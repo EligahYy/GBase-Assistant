@@ -1,0 +1,47 @@
+syntax:
+  - name: DISTRIBUTED_BY
+    description: "建表时指定分布键，数据按分布键哈希分片到各计算节点。分布键选择影响查询性能。"
+    pattern: "CREATE TABLE t (...) DISTRIBUTED BY ('column_name')"
+    example: |
+      CREATE TABLE orders (
+        order_id INT,
+        user_id INT,
+        amount DECIMAL(10,2),
+        created_at DATETIME
+      ) DISTRIBUTED BY ('user_id');
+    notes: "建议选择高基数、查询中常用作 JOIN/GROUP BY 的列作为分布键"
+
+  - name: REPLICATED
+    description: "创建复制表，每个计算节点保存完整数据副本。适合小的维度表。"
+    pattern: "CREATE TABLE t (...) REPLICATED"
+    example: |
+      CREATE TABLE dim_region (
+        region_id INT,
+        region_name VARCHAR(100)
+      ) REPLICATED;
+    notes: "复制表适合 <100MB 的维度表，大表不要用 REPLICATED"
+
+  - name: CREATE_TABLE_AS_SELECT
+    description: "支持 CREATE TABLE AS SELECT 语法，可用于建立中间结果表"
+    pattern: "CREATE TABLE new_table AS SELECT ... FROM ..."
+    example: |
+      CREATE TABLE user_summary DISTRIBUTED BY ('user_id') AS
+      SELECT user_id, COUNT(*) AS order_count, SUM(amount) AS total
+      FROM orders
+      GROUP BY user_id;
+
+  - name: LIMIT_OFFSET
+    description: "分页语法与 MySQL 相同，支持 LIMIT count OFFSET offset 和 LIMIT offset, count"
+    pattern: "SELECT ... LIMIT 10 OFFSET 20"
+
+  - name: AUTO_INCREMENT
+    description: "支持 AUTO_INCREMENT，但在分布式表中全局唯一性由 GBase 系统保证，性能略低于单机"
+
+  - name: COLUMN_ENCODING
+    description: "支持列级压缩编码，建表时可指定"
+    pattern: "column_name TYPE ENCODING encoding_type"
+    example: |
+      CREATE TABLE sales (
+        sale_id INT,
+        description VARCHAR(500) ENCODING delta
+      ) DISTRIBUTED BY ('sale_id');

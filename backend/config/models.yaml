@@ -1,0 +1,31 @@
+default_model: "deepseek/deepseek-chat"
+
+models:
+  sql_generation:
+    primary: "deepseek/deepseek-chat"
+    fallback:
+      - "qwen/qwen2.5-72b-instruct"
+      - "openai/gpt-4o"
+    temperature: 0.1
+    max_tokens: 2048
+
+  knowledge_qa:
+    primary: "deepseek/deepseek-chat"
+    fallback:
+      - "qwen/qwen2.5-72b-instruct"
+      - "openai/gpt-4o"
+    temperature: 0.3
+    max_tokens: 4096
+
+  intent_classification:
+    primary: "deepseek/deepseek-chat"
+    fallback:
+      - "openai/gpt-4o-mini"
+    temperature: 0.0
+    max_tokens: 50
+
+providers:
+  deepseek:
+    api_base: "https://api.deepseek.com"
+  qwen:
+    api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1"

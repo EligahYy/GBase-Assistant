@@ -1,0 +1,54 @@
+functions:
+  supported:
+    - name: DATE_FORMAT
+      note: "与 MySQL 相同，格式化日期"
+    - name: DATE_ADD / DATE_SUB
+      note: "与 MySQL 相同"
+    - name: DATEDIFF
+      note: "与 MySQL 相同"
+    - name: NOW / CURDATE / CURTIME
+      note: "与 MySQL 相同"
+    - name: IFNULL / COALESCE
+      note: "与 MySQL 相同"
+    - name: IF / CASE WHEN
+      note: "与 MySQL 相同"
+    - name: CONCAT / CONCAT_WS
+      note: "与 MySQL 相同"
+    - name: SUBSTRING / SUBSTR
+      note: "与 MySQL 相同"
+    - name: LENGTH / CHAR_LENGTH
+      note: "与 MySQL 相同"
+    - name: UPPER / LOWER / TRIM
+      note: "与 MySQL 相同"
+    - name: ROUND / FLOOR / CEIL
+      note: "与 MySQL 相同"
+    - name: ABS / MOD
+      note: "与 MySQL 相同"
+    - name: COUNT / SUM / AVG / MAX / MIN
+      note: "聚合函数与 MySQL 相同"
+    - name: ROW_NUMBER / RANK / DENSE_RANK
+      note: "窗口函数支持，语法与标准 SQL 相同"
+    - name: LEAD / LAG
+      note: "窗口函数，支持"
+    - name: FIRST_VALUE / LAST_VALUE
+      note: "窗口函数，支持"
+    - name: NTILE
+      note: "窗口函数，支持"
+    - name: GROUP_CONCAT
+      note: "支持，与 MySQL 相同"
+    - name: CAST / CONVERT
+      note: "类型转换，支持常见类型"
+
+  unsupported:
+    - name: JSON_EXTRACT
+      alternative: "不支持 JSON 函数，需将 JSON 数据拆解为关系表存储"
+    - name: JSON_OBJECT / JSON_ARRAY
+      alternative: "同上，不支持 JSON 构造函数"
+    - name: ST_GeomFromText
+      alternative: "不支持 GIS 空间函数"
+    - name: GET_LOCK / RELEASE_LOCK
+      alternative: "不支持应用级锁函数"
+    - name: SLEEP
+      alternative: "不支持 SLEEP 函数"
+    - name: LOAD_FILE
+      alternative: "不支持 LOAD_FILE，使用 LOAD DATA 替代"

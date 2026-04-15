@@ -1,0 +1,62 @@
+[
+  {
+    "question": "GBase 8a 支持触发器吗？",
+    "answer": "GBase 8a **不支持触发器**（CREATE TRIGGER）。GBase 8a 是 MPP 分析数据库，其分布式架构不适合行级事件触发。建议将触发器逻辑迁移到应用层代码实现。",
+    "category": "syntax",
+    "keywords": ["触发器", "trigger", "CREATE TRIGGER"]
+  },
+  {
+    "question": "GBase 8a 支持外键约束吗？",
+    "answer": "GBase 8a 在语法层面接受 FOREIGN KEY 声明，但**不强制执行外键约束**。这意味着即使定义了外键，插入不符合约束的数据也不会报错。建议在应用层保证数据完整性，不要依赖 GBase 8a 的外键约束。",
+    "category": "syntax",
+    "keywords": ["外键", "foreign key", "约束", "数据完整性"]
+  },
+  {
+    "question": "GBase 8a 支持事务吗？",
+    "answer": "GBase 8a 对事务的支持有限。单节点操作支持基本的 BEGIN/COMMIT，但分布式跨节点事务的支持非常有限，不建议在 GBase 8a 上做复杂的分布式事务操作。GBase 8a 主要设计用于大规模分析查询，而非 OLTP 事务场景。",
+    "category": "feature",
+    "keywords": ["事务", "transaction", "BEGIN", "COMMIT", "ROLLBACK"]
+  },
+  {
+    "question": "DISTRIBUTED BY 怎么用？分布键怎么选？",
+    "answer": "DISTRIBUTED BY 是 GBase 8a 特有的建表语法，指定数据按哪列进行哈希分片：\n\n```sql\nCREATE TABLE orders (\n  order_id INT,\n  user_id INT,\n  amount DECIMAL(10,2)\n) DISTRIBUTED BY ('user_id');\n```\n\n**分布键选择原则**：\n1. 选择高基数列（如用户ID、订单ID），避免数据倾斜\n2. 选择查询中常用于 JOIN 条件的列，减少跨节点数据传输\n3. 选择常用于 GROUP BY 的列，提升聚合性能\n4. 避免选择 NULL 值多或重复值多的列",
+    "category": "syntax",
+    "keywords": ["DISTRIBUTED BY", "分布键", "建表", "分片", "数据倾斜"]
+  },
+  {
+    "question": "什么是复制表？什么时候用 REPLICATED？",
+    "answer": "REPLICATED 表会在每个计算节点上保存完整的数据副本，适合**小型维度表**：\n\n```sql\nCREATE TABLE dim_region (\n  region_id INT,\n  region_name VARCHAR(100)\n) REPLICATED;\n```\n\n**适用场景**：数据量小（建议 < 100MB）、需要频繁与大表 JOIN 的维度表。复制表可以避免 JOIN 时的跨节点数据传输，大幅提升查询性能。",
+    "category": "syntax",
+    "keywords": ["REPLICATED", "复制表", "维度表", "JOIN"]
+  },
+  {
+    "question": "GBase 8a 支持窗口函数吗？",
+    "answer": "GBase 8a 支持窗口函数，语法与标准 SQL 基本一致：\n\n```sql\nSELECT\n  user_id,\n  amount,\n  ROW_NUMBER() OVER(PARTITION BY dept_id ORDER BY salary DESC) AS rn,\n  RANK() OVER(ORDER BY amount DESC) AS rank,\n  SUM(amount) OVER(PARTITION BY region) AS region_total\nFROM orders;\n```\n\n支持的窗口函数：ROW_NUMBER、RANK、DENSE_RANK、NTILE、LEAD、LAG、FIRST_VALUE、LAST_VALUE、SUM/AVG/COUNT/MAX/MIN（聚合窗口函数）。\n\n注意：帧子句（ROWS/RANGE）中，RANGE 模式支持有限，建议优先使用 ROWS 模式。",
+    "category": "syntax",
+    "keywords": ["窗口函数", "OVER", "PARTITION BY", "ROW_NUMBER", "RANK", "LEAD", "LAG"]
+  },
+  {
+    "question": "GBase 8a 支持 JSON 函数吗？",
+    "answer": "GBase 8a **不支持 JSON 函数**，包括 JSON_EXTRACT、JSON_OBJECT、JSON_ARRAY 等 MySQL 5.7+ 引入的 JSON 函数。如果数据以 JSON 格式存储，建议在入库前将其解析为关系型数据结构。",
+    "category": "feature",
+    "keywords": ["JSON", "JSON_EXTRACT", "JSON函数"]
+  },
+  {
+    "question": "GBase 8a 和 MySQL 的主要区别是什么？",
+    "answer": "GBase 8a 声称 MySQL 兼容，但存在重要差异：\n\n**不支持的 MySQL 特性**：\n- 触发器（CREATE TRIGGER）\n- 外键约束强制执行\n- SELECT ... FOR UPDATE / LOCK IN SHARE MODE\n- LOCK TABLES\n- 事件调度器（CREATE EVENT）\n- JSON 函数（JSON_EXTRACT 等）\n- GIS/空间函数\n- 全文索引（FULLTEXT）\n\n**GBase 8a 独有的特性**：\n- DISTRIBUTED BY：指定分布键\n- REPLICATED：创建复制表\n- 列级压缩编码（ENCODING）\n- 大规模并行处理（MPP）架构，适合 TB 级数据分析",
+    "category": "feature",
+    "keywords": ["MySQL", "区别", "兼容性", "特性", "MPP"]
+  },
+  {
+    "question": "GBase 8a 查询性能优化有哪些建议？",
+    "answer": "GBase 8a 查询性能优化建议：\n\n1. **选择合适的分布键**：避免数据倾斜，让数据均匀分布到各节点\n2. **小维度表用 REPLICATED**：减少 JOIN 时的跨节点传输\n3. **避免 SELECT ***：明确指定所需列，减少数据传输\n4. **合理使用分区**：对大表按时间等维度分区\n5. **减少跨节点 JOIN**：尽量让 JOIN 的列与分布键一致\n6. **合理使用列压缩**：使用 ENCODING 子句对字符串列启用压缩\n7. **避免笛卡尔积**：确保 JOIN 有明确的关联条件",
+    "category": "performance",
+    "keywords": ["性能", "优化", "慢查询", "JOIN", "分布键"]
+  },
+  {
+    "question": "如何在 GBase 8a 中实现分页查询？",
+    "answer": "GBase 8a 支持标准的 LIMIT/OFFSET 分页语法：\n\n```sql\n-- 第1页，每页20条\nSELECT * FROM orders ORDER BY created_at DESC LIMIT 20 OFFSET 0;\n\n-- 第2页\nSELECT * FROM orders ORDER BY created_at DESC LIMIT 20 OFFSET 20;\n\n-- MySQL 风格也支持\nSELECT * FROM orders ORDER BY created_at DESC LIMIT 0, 20;\n```\n\n注意：在大数据量场景下，大 OFFSET 分页性能较差（需扫描并丢弃大量数据），建议使用游标分页（基于上一页最后一条记录的 ID 或时间戳进行条件过滤）。",
+    "category": "syntax",
+    "keywords": ["分页", "LIMIT", "OFFSET", "翻页"]
+  }
+]

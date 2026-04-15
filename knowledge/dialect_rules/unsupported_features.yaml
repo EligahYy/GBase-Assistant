@@ -1,0 +1,43 @@
+unsupported:
+  - feature: TRIGGER
+    description: "GBase 8a 不支持触发器"
+    suggestion: "使用应用层代码或存储过程替代触发器逻辑"
+
+  - feature: FOREIGN_KEY_CONSTRAINT
+    description: "GBase 8a 语法上接受 FOREIGN KEY 声明，但不强制执行约束"
+    suggestion: "不要依赖外键约束保证数据完整性，在应用层实现"
+
+  - feature: FOR_UPDATE
+    description: "不支持 SELECT ... FOR UPDATE 行锁语法"
+    suggestion: "GBase 8a 是 MPP 分析数据库，不适合 OLTP 行级锁场景"
+
+  - feature: LOCK_TABLES
+    description: "不支持 LOCK TABLES / UNLOCK TABLES"
+
+  - feature: CREATE_EVENT
+    description: "不支持 MySQL 事件调度器（CREATE EVENT）"
+    suggestion: "使用外部调度工具（如 cron）替代"
+
+  - feature: GET_DIAGNOSTICS
+    description: "不支持 GET DIAGNOSTICS 语句"
+
+  - feature: SIGNAL_RESIGNAL
+    description: "不支持 SIGNAL / RESIGNAL 语句（存储过程错误处理）"
+
+  - feature: CURSOR_IN_PROCEDURE
+    description: "存储过程中不支持游标（CURSOR）"
+    suggestion: "改用 SELECT 查询或临时表"
+
+  - feature: FULLTEXT_INDEX
+    description: "不支持全文索引（FULLTEXT INDEX）"
+    suggestion: "如需全文搜索，考虑使用外部搜索引擎"
+
+  - feature: JSON_FUNCTIONS
+    description: "不支持 JSON_EXTRACT、JSON_OBJECT 等 JSON 函数"
+    suggestion: "将 JSON 数据预处理为关系表结构存储"
+
+  - feature: SPATIAL_FUNCTIONS
+    description: "不支持 GIS/空间函数（ST_*、GeomFromText 等）"
+
+  - feature: WINDOW_FUNCTION_RANGE_FRAME
+    description: "窗口函数帧子句中，RANGE 模式支持有限，优先使用 ROWS 模式"

@@ -1,0 +1,67 @@
+# ── Environment & Secrets ──────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+wheels/
+*.egg-info/
+*.egg
+.venv/
+venv/
+ENV/
+env/
+
+# ── Node.js / Frontend ─────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.local
+.eslintcache
+*.tsbuildinfo
+*.timestamp-*-*.mjs
+
+# ── Build Outputs ──────────────────────────────────────────────────────────────
+frontend/dist
+dist-ssr
+coverage/
+
+# ── Databases & Data ───────────────────────────────────────────────────────────
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ── IDEs & Editors ─────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── OS ─────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Testing ────────────────────────────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ── Misc ───────────────────────────────────────────────────────────────────────
+*.log
