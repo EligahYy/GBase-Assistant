@@ -2,6 +2,9 @@
 
 面向产品、研发与测试人员的 GBase 8a 数据库 AI 助手。通过自然语言对话，自动生成 GBase 8a 兼容的 SQL，并解答数据库专业问题。
 
+## 测试git
+测试vscode git
+
 ## 核心功能
 
 - **Text-to-SQL**：自然语言 → GBase 8a 兼容 SQL + 中文解释
