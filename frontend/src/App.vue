@@ -42,13 +42,8 @@ onMounted(() => {
 </template>
 
 <style>
-/* 让 Naive UI provider 层完全透明 */
-#app,
-#app > div,
-#app > div > div,
-#app > div > div > div {
-  height: 100%;
-  width: 100%;
+#app, #app > div, #app > div > div, #app > div > div > div {
+  height: 100%; width: 100%;
 }
 </style>
 

@@ -21,18 +21,21 @@ const toggleSidebar = inject<() => void>('toggleSidebar', () => {})
 const inputText = ref('')
 const isComposing = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
+const selectedModel = ref(localStorage.getItem('gbase_model') || 'deepseek/deepseek-chat')
+const modelDisplayName = computed(() => {
+  const name = selectedModel.value.split('/').pop() || 'DeepSeek'
+  return name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+})
 
 const activeConn = computed(() =>
   connStore.connections.find(c => c.id === connStore.activeConnectionId)
 )
 
-// Auto-scroll to bottom on new messages
 watch(() => chatStore.messages.length, async () => {
   await nextTick()
   scrollToBottom()
 })
 
-// Auto-scroll on streaming content update
 watch(() => chatStore.messages.map(m => m.content).join(''), async () => {
   await nextTick()
   if (messagesContainer.value) {
@@ -44,29 +47,23 @@ watch(() => chatStore.messages.map(m => m.content).join(''), async () => {
 
 function scrollToBottom() {
   if (messagesContainer.value) {
-    messagesContainer.value.scrollTo({
-      top: messagesContainer.value.scrollHeight,
-      behavior: 'smooth'
-    })
+    messagesContainer.value.scrollTo({ top: messagesContainer.value.scrollHeight, behavior: 'smooth' })
   }
 }
 
 async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || isStreaming.value) return
-
   inputText.value = ''
   chatStore.addUserMessage(text)
-
   const streamingId = chatStore.addStreamingMessage()
   const conversationId = chatStore.currentConversationId
-
   const { url, body } = createStreamUrl({
     message: text,
     conversation_id: conversationId,
     db_connection_id: connStore.activeConnectionId,
+    model: selectedModel.value,
   })
-
   const serverConversationId = await streamPost(url, body, (chunk) => {
     if (chunk.type === 'text') {
       chatStore.appendStreamToken(streamingId, chunk.content)
@@ -76,14 +73,11 @@ async function sendMessage() {
       naiveMsg.error(chunk.content)
     }
   })
-
   chatStore.finalizeStreamMessage(streamingId, serverConversationId ?? conversationId ?? crypto.randomUUID())
   await chatStore.loadConversations()
 }
 
-function handleStop() {
-  stopStream()
-}
+function handleStop() { stopStream() }
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey && !isComposing.value) {
@@ -105,23 +99,23 @@ const hints = [
     <!-- Header -->
     <header class="chat-header">
       <div class="header-left">
-        <button class="icon-btn" @click="toggleSidebar">
+        <button class="header-icon-btn" @click="toggleSidebar">
           <n-icon :component="MenuOutline" size="18" />
         </button>
         <div v-if="activeConn" class="conn-badge">
-          <n-icon :component="ServerOutline" size="13" />
+          <n-icon :component="ServerOutline" size="12" />
           <span>{{ activeConn.name }}</span>
         </div>
         <div v-else class="conn-badge muted">
-          <n-icon :component="ServerOutline" size="13" />
+          <n-icon :component="ServerOutline" size="12" />
           <span>未选择数据库</span>
         </div>
       </div>
       <div class="header-right">
-        <button class="theme-btn" @click="toggleTheme">
+        <button class="header-icon-btn" @click="toggleTheme">
           <n-icon :component="theme === 'light' ? SunnyOutline : MoonOutline" size="18" />
         </button>
-        <span class="model-tag">DeepSeek</span>
+        <span class="model-label" :title="selectedModel">{{ modelDisplayName }}</span>
       </div>
     </header>
 
@@ -130,17 +124,15 @@ const hints = [
       <!-- Empty state -->
       <div v-if="chatStore.messages.length === 0" class="empty-state">
         <div class="empty-brand">
-          <div class="empty-icon">G</div>
-          <h2 class="empty-title">GBase 8a 数据库助手</h2>
+          <div class="monogram-wrap">
+            <div class="monogram">G</div>
+            <div class="monogram-glow" />
+          </div>
+          <h2 class="empty-title">有什么可以帮您的？</h2>
           <p class="empty-sub">输入自然语言，自动生成 GBase 8a SQL 或解答数据库问题</p>
         </div>
         <div class="hint-grid">
-          <button
-            v-for="hint in hints"
-            :key="hint"
-            class="hint-card"
-            @click="inputText = hint"
-          >
+          <button v-for="hint in hints" :key="hint" class="hint-card" @click="inputText = hint">
             {{ hint }}
           </button>
         </div>
@@ -153,7 +145,7 @@ const hints = [
 
     <!-- Input -->
     <div class="input-area">
-      <div class="input-box" :class="{ disabled: isStreaming }">
+      <div class="input-capsule" :class="{ disabled: isStreaming }">
         <n-input
           v-model:value="inputText"
           type="textarea"
@@ -165,22 +157,10 @@ const hints = [
           @compositionstart="isComposing = true"
           @compositionend="isComposing = false"
         />
-        <!-- Stop button during streaming -->
-        <button
-          v-if="isStreaming"
-          class="send-btn stop-btn"
-          @click="handleStop"
-        >
+        <button v-if="isStreaming" class="send-circle stop" @click="handleStop">
           <n-icon :component="StopCircleOutline" size="16" />
         </button>
-        <!-- Normal send button -->
-        <button
-          v-else
-          class="send-btn"
-          :class="{ active: inputText.trim() }"
-          :disabled="!inputText.trim()"
-          @click="sendMessage"
-        >
+        <button v-else class="send-circle" :class="{ active: inputText.trim() }" :disabled="!inputText.trim()" @click="sendMessage">
           <n-icon :component="SendOutline" size="16" />
         </button>
       </div>
@@ -204,75 +184,47 @@ const hints = [
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
   height: var(--header-height);
   flex-shrink: 0;
-  background: var(--bg-primary);
+  background: transparent;
+  position: relative;
+  z-index: 10;
 }
-.header-left {
+.header-left, .header-right {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.icon-btn {
+.header-icon-btn {
   display: none;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
+  align-items: center; justify-content: center;
+  width: 34px; height: 34px; padding: 0;
+  background: none; border: none; border-radius: var(--radius-sm);
+  color: var(--text-secondary); cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-smooth);
 }
-.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-@media (max-width: 768px) {
-  .icon-btn { display: flex; }
-}
-.theme-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.theme-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.header-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+@media (max-width: 768px) { .header-icon-btn { display: flex; } }
+
 .conn-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 500;
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 500;
   color: var(--text-secondary);
-  background: var(--bg-secondary);
-  padding: 5px 10px;
-  border-radius: 20px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  padding: 5px 11px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border);
 }
-.conn-badge.muted { opacity: 0.7; }
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.model-tag {
-  font-size: 11px;
-  font-weight: 500;
+.conn-badge.muted { opacity: 0.6; }
+.model-label {
+  font-size: 12px; font-weight: 500;
   color: var(--text-muted);
-  background: var(--bg-secondary);
-  padding: 4px 10px;
-  border-radius: 20px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  padding: 5px 11px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border);
   letter-spacing: 0.02em;
 }
@@ -285,16 +237,17 @@ const hints = [
   scroll-behavior: smooth;
 }
 .messages-list {
-  max-width: 900px;
+  max-width: var(--max-content-width);
   width: 100%;
   margin: 0 auto;
-  padding: 20px 24px 140px;
+  padding: 20px 24px 160px;
 }
 @media (max-width: 1024px) {
-  .messages-list { max-width: 100%; padding: 18px 20px 140px; }
+  .messages-list { max-width: 100%; padding: 18px 20px 160px; }
 }
 @media (max-width: 768px) {
-  .messages-list { padding: 14px 16px 140px; }
+  .messages-list { padding: 14px 16px 160px; }
+  .chat-header { padding: 14px 16px; }
 }
 
 /* Empty state */
@@ -306,107 +259,112 @@ const hints = [
   min-height: 100%;
   padding: 40px 20px;
   text-align: center;
+  animation: fadeInUp var(--duration-slow) var(--ease-out-expo) both;
 }
 .empty-brand {
-  margin-bottom: 36px;
+  margin-bottom: 44px;
 }
-.empty-icon {
-  width: 56px;
-  height: 56px;
-  background: var(--accent);
-  color: var(--text-inverse);
-  border-radius: 16px;
-  font-size: 24px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 18px;
+.monogram-wrap {
+  position: relative;
+  width: 72px; height: 72px;
+  margin: 0 auto 24px;
+}
+.monogram {
+  width: 72px; height: 72px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color: #fff;
+  border-radius: 20px;
+  font-size: 32px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; z-index: 2;
+  box-shadow: 0 4px 20px var(--accent-glow);
+}
+.monogram-glow {
+  position: absolute;
+  inset: -8px;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  border-radius: 28px;
+  animation: breathe 3s ease-in-out infinite;
+  z-index: 1;
 }
 .empty-title {
-  font-size: 24px;
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
-  margin-bottom: 6px;
+  letter-spacing: -0.03em;
+  margin-bottom: 8px;
 }
 .empty-sub {
-  font-size: 15px;
-  color: var(--text-muted);
+  font-size: var(--text-base);
+  color: var(--text-secondary);
   line-height: 1.6;
-  max-width: 420px;
+  max-width: 380px;
 }
+
 .hint-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  max-width: 600px;
+  max-width: 560px;
   width: 100%;
 }
 @media (max-width: 640px) {
   .hint-grid { grid-template-columns: 1fr; }
 }
 .hint-card {
-  padding: 14px 16px;
-  background: var(--bg-primary);
+  padding: 16px 18px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   font-size: 14px;
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
   font-family: var(--font-sans);
-  transition: all 0.15s ease;
+  transition: all var(--duration-fast) var(--ease-smooth);
   line-height: 1.5;
   box-shadow: var(--shadow-sm);
 }
 .hint-card:hover {
-  background: var(--bg-hover);
+  background: var(--bg-surface);
   border-color: var(--border-strong);
   color: var(--text-primary);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
 
 /* Input */
 .input-area {
   flex-shrink: 0;
-  padding: 14px 24px 24px;
-  background: transparent;
-  border-top: none;
+  padding: 16px 24px 28px;
+  background: linear-gradient(to top, var(--bg-body) 60%, transparent);
+  position: relative;
+  z-index: 10;
 }
-.input-box {
+.input-capsule {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  max-width: 820px;
+  max-width: 760px;
   width: 100%;
   margin: 0 auto;
-  background: var(--bg-primary);
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
   border: 1px solid var(--border);
-  border-radius: 24px;
-  padding: 12px 14px 12px 18px;
-  box-shadow:
-    0 4px 6px -1px rgba(0, 0, 0, 0.06),
-    0 2px 4px -1px rgba(0, 0, 0, 0.04),
-    0 0 0 1px rgba(0, 0, 0, 0.02);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  border-radius: var(--radius-xl);
+  padding: 12px 14px 12px 20px;
+  box-shadow: var(--shadow-md), var(--shadow-glow);
+  transition: all var(--duration-fast) var(--ease-smooth);
 }
-.input-box:focus-within {
-  border-color: var(--border-strong);
-  box-shadow:
-    0 8px 16px -4px rgba(0, 0, 0, 0.08),
-    0 4px 8px -2px rgba(0, 0, 0, 0.04),
-    0 0 0 1px rgba(0, 0, 0, 0.02);
-  transform: translateY(-1px);
+.input-capsule:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-lg), var(--shadow-glow);
 }
-.input-box.disabled {
-  opacity: 0.7;
-}
+.input-capsule.disabled { opacity: 0.7; }
 
-.chat-input {
-  flex: 1;
-}
+.chat-input { flex: 1; }
 :deep(.n-input) {
   --n-border: none !important;
   --n-border-hover: none !important;
@@ -418,45 +376,40 @@ const hints = [
 :deep(.n-input__state-border) { display: none !important; }
 :deep(.n-input-wrapper) { padding: 0 !important; background: transparent !important; }
 
-.send-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+.send-circle {
+  width: 36px; height: 36px;
+  border-radius: 50%;
   border: none;
   background: var(--border);
   color: var(--text-muted);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.15s ease;
+  align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-spring);
   margin-bottom: 2px;
 }
-.send-btn.active {
+.send-circle.active {
   background: var(--accent);
-  color: var(--text-inverse);
+  color: #fff;
+  box-shadow: 0 2px 10px var(--accent-glow);
 }
-.send-btn.active:hover {
+.send-circle.active:hover {
   background: var(--accent-hover);
-  transform: scale(1.05);
+  transform: scale(1.08);
 }
-.send-btn:disabled {
-  cursor: not-allowed;
-}
-.stop-btn {
+.send-circle:disabled { cursor: not-allowed; }
+.send-circle.stop {
   background: var(--error);
   color: #fff;
+  animation: pulse-ring 1.5s ease-out infinite;
 }
-.stop-btn:hover {
-  background: #dc2626;
-  transform: scale(1.05);
-}
+.send-circle.stop:hover { background: #ff453a; transform: scale(1.05); }
 
 .input-hint {
   text-align: center;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
-  margin-top: 8px;
+  margin-top: 10px;
+  letter-spacing: 0.02em;
 }
 </style>

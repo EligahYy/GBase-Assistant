@@ -48,6 +48,15 @@ def validate_sql(sql: str, schemas: list[TableSchema] | None = None) -> Validati
     safety_warnings = _check_safety(statement)
     warnings.extend(safety_warnings)
 
+    # ── Layer 2b: GROUP BY / JOIN 检查 ─────────────────────────────────────────
+    warnings.extend(_check_group_by_compliance(statement))
+    warnings.extend(_check_join_conditions(statement))
+
+    # ── Layer 2c: GBase 8a DDL 特有规则 ────────────────────────────────────────
+    ddl_errors, ddl_warnings = _check_gbase_ddl(sql)
+    errors.extend(ddl_errors)
+    warnings.extend(ddl_warnings)
+
     # ── Layer 3: Schema 交叉引用 ────────────────────────────────────────────────
     if schemas:
         schema_errors, schema_warnings = _check_schema_references(statement, schemas)
@@ -117,6 +126,76 @@ def _check_safety(statement: exp.Expression) -> list[str]:
     return warnings
 
 
+def _check_group_by_compliance(statement: exp.Expression) -> list[str]:
+    """检查 GROUP BY 合规性：非聚合列必须出现在 GROUP BY 中。"""
+    warnings = []
+    for select in statement.find_all(exp.Select):
+        group = select.args.get("group")
+        if not group:
+            continue
+        group_cols = set()
+        for gcol in group.expressions:
+            if isinstance(gcol, exp.Column):
+                group_cols.add(gcol.name.lower())
+        for expr in select.expressions:
+            if isinstance(expr, (exp.AggFunc, exp.Count)):
+                continue
+            if isinstance(expr, exp.Alias):
+                inner = expr.this
+                if isinstance(inner, (exp.AggFunc, exp.Count)):
+                    continue
+                if isinstance(inner, exp.Column):
+                    if inner.name.lower() not in group_cols:
+                        warnings.append(f"GROUP BY 中缺少非聚合列 '{inner.name}'")
+            elif isinstance(expr, exp.Column):
+                if expr.name.lower() not in group_cols:
+                    warnings.append(f"GROUP BY 中缺少非聚合列 '{expr.name}'")
+    return warnings
+
+
+def _check_join_conditions(statement: exp.Expression) -> list[str]:
+    """检查 JOIN 是否有 ON / USING 条件（提醒可能的笛卡尔积）。"""
+    warnings = []
+    for join in statement.find_all(exp.Join):
+        on_clause = join.args.get("on")
+        using_clause = join.args.get("using")
+        if not on_clause and not using_clause:
+            warnings.append("JOIN 缺少 ON/USING 条件，可能产生笛卡尔积")
+    return warnings
+
+
+def _check_gbase_ddl(sql: str) -> tuple[list[str], list[str]]:
+    """检查 GBase 8a 特有 DDL 规则（DISTRIBUTED BY / REPLICATED）。"""
+    errors = []
+    warnings = []
+    sql_upper = sql.upper()
+
+    has_replicated = "REPLICATED" in sql_upper
+    has_distributed = "DISTRIBUTED BY" in sql_upper
+
+    if has_replicated and has_distributed:
+        errors.append("REPLICATED 和 DISTRIBUTED BY 不能同时使用")
+
+    if has_distributed:
+        dist_match = re.search(r"DISTRIBUTED\s+BY\s*\(?(?:['\"])?([^')\"]+)(?:['\"])?\)?", sql, re.IGNORECASE)
+        if dist_match:
+            dist_col = dist_match.group(1).strip().lower()
+            cols_match = re.search(r"CREATE\s+TABLE\s+[^\(]+\(([^)]+)\)", sql, re.IGNORECASE | re.DOTALL)
+            if cols_match:
+                cols_text = cols_match.group(1)
+                create_cols = set()
+                for line in cols_text.split(","):
+                    parts = line.strip().split()
+                    if parts:
+                        col_name = parts[0].strip("`\"'").lower()
+                        if col_name and col_name not in ("primary", "unique", "index", "constraint", "foreign"):
+                            create_cols.add(col_name)
+                if dist_col not in create_cols:
+                    errors.append(f"DISTRIBUTED BY 列 '{dist_col}' 不存在于表定义中")
+
+    return errors, warnings
+
+
 def _check_schema_references(
     statement: exp.Expression, schemas: list[TableSchema]
 ) -> tuple[list[str], list[str]]:
@@ -124,7 +203,7 @@ def _check_schema_references(
     errors = []
     warnings = []
 
-    known_tables = {s.table_name.lower() for s in schemas}
+    known_tables = {s.table_name.lower(): s for s in schemas}
 
     # 提取 SQL 中引用的表名
     referenced_tables = set()
@@ -136,5 +215,46 @@ def _check_schema_references(
     for tbl in referenced_tables:
         if tbl and tbl not in known_tables:
             warnings.append(f"表 '{tbl}' 在当前 Schema 中未找到，请确认表名是否正确")
+
+    # ── 列名交叉引用 ──────────────────────────────────────────────────────────
+    # 构建别名 -> 实际表名映射
+    alias_to_table: dict[str, str] = {}
+    for table in statement.find_all(exp.Table):
+        if table.name and table.alias:
+            alias_to_table[table.alias.lower()] = table.name.lower()
+
+    # 收集所有已知列（按表）
+    table_columns: dict[str, set[str]] = {}
+    for s in schemas:
+        if s.columns:
+            table_columns[s.table_name.lower()] = {c.lower() for c in s.columns}
+
+    for col in statement.find_all(exp.Column):
+        col_name = col.name.lower() if col.name else None
+        if not col_name:
+            continue
+
+        # 跳过函数参数中的列（如 COUNT(*)）
+        parent = col.parent
+        if isinstance(parent, exp.Alias):
+            parent = parent.parent
+        if isinstance(parent, exp.Func):
+            continue
+
+        table_ref = col.table.lower() if col.table else None
+
+        if table_ref:
+            # 有表前缀：u.name
+            real_table = alias_to_table.get(table_ref, table_ref)
+            cols = table_columns.get(real_table, set())
+            if cols and col_name not in cols:
+                warnings.append(f"列 '{col_name}' 在表 '{real_table}' 中不存在")
+        else:
+            # 无表前缀：检查是否存在于任何引用的表中
+            all_ref_cols: set[str] = set()
+            for tbl in referenced_tables:
+                all_ref_cols.update(table_columns.get(tbl, set()))
+            if all_ref_cols and col_name not in all_ref_cols:
+                warnings.append(f"列 '{col_name}' 在已知 Schema 中未找到")
 
     return errors, warnings

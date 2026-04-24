@@ -20,6 +20,7 @@ from app.dependencies import get_example_retriever, get_knowledge_retriever, get
 from app.knowledge.loader import DbSchemaRetriever
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.sql_feedback import SQLFeedback
 from app.protocols import ChatContext, ExampleRetriever, KnowledgeRetriever, LLMClient
 from app.schemas.chat import ChatRequest, ChatResponse, ConversationResponse, MessageResponse
 
@@ -51,16 +52,40 @@ async def _get_or_create_conversation(
     return conv
 
 
+def _estimate_tokens(text: str) -> int:
+    """简易 token 估算：中文按字符，英文按单词数 * 1.3。"""
+    import re
+    # 中文字符
+    cn_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    # 英文单词
+    en_words = len(re.findall(r"[a-zA-Z]+", text))
+    return cn_chars + int(en_words * 1.3) + 5  # +5 作为格式开销
+
+
+HISTORY_TOKEN_BUDGET = 4000
+
+
 async def _build_context(db: AsyncSession, conv: Conversation) -> ChatContext:
-    """构建对话上下文（最近 10 条历史消息）。"""
+    """构建对话上下文（token 感知截断）。"""
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conv.id)
         .order_by(Message.created_at.desc())
-        .limit(20)
+        .limit(50)
     )
     messages = list(reversed(result.scalars().all()))
-    history = [{"role": m.role, "content": m.content} for m in messages]
+
+    # Token 感知截断：从最近的消息开始保留，直到预算用完
+    history: list[dict] = []
+    total_tokens = 0
+    for m in reversed(messages):
+        msg_tokens = _estimate_tokens(m.content)
+        if total_tokens + msg_tokens > HISTORY_TOKEN_BUDGET and history:
+            logger.info("对话上下文截断：保留最近 %d 条消息，跳过 %d 条", len(history), len(messages) - len(history))
+            break
+        history.insert(0, {"role": m.role, "content": m.content})
+        total_tokens += msg_tokens
+
     return ChatContext(
         db_id=conv.db_connection_id,
         conversation_id=conv.id,
@@ -115,7 +140,7 @@ async def chat(
     knowledge_retriever: KnowledgeRetriever = Depends(get_knowledge_retriever),
 ):
     """非流式聊天接口。"""
-    llm_client: LLMClient = get_llm_client(request.model)
+    llm_client: LLMClient = get_llm_client(request.model, task_type="intent_classification")
     schema_retriever = DbSchemaRetriever(db)
 
     conv = await _get_or_create_conversation(db, request.conversation_id, request.db_connection_id, request.model)
@@ -124,6 +149,10 @@ async def chat(
     # 意图分类
     intent = await classify_intent(request.message, llm_client)
     logger.info("意图分类: %s | 消息: %.50s", intent, request.message)
+
+    # 按意图创建 task-specific LLM client
+    task_type = "sql_generation" if intent == "sql" else ("knowledge_qa" if intent == "qa" else "general")
+    llm_client = get_llm_client(request.model, task_type=task_type)
 
     # 执行对应 chain
     if intent == "sql":
@@ -160,7 +189,7 @@ async def chat_stream(
     knowledge_retriever: KnowledgeRetriever = Depends(get_knowledge_retriever),
 ):
     """流式聊天接口，返回 SSE。"""
-    llm_client: LLMClient = get_llm_client(request.model)
+    llm_client: LLMClient = get_llm_client(request.model, task_type="intent_classification")
     schema_retriever = DbSchemaRetriever(db)
 
     conv = await _get_or_create_conversation(db, request.conversation_id, request.db_connection_id, request.model)
@@ -169,9 +198,15 @@ async def chat_stream(
     intent = await classify_intent(request.message, llm_client)
     logger.info("流式意图分类: %s | 消息: %.50s", intent, request.message)
 
+    # 按意图创建 task-specific LLM client
+    task_type = "sql_generation" if intent == "sql" else ("knowledge_qa" if intent == "qa" else "general")
+    llm_client = get_llm_client(request.model, task_type=task_type)
+
     async def event_generator():
         full_content = ""
         sql_content = None
+        sql_validated = None
+        token_usage = None
 
         try:
             if intent == "sql":
@@ -185,7 +220,7 @@ async def chat_stream(
                 async def general_stream():
                     async for token in llm_client.stream(build_general_prompt(request.message, context.history)):
                         yield StreamChunk(type="text", content=token)
-                    yield StreamChunk(type="done", content="")
+                    yield StreamChunk(type="done", content="", token_usage={})
 
                 stream = general_stream()
 
@@ -194,7 +229,18 @@ async def chat_stream(
                     full_content += chunk.content
                 elif chunk.type == "sql":
                     sql_content = chunk.content
+                elif chunk.type == "warning":
+                    full_content += f"\n\n{chunk.content}"
+                    # If warning from SQL validation, mark as invalid
+                    if sql_content and "⚠️" in chunk.content:
+                        sql_validated = False
+                elif chunk.type == "done":
+                    token_usage = chunk.token_usage
                 yield chunk.to_sse()
+
+            # If sql was generated but no validation warning was issued, mark as valid
+            if sql_content is not None and sql_validated is None:
+                sql_validated = True
 
         except Exception as e:
             logger.error("流式生成错误: %s", e)
@@ -210,8 +256,8 @@ async def chat_stream(
                 result_content=full_content,
                 message_type=intent,
                 sql_generated=sql_content,
-                sql_validated=None,
-                token_usage=None,
+                sql_validated=sql_validated,
+                token_usage=token_usage,
             )
         except Exception as e:
             logger.error("保存消息失败: %s", e)
@@ -311,3 +357,33 @@ async def delete_conversation(conversation_id: str, db: AsyncSession = Depends(g
     await db.delete(conv)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/feedback")
+async def create_feedback(
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit SQL feedback: { message_id, action, modified_sql?, feedback_note? }"""
+    message_id = payload.get("message_id")
+    action = payload.get("action")
+
+    if action not in ("accepted", "rejected", "modified"):
+        raise HTTPException(status_code=422, detail="action must be accepted/rejected/modified")
+
+    result = await db.execute(select(Message).where(Message.id == message_id))
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="消息不存在")
+
+    feedback = SQLFeedback(
+        id=str(uuid.uuid4()),
+        message_id=message_id,
+        action=action,
+        original_sql=msg.sql_generated,
+        modified_sql=payload.get("modified_sql"),
+        feedback_note=payload.get("feedback_note"),
+    )
+    db.add(feedback)
+    await db.commit()
+    return {"ok": True, "id": feedback.id}

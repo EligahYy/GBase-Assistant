@@ -9,6 +9,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
+import sqlglot
 import yaml
 
 from app.config import get_settings
@@ -69,7 +70,8 @@ class DbSchemaRetriever:
         self._session = session
 
     async def retrieve(self, query: str, db_id: str) -> list[TableSchema]:
-        """Phase 1: 返回指定 db_id 的完整 schema DDL（全量注入）。"""
+        """Phase 1: 返回指定 db_id 的完整 schema DDL（全量注入）。
+        Phase 2: 解析 DDL 提取每个表的列名。"""
         from sqlalchemy import select
 
         from app.models.connection import DbConnection
@@ -81,8 +83,70 @@ class DbSchemaRetriever:
         if not conn or not conn.schema_ddl:
             return []
 
-        # Phase 1: 将整个 DDL 作为一个 TableSchema 返回
+        # Phase 2: 尝试解析 DDL 为多个 TableSchema（含列名）
+        schemas = _parse_ddl_to_schemas(conn.schema_ddl)
+        if schemas:
+            return schemas
+
+        # 回退：将整个 DDL 作为一个 TableSchema 返回
         return [TableSchema(table_name="__all__", ddl=conn.schema_ddl, description=f"{conn.name} 数据库 Schema")]
+
+
+def _parse_ddl_to_schemas(ddl_text: str) -> list[TableSchema]:
+    """解析 DDL 文本，提取每个 CREATE TABLE 的表名和列名。"""
+    schemas = []
+    # 按分号分割语句
+    statements = [s.strip() for s in ddl_text.split(";") if s.strip()]
+
+    for stmt in statements:
+        if not stmt.upper().startswith("CREATE TABLE"):
+            continue
+
+        # 尝试用 sqlglot 解析
+        try:
+            parsed = sqlglot.parse(stmt, dialect="mysql")
+            if parsed and parsed[0]:
+                create_stmt = parsed[0]
+                if isinstance(create_stmt, sqlglot.exp.Create):
+                    table = create_stmt.find(sqlglot.exp.Table)
+                    if table and table.name:
+                        table_name = table.name
+                        # 提取列定义
+                        schema = create_stmt.find(sqlglot.exp.Schema)
+                        columns = []
+                        if schema:
+                            for col in schema.expressions:
+                                if isinstance(col, sqlglot.exp.ColumnDef) and col.name:
+                                    columns.append(col.name)
+                        schemas.append(TableSchema(
+                            table_name=table_name,
+                            ddl=stmt,
+                            columns=columns,
+                        ))
+                        continue
+        except Exception:
+            pass
+
+        # 回退：正则提取表名和列名
+        import re
+        m = re.search(r"CREATE\s+TABLE\s+[`\"]?([^`\"(\s]+)[`\"]?\s*\((.+)\)", stmt, re.IGNORECASE | re.DOTALL)
+        if m:
+            table_name = m.group(1).strip()
+            cols_text = m.group(2)
+            columns = []
+            for line in cols_text.split(","):
+                parts = line.strip().split()
+                if parts:
+                    col_name = parts[0].strip("`\"'").lower()
+                    if col_name and col_name not in ("primary", "unique", "index", "constraint", "foreign", "key"):
+                        columns.append(col_name)
+            schemas.append(TableSchema(
+                table_name=table_name,
+                ddl=stmt,
+                columns=columns,
+            ))
+
+    return schemas
 
 
 # 验证实现满足 Protocol

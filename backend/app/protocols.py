@@ -15,6 +15,7 @@ class TableSchema:
     table_name: str
     ddl: str
     description: str = ""
+    columns: list[str] = field(default_factory=list)
 
 
 @dataclass

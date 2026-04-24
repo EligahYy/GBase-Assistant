@@ -47,6 +47,7 @@ async def init_db() -> None:
     import app.models.connection  # noqa: F401
     import app.models.conversation  # noqa: F401
     import app.models.message  # noqa: F401
+    import app.models.sql_feedback  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
