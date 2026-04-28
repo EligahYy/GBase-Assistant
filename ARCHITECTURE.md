@@ -396,7 +396,7 @@ gbase8a-assistant/
 
 ## 开发阶段（优化后）
 
-### Phase 1：MVP 闭环（Week 1-2）
+### Phase 1：MVP 闭环（Week 1-2）✅ 已完成
 
 **目标**：跑通"自然语言 → GBase 8a SQL + 解释"的最小闭环
 
@@ -421,17 +421,30 @@ gbase8a-assistant/
 - 能输入"GBase 8a 支持触发器吗？"，返回准确的知识回答
 - SQL 包含中文解释，可一键复制
 
-### Phase 2：核心增强（Week 3-5）
+### Phase 2：核心增强（Week 3-5）✅ 基本完成
 
 **目标**：多轮对话 + Schema 管理 + SQL 验证增强
 
-- 对话历史持久化（SQLite）
-- 多轮上下文：滑动窗口 + 摘要压缩
-- Schema 管理 UI：手动导入 DDL，存储到 db_connections
-- SQL 验证增强：表/列名交叉引用
-- 多模型配置 + fallback
-- SQL 反馈机制（采纳/拒绝/修改）
-- 对话列表侧栏
+- [x] 对话历史持久化（SQLite）
+- [x] 多轮上下文：滑动窗口 + Token 感知截断（4000 token budget）
+- [x] Schema 管理 UI：手动导入 DDL，存储到 db_connections
+- [x] SQL 验证增强：表/列名交叉引用
+- [x] 多模型配置 + fallback（任务类型区分：intent/sql_generation/knowledge_qa）
+- [x] SQL 反馈机制（采纳/拒绝/修改）
+- [x] 对话列表侧栏（新建/重命名/删除/归档）
+- [x] 前端 Settings 页面（模型选择 + 连接管理）
+- [x] 基础测试覆盖（test_sql_validator, test_sql_chain, test_api）
+
+### Phase 2.5：收尾与加固（当前 → Week 5 末）
+
+**目标**：补齐 Phase 2 遗留项，为 Phase 3 做准备
+
+- [ ] **清理安全漏洞**：`.env.example` 中的真实 API Key 已轮换（2026-04-28），检查 Git 历史并考虑 force-push 清理敏感提交
+- [ ] **Alembic 迁移脚本**：当前靠 `init_db()` 自动建表，需生成首个正式迁移脚本
+- [ ] **FAQ 知识库扩展**：从 10 条扩展到 30-50 条，覆盖常见 GBase 8a 运维和开发问题
+- [ ] **测试稳定化**：运行全部测试，修复 flaky case，在 CI 中接入 `make test`
+- [ ] **前端 build 验证**：`npm run build` 通过，检查 tree-shaking 和产物体积
+- [ ] **模型配置校准**：`models.yaml` 中 `sql_generation.primary` 当前为 `deepseek/deepseek-chat`，评估是否切换为 `deepseek/deepseek-coder` 以提升 SQL 生成准确率
 
 ### Phase 3：智能增强（Week 6-9）
 
@@ -664,8 +677,9 @@ Prompt 意图分类 ──────────── Prompt 意图分类 ─
 3. **渐进式复杂度**：先跑通简单方案，用实际问题驱动架构升级
 4. **知识库第一天开始积累**：方言规则、Few-shot 示例从 Phase 1 就建，持续丰富
 5. **升级零重写**：每次技术升级只替换实现，不改调用方代码
-4. **可迁移数据库层**：SQLAlchemy ORM 抽象，SQLite→PostgreSQL 只需改连接字符串
-5. **模型无关**：LiteLLM 抽象层，所有 LLM 调用通过统一接口，不硬编码任何模型
+6. **可迁移数据库层**：SQLAlchemy ORM 抽象，SQLite→PostgreSQL 只需改连接字符串
+7. **模型无关**：LiteLLM 抽象层，所有 LLM 调用通过统一接口，不硬编码任何模型
+8. **安全优先**：API Key 等敏感信息绝不进入 Git 历史，`.env.example` 只使用假值
 
 ---
 

@@ -8,7 +8,7 @@
 
 **GBase 8a Agent 数据库助手** 是一个面向内部团队的 AI 数据库助手。用户通过自然语言中文对话，系统生成兼容国产 GBase 8a MPP 数据库的 SQL 查询，或回答 GBase 8a 相关的技术问题。
 
-- **当前阶段**：Phase 1（MVP 已闭环，核心功能已实现并可用）
+- **当前阶段**：Phase 2 基本完成（MVP 已闭环，多轮对话、模型 fallback、Schema 管理、SQL 反馈、对话历史侧栏等核心功能已实现并可用）
 - **目标用户**：<50 人的内部产品/研发/测试团队
 - **部署方式**：单机部署，前后端分离
 - **主要语言**：中文（文档、注释、UI、Prompt 均以中文为主）
@@ -355,8 +355,20 @@ testpaths = ["tests"]
 
 ## 已知短板与下一步（供 Agent 参考）
 
-1. **测试缺失**：整个项目目前没有任何自动化测试。添加测试是高优先级任务。
-2. **部署目录为空**：`deploy/` 目录没有任何 Docker、Nginx 或 CI 配置。
-3. **Alembic 迁移脚本为空**：`alembic/versions/` 下没有任何迁移文件。当前靠 `init_db()` 在启动时自动建表。
-4. **模型配置未完全接入**：`backend/config/models.yaml` 存在但当前代码主要从 `.env` 读取 `DEFAULT_MODEL`，未深度使用 `models.yaml` 的 fallback 配置。
-5. **前端路由极简**：目前仅有单一路由 `/`，没有设置页面、Schema 管理页面（虽然后端 API 已具备连接 CRUD）。
+### 已解决的问题（Phase 2 完成）
+- ~~测试缺失~~：已有 `test_sql_validator.py`、`test_sql_chain.py`、`test_api.py` 三个测试文件，需运行并稳定化
+- ~~模型配置未完全接入~~：`LiteLLMClientImpl` 已深度接入 `models.yaml`，支持任务类型区分（intent/sql_generation/knowledge_qa）和自动 fallback
+- ~~前端路由极简~~：已新增 `/settings` 路由，支持模型选择和数据库连接管理
+
+### 待解决（Phase 2.5 收尾）
+1. **Alembic 迁移脚本为空**：`alembic/versions/` 下没有任何迁移文件。当前靠 `init_db()` 在启动时自动建表，需生成首个正式迁移脚本
+2. **部署目录为空**：`deploy/` 目录没有任何 Docker、Nginx 或 CI 配置，Phase 4 前需要补齐
+3. **FAQ 知识库单薄**：`faq.json` 仅 10 条，需扩展到 30-50 条覆盖更多场景
+4. **SQL 示例可扩展**：`sql_examples.jsonl` 已有 30 条，但缺少 GBase 8a 特有语法（如 `ENCODING`、节点函数 `DBNODE()` 等）的示例
+5. **测试覆盖不足**：已有测试骨架，但缺少 mock LLM 的链路测试和前端组件测试
+6. **模型配置待校准**：`models.yaml` 中 `sql_generation.primary` 为 `deepseek/deepseek-chat`，可评估是否切换为 `deepseek/deepseek-coder` 以提升 SQL 准确率
+
+### Phase 3 预备项
+- 评估 Schema 总量是否接近 prompt token 限制（当前全量注入，50+ 表时将成为瓶颈）
+- 准备 Qdrant 向量数据库引入方案（Schema Linking + Few-shot 动态检索 + RAG）
+- 规划错误码查询工具（GBase 8a 错误码知识库）
