@@ -24,10 +24,19 @@ class FakeSession:
 
 
 class TestSchemaRetrieverFallback:
-    def test_returns_qdrant_wrapper_when_db_session_provided(self):
+    def test_returns_db_retriever_when_qdrant_unavailable(self):
+        """Qdrant 不可用时直接返回 DbSchemaRetriever。"""
         retriever = get_schema_retriever(db_session=FakeSession())
         assert retriever is not None
-        assert not isinstance(retriever, DbSchemaRetriever)
+        # 测试环境中 Qdrant 标记为不可用，应直接返回 DbSchemaRetriever
+        assert isinstance(retriever, DbSchemaRetriever)
+
+    def test_returns_wrapper_when_qdrant_available(self):
+        """Qdrant 可用时返回带降级能力的 wrapper。"""
+        with patch("app.vector.client.is_qdrant_available", return_value=True):
+            retriever = get_schema_retriever(db_session=FakeSession())
+            assert retriever is not None
+            assert not isinstance(retriever, DbSchemaRetriever)
 
     @pytest.mark.anyio
     async def test_fallback_retrieve_returns_empty_without_db(self):
@@ -72,10 +81,17 @@ class TestSchemaRetrieverFallback:
 
 
 class TestExampleRetrieverFallback:
-    def test_returns_qdrant_wrapper(self):
+    def test_returns_file_retriever_when_qdrant_unavailable(self):
+        """Qdrant 不可用时直接返回 FileExampleRetriever。"""
         retriever = get_example_retriever()
         assert retriever is not None
-        assert not isinstance(retriever, FileExampleRetriever)
+        assert isinstance(retriever, FileExampleRetriever)
+
+    def test_returns_wrapper_when_qdrant_available(self):
+        with patch("app.vector.client.is_qdrant_available", return_value=True):
+            retriever = get_example_retriever()
+            assert retriever is not None
+            assert not isinstance(retriever, FileExampleRetriever)
 
     @pytest.mark.anyio
     async def test_fallback_returns_file_examples(self):
@@ -92,10 +108,17 @@ class TestExampleRetrieverFallback:
 
 
 class TestKnowledgeRetrieverFallback:
-    def test_returns_qdrant_wrapper(self):
+    def test_returns_file_retriever_when_qdrant_unavailable(self):
+        """Qdrant 不可用时直接返回 FileKnowledgeRetriever。"""
         retriever = get_knowledge_retriever()
         assert retriever is not None
-        assert not isinstance(retriever, FileKnowledgeRetriever)
+        assert isinstance(retriever, FileKnowledgeRetriever)
+
+    def test_returns_wrapper_when_qdrant_available(self):
+        with patch("app.vector.client.is_qdrant_available", return_value=True):
+            retriever = get_knowledge_retriever()
+            assert retriever is not None
+            assert not isinstance(retriever, FileKnowledgeRetriever)
 
     @pytest.mark.anyio
     async def test_fallback_returns_file_knowledge(self):

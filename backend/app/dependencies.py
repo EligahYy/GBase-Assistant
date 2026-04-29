@@ -31,19 +31,16 @@ def _get_file_knowledge_retriever() -> FileKnowledgeRetriever:
 
 def get_schema_retriever(db_session=None) -> SchemaRetriever:
     """SchemaRetriever：优先 Qdrant 向量检索，未命中时回退全量 DB DDL。"""
-    # 尝试创建 Qdrant retriever；如果 Qdrant 不可用，直接回退到 DbSchemaRetriever
-    try:
-        from app.vector.client import get_qdrant_manager
+    from app.vector.client import is_qdrant_available
 
-        # 验证 Qdrant 客户端可实例化（轻量检查，不实际发起网络请求）
-        get_qdrant_manager()
-        # 这里不实际调用 await（同步上下文），依赖调用方在 await retrieve() 时捕获异常
-        return _QdrantSchemaRetrieverWithFallback(db_session)
-    except Exception as e:
-        logger.debug("Qdrant SchemaRetriever 初始化失败，回退到 DbSchemaRetriever: %s", e)
+    # 如果 lifespan 中已确认 Qdrant 不可用，直接返回 DB 全量模式
+    if not is_qdrant_available():
         if db_session is None:
-            raise RuntimeError("DbSchemaRetriever 需要 db_session，但当前上下文未提供") from e
+            raise RuntimeError("DbSchemaRetriever 需要 db_session，但当前上下文未提供")
         return DbSchemaRetriever(db_session)
+
+    # Qdrant 标记为可用时，返回带降级能力的 wrapper
+    return _QdrantSchemaRetrieverWithFallback(db_session)
 
 
 class _QdrantSchemaRetrieverWithFallback:
@@ -78,11 +75,11 @@ class _QdrantSchemaRetrieverWithFallback:
 
 def get_example_retriever() -> ExampleRetriever:
     """ExampleRetriever：优先 Qdrant 动态检索，失败时回退到文件前 top_k 条。"""
-    try:
-        return _QdrantExampleRetrieverWithFallback()
-    except Exception as e:
-        logger.debug("Qdrant ExampleRetriever 初始化失败，回退到文件: %s", e)
+    from app.vector.client import is_qdrant_available
+
+    if not is_qdrant_available():
         return _get_file_example_retriever()
+    return _QdrantExampleRetrieverWithFallback()
 
 
 class _QdrantExampleRetrieverWithFallback:
@@ -112,11 +109,11 @@ class _QdrantExampleRetrieverWithFallback:
 
 def get_knowledge_retriever() -> KnowledgeRetriever:
     """KnowledgeRetriever：优先 Qdrant RAG 检索，失败时回退到文件关键词匹配。"""
-    try:
-        return _QdrantKnowledgeRetrieverWithFallback()
-    except Exception as e:
-        logger.debug("Qdrant KnowledgeRetriever 初始化失败，回退到文件: %s", e)
+    from app.vector.client import is_qdrant_available
+
+    if not is_qdrant_available():
         return _get_file_knowledge_retriever()
+    return _QdrantKnowledgeRetrieverWithFallback()
 
 
 class _QdrantKnowledgeRetrieverWithFallback:

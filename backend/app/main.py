@@ -29,17 +29,19 @@ async def lifespan(app: FastAPI):
     if os.getenv("TESTING"):
         logger.info("测试模式：跳过 Qdrant 和 Embedding 初始化")
     else:
+        # Qdrant 初始化和知识库同步
         try:
-            from app.vector.client import get_qdrant_manager
+            from app.vector.client import get_qdrant_manager, set_qdrant_available
             from app.vector.embedder import get_embedder
             from app.vector.ingest import sync_all_to_qdrant
 
-            embedder = get_embedder()
             qdrant_mgr = get_qdrant_manager()
+            embedder = get_embedder()
             await qdrant_mgr.ensure_collections(dimension=embedder.dimension)
+            set_qdrant_available(True)
             logger.info("Qdrant collections 就绪 (dim=%d)", embedder.dimension)
 
-            # 预加载 embedding 模型（避免首次请求阻塞）
+            # Qdrant 可用时才预热 Embedding 模型
             await embedder.embed(["warmup"])
             logger.info("Embedding 模型预热完成")
 

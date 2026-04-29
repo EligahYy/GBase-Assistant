@@ -58,6 +58,7 @@ class QdrantManager:
 
 # 全局实例（生命周期由 lifespan 管理）
 _qdrant_manager: QdrantManager | None = None
+_qdrant_available: bool = False
 
 
 def get_qdrant_manager() -> QdrantManager:
@@ -70,3 +71,14 @@ def get_qdrant_manager() -> QdrantManager:
 def set_qdrant_manager(manager: QdrantManager) -> None:
     global _qdrant_manager
     _qdrant_manager = manager
+
+
+def is_qdrant_available() -> bool:
+    """返回 Qdrant 是否通过 lifespan 健康检查。"""
+    global _qdrant_available
+    return _qdrant_available
+
+
+def set_qdrant_available(available: bool) -> None:
+    global _qdrant_available
+    _qdrant_available = available
