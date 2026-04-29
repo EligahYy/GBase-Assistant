@@ -1,4 +1,6 @@
 <script setup lang="ts">
+ 
+defineOptions({ name: 'AppSidebar' })
 import { onMounted, ref, nextTick } from 'vue'
 import type { DropdownOption } from 'naive-ui'
 import {

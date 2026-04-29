@@ -1,10 +1,18 @@
 """Tests for SQL generation chain with mocked LLM."""
+
 from __future__ import annotations
 
 import pytest
 
 from app.chains.sql_chain import run_sql_chain, stream_sql_chain
-from app.protocols import ChatContext, ChatResult, ExampleRetriever, LLMClient, SchemaRetriever, StreamChunk, TableSchema
+from app.protocols import (
+    ChatContext,
+    ExampleRetriever,
+    LLMClient,
+    SchemaRetriever,
+    StreamChunk,
+    TableSchema,
+)
 
 
 class MockLLMClient(LLMClient):
@@ -66,10 +74,8 @@ class TestRunSQLChain:
 
     @pytest.mark.asyncio
     async def test_successful_sql_generation(self, mock_schema_retriever, mock_example_retriever, context):
-        llm = MockLLMClient(['''```sql\nSELECT id FROM users\n```\n查询用户ID'''])
-        result = await run_sql_chain(
-            "查询所有用户ID", context, mock_schema_retriever, mock_example_retriever, llm
-        )
+        llm = MockLLMClient(["""```sql\nSELECT id FROM users\n```\n查询用户ID"""])
+        result = await run_sql_chain("查询所有用户ID", context, mock_schema_retriever, mock_example_retriever, llm)
         assert result.sql == "SELECT id FROM users"
         assert result.validation is not None
         assert result.validation.is_valid is True
@@ -77,7 +83,7 @@ class TestRunSQLChain:
 
     @pytest.mark.asyncio
     async def test_prompt_contains_schema_and_rules(self, mock_schema_retriever, mock_example_retriever, context):
-        llm = MockLLMClient(['''```sql\nSELECT id FROM users\n```'''])
+        llm = MockLLMClient(["""```sql\nSELECT id FROM users\n```"""])
         await run_sql_chain("查询用户", context, mock_schema_retriever, mock_example_retriever, llm)
         assert llm.last_messages is not None
         system_msg = llm.last_messages[0]["content"]
@@ -88,13 +94,13 @@ class TestRunSQLChain:
     @pytest.mark.asyncio
     async def test_self_correction_retry(self, mock_schema_retriever, mock_example_retriever, context):
         # First response has invalid SQL (FOR UPDATE), second response is valid
-        llm = MockLLMClient([
-            '''```sql\nSELECT * FROM users FOR UPDATE\n```''',
-            '''```sql\nSELECT * FROM users\n```''',
-        ])
-        result = await run_sql_chain(
-            "查询用户", context, mock_schema_retriever, mock_example_retriever, llm
+        llm = MockLLMClient(
+            [
+                """```sql\nSELECT * FROM users FOR UPDATE\n```""",
+                """```sql\nSELECT * FROM users\n```""",
+            ]
         )
+        result = await run_sql_chain("查询用户", context, mock_schema_retriever, mock_example_retriever, llm)
         assert llm.call_count == 2
         assert result.validation is not None
         # Second attempt should be valid
@@ -103,12 +109,13 @@ class TestRunSQLChain:
     @pytest.mark.asyncio
     async def test_max_retries_exceeded(self, mock_schema_retriever, mock_example_retriever, context):
         # Always return invalid SQL
-        llm = MockLLMClient([
-            '''```sql\nSELECT * FROM users FOR UPDATE\n```''',
-        ] * 5)
-        result = await run_sql_chain(
-            "查询用户", context, mock_schema_retriever, mock_example_retriever, llm
+        llm = MockLLMClient(
+            [
+                """```sql\nSELECT * FROM users FOR UPDATE\n```""",
+            ]
+            * 5
         )
+        result = await run_sql_chain("查询用户", context, mock_schema_retriever, mock_example_retriever, llm)
         assert llm.call_count == 3  # MAX_RETRIES
         assert result.validation is not None
         assert result.validation.is_valid is False
@@ -117,9 +124,7 @@ class TestRunSQLChain:
     @pytest.mark.asyncio
     async def test_no_sql_extracted(self, mock_schema_retriever, mock_example_retriever, context):
         llm = MockLLMClient(["对不起，我无法生成这个查询"])
-        result = await run_sql_chain(
-            "查询用户", context, mock_schema_retriever, mock_example_retriever, llm
-        )
+        result = await run_sql_chain("查询用户", context, mock_schema_retriever, mock_example_retriever, llm)
         assert result.sql is None
         assert result.validation is not None
         assert result.validation.is_valid is False
@@ -130,11 +135,9 @@ class TestStreamSQLChain:
 
     @pytest.mark.asyncio
     async def test_stream_yields_text_and_sql(self, mock_schema_retriever, mock_example_retriever, context):
-        llm = MockLLMClient(['''```sql\nSELECT id FROM users\n```'''])
+        llm = MockLLMClient(["""```sql\nSELECT id FROM users\n```"""])
         chunks: list[StreamChunk] = []
-        async for chunk in stream_sql_chain(
-            "查询用户ID", context, mock_schema_retriever, mock_example_retriever, llm
-        ):
+        async for chunk in stream_sql_chain("查询用户ID", context, mock_schema_retriever, mock_example_retriever, llm):
             chunks.append(chunk)
 
         text_chunks = [c for c in chunks if c.type == "text"]
@@ -148,11 +151,9 @@ class TestStreamSQLChain:
 
     @pytest.mark.asyncio
     async def test_stream_warning_on_invalid_sql(self, mock_schema_retriever, mock_example_retriever, context):
-        llm = MockLLMClient(['''```sql\nSELECT * FROM users FOR UPDATE\n```'''])
+        llm = MockLLMClient(["""```sql\nSELECT * FROM users FOR UPDATE\n```"""])
         chunks: list[StreamChunk] = []
-        async for chunk in stream_sql_chain(
-            "查询用户", context, mock_schema_retriever, mock_example_retriever, llm
-        ):
+        async for chunk in stream_sql_chain("查询用户", context, mock_schema_retriever, mock_example_retriever, llm):
             chunks.append(chunk)
 
         warning_chunks = [c for c in chunks if c.type == "warning"]
@@ -163,9 +164,7 @@ class TestStreamSQLChain:
     async def test_stream_no_sql_no_warning(self, mock_schema_retriever, mock_example_retriever, context):
         llm = MockLLMClient(["无法生成SQL"])
         chunks: list[StreamChunk] = []
-        async for chunk in stream_sql_chain(
-            "查询用户", context, mock_schema_retriever, mock_example_retriever, llm
-        ):
+        async for chunk in stream_sql_chain("查询用户", context, mock_schema_retriever, mock_example_retriever, llm):
             chunks.append(chunk)
 
         sql_chunks = [c for c in chunks if c.type == "sql"]

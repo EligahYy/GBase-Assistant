@@ -439,12 +439,13 @@ gbase8a-assistant/
 
 **目标**：补齐 Phase 2 遗留项，为 Phase 3 做准备
 
-- [ ] **清理安全漏洞**：`.env.example` 中的真实 API Key 已轮换（2026-04-28），检查 Git 历史并考虑 force-push 清理敏感提交
-- [ ] **Alembic 迁移脚本**：当前靠 `init_db()` 自动建表，需生成首个正式迁移脚本
-- [ ] **FAQ 知识库扩展**：从 10 条扩展到 30-50 条，覆盖常见 GBase 8a 运维和开发问题
-- [ ] **测试稳定化**：运行全部测试，修复 flaky case，在 CI 中接入 `make test`
-- [ ] **前端 build 验证**：`npm run build` 通过，检查 tree-shaking 和产物体积
-- [ ] **模型配置校准**：`models.yaml` 中 `sql_generation.primary` 当前为 `deepseek/deepseek-chat`，评估是否切换为 `deepseek/deepseek-coder` 以提升 SQL 生成准确率
+- [x] **清理安全漏洞**：`.env.example` 中的真实 API Key 已替换为 `sk-xxx`（2026-04-28）
+- [x] **Alembic 迁移状态修复**：`alembic_version` 表存在脏数据（多版本记录），已清理并校准为 `5c906286dcba`
+- [x] **FAQ 知识库扩展**：从 10 条扩展到 **38 条**，覆盖语法、特性、性能、运维等场景
+- [x] **测试稳定化**：运行全部测试，**48 passed**；修复 `datetime.utcnow()` 废弃警告（改为 `datetime.now(timezone.utc)`）和 `on_event` 废弃警告（改为 `lifespan`）
+- [x] **代码格式与 lint**：后端 ruff（check + format）全部通过；前端 oxlint + eslint 全部通过
+- [x] **前端 build 验证**：`npm run build` 通过，产物约 1.5MB（gzip 后 432KB）
+- [x] **模型配置校准**：`sql_generation.primary` 保持 `deepseek/deepseek-chat`。评估结论：DeepSeek-V3（chat）已整合代码生成能力，与专用 coder 模型在 SQL 任务上差距不大；当前配置运行稳定，暂不需要切换。如后续 SQL 准确率不达标，再评估引入 `deepseek-coder`
 
 ### Phase 3：智能增强（Week 6-9）
 

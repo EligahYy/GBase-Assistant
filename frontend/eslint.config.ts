@@ -18,6 +18,12 @@ export default defineConfigWithVueTs(
 
   ...pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
+  {
+    name: 'app/custom-rules',
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 )

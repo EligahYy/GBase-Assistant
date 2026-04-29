@@ -1,8 +1,9 @@
 """GBase 8a 知识问答链：知识库检索 → LLM 生成回答。"""
+
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from app.llm.prompts import build_qa_prompt
 from app.protocols import ChatContext, ChatResult, KnowledgeRetriever, LLMClient, StreamChunk

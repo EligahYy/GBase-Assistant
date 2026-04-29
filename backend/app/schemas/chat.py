@@ -37,7 +37,7 @@ class MessageResponse(BaseModel):
         return v  # type: ignore[return-value]
 
     @classmethod
-    def from_orm_model(cls, obj) -> "MessageResponse":
+    def from_orm_model(cls, obj) -> MessageResponse:
         return cls(
             id=obj.id,
             role=obj.role,

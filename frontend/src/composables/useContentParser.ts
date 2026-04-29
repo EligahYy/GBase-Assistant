@@ -11,13 +11,13 @@ export interface ContentSegment {
 }
 
 /**
- * 解析包含 ```sql...``` 代码块的文本，返回按顺序排列的段落列表。
- * 支持流式输入（内容可能在 SQL 块中间截断）。
+ * 解析包含代码块的文本，返回按顺序排列的段落列表。
+ * 支持 ```sql / ```SQL / ``` 等多种代码块标记，支持流式输入。
  */
 export function parseContent(raw: string): ContentSegment[] {
   const segments: ContentSegment[] = []
-  // 匹配完整的 ```sql ... ``` 块
-  const completeRe = /```sql\n?([\s\S]*?)```/gi
+  // 匹配完整的 ```sql ... ``` 或 ``` ... ``` 块（不区分大小写）
+  const completeRe = /```(?:sql)?\n?([\s\S]*?)```/gi
   let lastIndex = 0
   let match: RegExpExecArray | null
 
@@ -32,13 +32,14 @@ export function parseContent(raw: string): ContentSegment[] {
   const tail = raw.slice(lastIndex)
   if (!tail) return segments
 
-  // 检查是否有一个未闭合的 ```sql 块（流式进行中）
-  const openIdx = tail.indexOf('```sql')
+  // 检查是否有一个未闭合的代码块（流式进行中）
+  const openIdx = tail.search(/```(?:sql)?\n?/i)
   if (openIdx >= 0) {
     const before = tail.slice(0, openIdx)
     if (before.trim()) segments.push({ type: 'text', content: before, complete: true })
-    // 去掉 ```sql\n 前缀，剩余就是正在流式输出的 SQL
-    const partialSql = tail.slice(openIdx + 6).replace(/^\n/, '')
+    const m = tail.slice(openIdx).match(/```(?:sql)?\n?/i)
+    const prefixLen = m ? m[0].length : 6
+    const partialSql = tail.slice(openIdx + prefixLen).replace(/^\n/, '')
     if (partialSql) segments.push({ type: 'sql', content: partialSql, complete: false })
   } else {
     if (tail.trim()) segments.push({ type: 'text', content: tail, complete: true })

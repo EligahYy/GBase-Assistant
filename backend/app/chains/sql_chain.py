@@ -2,10 +2,11 @@
 SQL 生成链：NL → Schema 检索 → Few-shot 检索 → LLM 生成 → 验证 → 自纠错。
 遵循 Protocol 驱动设计：所有依赖通过参数注入，函数为纯函数语义。
 """
+
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from app.knowledge.loader import load_dialect_rules
 from app.llm.prompts import build_sql_correction_prompt, build_sql_prompt
@@ -76,7 +77,9 @@ async def run_sql_chain(
         else:
             # 最后一次失败，仍返回结果但标记无效
             return ChatResult(
-                content=content + f"\n\n⚠️ 注意：以上 SQL 存在以下问题：\n" + "\n".join(f"- {e}" for e in validation.errors),
+                content=content
+                + "\n\n⚠️ 注意：以上 SQL 存在以下问题：\n"
+                + "\n".join(f"- {e}" for e in validation.errors),
                 message_type="sql",
                 sql=sql,
                 token_usage=token_usage,

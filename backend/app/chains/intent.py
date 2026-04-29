@@ -1,4 +1,5 @@
 """意图分类：通过 LLM + few-shot prompt 判断用户意图。"""
+
 from __future__ import annotations
 
 import json

@@ -1,8 +1,9 @@
 """SQL feedback ORM model."""
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,4 +20,4 @@ class SQLFeedback(Base):
     original_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
     modified_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

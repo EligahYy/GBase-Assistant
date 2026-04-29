@@ -1,4 +1,5 @@
 """Health check endpoint with dependency status."""
+
 from __future__ import annotations
 
 import logging

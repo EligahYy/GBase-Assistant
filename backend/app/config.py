@@ -1,4 +1,5 @@
 """应用配置，通过环境变量和 .env 文件加载。"""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -24,6 +25,10 @@ class Settings(BaseSettings):
     # 默认模型
     default_model: str = "deepseek/deepseek-chat"
 
+    # 向量数据库
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str = ""
+
     # 应用
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     debug: bool = False
@@ -40,6 +45,7 @@ class Settings(BaseSettings):
     def parse_cors(cls, v: str | list) -> list[str]:
         if isinstance(v, str):
             import json
+
             return json.loads(v)
         return v
 

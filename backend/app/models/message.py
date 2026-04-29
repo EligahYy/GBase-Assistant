@@ -1,9 +1,10 @@
 """Message ORM 模型。token_usage 用 Text 存 JSON（兼容 SQLite）。"""
+
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -24,9 +25,9 @@ class Message(Base):
     sql_generated: Mapped[str | None] = mapped_column(Text, nullable=True)
     sql_validated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     token_usage: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
-    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")  # noqa: F821
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")  # noqa: F821
 
     def set_token_usage(self, usage: dict | None) -> None:
         self.token_usage = json.dumps(usage, ensure_ascii=False) if usage else None

@@ -3,11 +3,13 @@
 所有模块依赖此文件中的 Protocol，不依赖具体实现。
 升级时只替换 dependencies.py 中的绑定，调用方代码不变。
 """
+
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @dataclass
@@ -110,4 +112,18 @@ class LLMClient(Protocol):
 
     async def stream(self, messages: list[dict], **kwargs) -> AsyncIterator[str]:
         """流式生成，yield token chunks"""
+        ...
+
+
+@runtime_checkable
+class Embedder(Protocol):
+    """文本向量化接口。Phase 3: bge-m3 本地; Phase 4+: 可切换 OpenAI API"""
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """将文本列表转换为向量列表"""
+        ...
+
+    @property
+    def dimension(self) -> int:
+        """向量维度"""
         ...

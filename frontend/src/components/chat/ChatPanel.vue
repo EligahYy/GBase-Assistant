@@ -3,7 +3,7 @@ import { ref, nextTick, watch, computed, inject } from 'vue'
 import { useMessage } from 'naive-ui'
 import { SendOutline, ServerOutline, MenuOutline, SunnyOutline, MoonOutline, StopCircleOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import type { Ref } from 'vue'
+
 import MessageBubble from './MessageBubble.vue'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'

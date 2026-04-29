@@ -20,9 +20,8 @@ const isTyping = computed(() =>
   props.message.isStreaming && !props.message.streamContent
 )
 
-function renderMarkdown(text: string, streaming = false): string {
+function renderMarkdown(text: string): string {
   try {
-    if (streaming) return marked.parseInline(text) as string
     return marked.parse(text) as string
   } catch {
     return text
@@ -54,7 +53,7 @@ function renderMarkdown(text: string, streaming = false): string {
             <div v-if="seg.type === 'text' && isUser" class="text-segment" style="white-space: pre-wrap">{{ seg.content }}</div>
             <div v-else-if="seg.type === 'text'" class="text-segment"
               :style="message.isStreaming ? 'white-space: pre-wrap' : ''"
-              v-html="renderMarkdown(seg.content, message.isStreaming)" />
+              v-html="renderMarkdown(seg.content)" />
             <SqlBlock v-else-if="seg.content" :sql="seg.content" :streaming="!seg.complete" :message-id="message.id" />
           </template>
 

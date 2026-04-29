@@ -1,4 +1,5 @@
 """Prompt 模板管理。使用 f-string 构建，保持简单可维护。"""
+
 from __future__ import annotations
 
 from app.protocols import KnowledgeChunk, SQLExample, TableSchema
@@ -45,6 +46,22 @@ SQL_SYSTEM_BASE = """你是 GBase 8a MPP 分析数据库的 SQL 专家。根据�
 不要输出任何其他内容。"""
 
 
+def _build_turn_index(history: list[dict]) -> str | None:
+    """构建对话轮次索引，帮助 LLM 回溯历史版本。不修改原始消息内容。"""
+    if not history:
+        return None
+    lines = []
+    turn = 0
+    for msg in history:
+        if msg["role"] == "user":
+            turn += 1
+        preview = msg["content"][:50].replace("\n", " ")
+        if len(msg["content"]) > 50:
+            preview += "..."
+        lines.append(f"第{turn}轮 {msg['role']}: {preview}")
+    return "对话历史索引（供你回溯定位用，回复时严禁使用此格式）：\n" + "\n".join(lines)
+
+
 def build_sql_prompt(
     message: str,
     dialect_rules: dict,
@@ -83,9 +100,12 @@ def build_sql_prompt(
 
     messages: list[dict] = [{"role": "system", "content": system_content}]
 
-    # 注入对话历史（最近 6 轮）
+    # 注入对话历史：先附加轮次索引（独立 system message），再附加原始消息
     if history:
-        messages.extend(history[-12:])  # 最多 6 轮，每轮 2 条
+        index = _build_turn_index(history)
+        if index:
+            messages.append({"role": "system", "content": index})
+        messages.extend(history)
 
     messages.append({"role": "user", "content": message})
     return messages
@@ -121,13 +141,17 @@ def build_qa_prompt(
     messages: list[dict] = [{"role": "system", "content": system_content}]
 
     if history:
-        messages.extend(history[-12:])
+        index = _build_turn_index(history)
+        if index:
+            messages.append({"role": "system", "content": index})
+        messages.extend(history)
 
     messages.append({"role": "user", "content": message})
     return messages
 
 
 # ── SQL 自纠错 ──────────────────────────────────────────────────────────────────
+
 
 def build_sql_correction_prompt(
     original_message: str,
@@ -139,9 +163,7 @@ def build_sql_correction_prompt(
     correction = (
         f"上面生成的 SQL 存在以下问题，请修正：\n"
         f"错误的 SQL：\n```sql\n{failed_sql}\n```\n"
-        f"问题：\n"
-        + "\n".join(f"- {e}" for e in errors)
-        + "\n\n请重新生成符合 GBase 8a 规范的 SQL。"
+        f"问题：\n" + "\n".join(f"- {e}" for e in errors) + "\n\n请重新生成符合 GBase 8a 规范的 SQL。"
     )
     return existing_messages + [{"role": "user", "content": correction}]
 
@@ -156,12 +178,16 @@ GENERAL_SYSTEM = """你是 GBase 8a 数据库助手。你的主要功能是帮�
 def build_general_prompt(message: str, history: list[dict] | None = None) -> list[dict]:
     messages: list[dict] = [{"role": "system", "content": GENERAL_SYSTEM}]
     if history:
-        messages.extend(history[-6:])
+        index = _build_turn_index(history)
+        if index:
+            messages.append({"role": "system", "content": index})
+        messages.extend(history)
     messages.append({"role": "user", "content": message})
     return messages
 
 
 # ── 辅助格式化 ──────────────────────────────────────────────────────────────────
+
 
 def _format_unsupported(rules: list[dict]) -> str:
     if not rules:

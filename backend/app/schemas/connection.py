@@ -35,7 +35,7 @@ class ConnectionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     @classmethod
-    def from_orm_model(cls, obj) -> "ConnectionResponse":
+    def from_orm_model(cls, obj) -> ConnectionResponse:
         return cls(
             id=obj.id,
             name=obj.name,

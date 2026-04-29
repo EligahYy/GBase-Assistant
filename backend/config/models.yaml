@@ -24,6 +24,20 @@ models:
     temperature: 0.0
     max_tokens: 50
 
+embedding:
+  provider: "local"  # local | litellm
+  local:
+    model: "BAAI/bge-m3"
+    device: "cpu"  # cpu | cuda | mps
+  litellm:
+    model: "openai/text-embedding-3-small"
+
+collections:
+  schemas: "schemas"
+  sql_examples: "sql_examples"
+  knowledge: "knowledge"
+  error_codes: "error_codes"
+
 providers:
   deepseek:
     api_base: "https://api.deepseek.com"

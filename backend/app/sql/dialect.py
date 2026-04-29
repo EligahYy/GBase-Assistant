@@ -1,4 +1,5 @@
 """GBase 8a sqlglot 方言定义。继承 MySQL 方言并覆写不支持的特性。"""
+
 from __future__ import annotations
 
 import sqlglot
@@ -40,13 +41,15 @@ UNSUPPORTED_STATEMENT_TYPES = {
 }
 
 # 不支持的子句关键词（字符串匹配，用于快速预检）
-UNSUPPORTED_KEYWORDS = frozenset([
-    "FOR UPDATE",
-    "LOCK IN SHARE MODE",
-    "LOCK TABLES",
-    "UNLOCK TABLES",
-    "CREATE TRIGGER",
-    "DROP TRIGGER",
-    "ALTER TRIGGER",
-    "CREATE EVENT",
-])
+UNSUPPORTED_KEYWORDS = frozenset(
+    [
+        "FOR UPDATE",
+        "LOCK IN SHARE MODE",
+        "LOCK TABLES",
+        "UNLOCK TABLES",
+        "CREATE TRIGGER",
+        "DROP TRIGGER",
+        "ALTER TRIGGER",
+        "CREATE EVENT",
+    ]
+)

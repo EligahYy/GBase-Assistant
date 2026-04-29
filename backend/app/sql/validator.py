@@ -1,4 +1,5 @@
 """SQL 验证：语法检查 + GBase 8a 方言合规 + Schema 交叉引用。"""
+
 from __future__ import annotations
 
 import re
@@ -196,9 +197,7 @@ def _check_gbase_ddl(sql: str) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
-def _check_schema_references(
-    statement: exp.Expression, schemas: list[TableSchema]
-) -> tuple[list[str], list[str]]:
+def _check_schema_references(statement: exp.Expression, schemas: list[TableSchema]) -> tuple[list[str], list[str]]:
     """交叉引用 SQL 中的表名/列名与已知 schema。"""
     errors = []
     warnings = []

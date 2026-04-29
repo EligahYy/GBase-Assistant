@@ -4,10 +4,10 @@ import { useMessage } from 'naive-ui'
 import { CopyOutline, CheckmarkOutline, ThumbsUpOutline, ThumbsDownOutline, CreateOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import hljs from 'highlight.js/lib/core'
-import sql from 'highlight.js/lib/languages/sql'
+import sqlLang from 'highlight.js/lib/languages/sql'
 import { submitFeedback } from '@/api/feedback'
 
-hljs.registerLanguage('sql', sql)
+hljs.registerLanguage('sql', sqlLang)
 
 const props = defineProps<{ sql: string; streaming?: boolean; messageId?: string }>()
 const naiveMsg = useMessage()

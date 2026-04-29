@@ -1,5 +1,10 @@
 """API integration tests with in-memory SQLite."""
+
 from __future__ import annotations
+
+import os
+
+os.environ["TESTING"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,12 +52,15 @@ class TestHealthAPI:
 
 class TestConnectionAPI:
     def test_create_connection(self):
-        response = client.post("/api/connections", json={
-            "name": "Test DB",
-            "host": "localhost",
-            "database_name": "test",
-            "schema_ddl": "CREATE TABLE users (id INT, name VARCHAR(20));"
-        })
+        response = client.post(
+            "/api/connections",
+            json={
+                "name": "Test DB",
+                "host": "localhost",
+                "database_name": "test",
+                "schema_ddl": "CREATE TABLE users (id INT, name VARCHAR(20));",
+            },
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "Test DB"
@@ -85,14 +93,19 @@ class TestConnectionAPI:
         assert get_resp.status_code == 200
         list_resp = client.get("/api/connections")
         assert conn_id not in [c["id"] for c in list_resp.json()]
+
+
 class TestConversationAPI:
     def test_create_conversation_via_chat(self):
-        response = client.post("/api/chat", json={
-            "message": "查询用户",
-            "db_connection_id": None,
-            "conversation_id": None,
-            "model": None,
-        })
+        response = client.post(
+            "/api/chat",
+            json={
+                "message": "查询用户",
+                "db_connection_id": None,
+                "conversation_id": None,
+                "model": None,
+            },
+        )
         assert response.status_code == 200
         data = response.json()
         assert "conversation_id" in data

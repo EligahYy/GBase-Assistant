@@ -1,4 +1,5 @@
 """Tests for SQL validator: syntax, dialect compliance, schema cross-reference."""
+
 from __future__ import annotations
 
 import pytest

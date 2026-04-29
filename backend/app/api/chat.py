@@ -1,10 +1,10 @@
 """聊天 API：非流式 POST /api/chat 和流式 POST /api/chat/stream。"""
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -16,8 +16,7 @@ from app.chains.intent import classify_intent
 from app.chains.qa_chain import run_qa_chain, stream_qa_chain
 from app.chains.sql_chain import run_sql_chain, stream_sql_chain
 from app.database import get_db
-from app.dependencies import get_example_retriever, get_knowledge_retriever, get_llm_client
-from app.knowledge.loader import DbSchemaRetriever
+from app.dependencies import get_example_retriever, get_knowledge_retriever, get_llm_client, get_schema_retriever
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.sql_feedback import SQLFeedback
@@ -53,38 +52,63 @@ async def _get_or_create_conversation(
 
 
 def _estimate_tokens(text: str) -> int:
-    """简易 token 估算：中文按字符，英文按单词数 * 1.3。"""
+    """
+    Token 估算：混合内容适配版。
+
+    中文字符 ≈ 1 token，英文单词 ≈ 1.3 token，代码/符号 ≈ 0.5 token。
+    对 SQL 代码块给予 1.5 倍权重（符号密集，tokenizer 分词效率低）。
+    """
     import re
+
     # 中文字符
     cn_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
     # 英文单词
     en_words = len(re.findall(r"[a-zA-Z]+", text))
-    return cn_chars + int(en_words * 1.3) + 5  # +5 作为格式开销
+    # 符号和数字（代码密集区域的特征）
+    symbols = len(re.findall(r"[0-9\-_=+<>!@#$%^&*(){\[\]}|;:'\",./?`~]", text))
+    # 代码块检测：如果包含 ``` 包裹的代码，增加权重
+    code_blocks = len(re.findall(r"```[\s\S]*?```", text))
+    code_bonus = code_blocks * 30  # 每个代码块额外 +30（格式标记开销）
+
+    base = cn_chars + int(en_words * 1.3) + int(symbols * 0.5) + 5 + code_bonus
+    # 代码块内容整体 ×1.2（符号分词更细碎）
+    if code_blocks:
+        base = int(base * 1.2)
+    return base
 
 
-HISTORY_TOKEN_BUDGET = 4000
+HISTORY_TOKEN_BUDGET = 8000
 
 
 async def _build_context(db: AsyncSession, conv: Conversation) -> ChatContext:
-    """构建对话上下文（token 感知截断）。"""
+    """构建对话上下文（token 感知截断 + 轮次标记）。"""
     result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conv.id)
-        .order_by(Message.created_at.desc())
-        .limit(50)
+        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at.desc()).limit(100)
     )
     messages = list(reversed(result.scalars().all()))
 
     # Token 感知截断：从最近的消息开始保留，直到预算用完
     history: list[dict] = []
     total_tokens = 0
+    skipped = 0
     for m in reversed(messages):
         msg_tokens = _estimate_tokens(m.content)
         if total_tokens + msg_tokens > HISTORY_TOKEN_BUDGET and history:
-            logger.info("对话上下文截断：保留最近 %d 条消息，跳过 %d 条", len(history), len(messages) - len(history))
-            break
+            skipped += 1
+            continue
         history.insert(0, {"role": m.role, "content": m.content})
         total_tokens += msg_tokens
+
+    if skipped:
+        logger.info(
+            "对话上下文截断：总消息 %d 条，保留最近 %d 条（约 %d tokens），跳过最早 %d 条",
+            len(messages),
+            len(history),
+            total_tokens,
+            skipped,
+        )
+    else:
+        logger.info("对话上下文完整保留：%d 条消息（约 %d tokens）", len(history), total_tokens)
 
     return ChatContext(
         db_id=conv.db_connection_id,
@@ -141,7 +165,7 @@ async def chat(
 ):
     """非流式聊天接口。"""
     llm_client: LLMClient = get_llm_client(request.model, task_type="intent_classification")
-    schema_retriever = DbSchemaRetriever(db)
+    schema_retriever = get_schema_retriever(db)
 
     conv = await _get_or_create_conversation(db, request.conversation_id, request.db_connection_id, request.model)
     context = await _build_context(db, conv)
@@ -161,12 +185,15 @@ async def chat(
         chat_result = await run_qa_chain(request.message, context, knowledge_retriever, llm_client)
     else:
         from app.llm.prompts import build_general_prompt
+
         content, token_usage = await llm_client.complete(build_general_prompt(request.message, context.history))
         from app.protocols import ChatResult
+
         chat_result = ChatResult(content=content, message_type="general", token_usage=token_usage)
 
     _, assistant_msg = await _save_messages(
-        db, conv,
+        db,
+        conv,
         user_content=request.message,
         result_content=chat_result.content,
         message_type=chat_result.message_type,
@@ -190,7 +217,7 @@ async def chat_stream(
 ):
     """流式聊天接口，返回 SSE。"""
     llm_client: LLMClient = get_llm_client(request.model, task_type="intent_classification")
-    schema_retriever = DbSchemaRetriever(db)
+    schema_retriever = get_schema_retriever(db)
 
     conv = await _get_or_create_conversation(db, request.conversation_id, request.db_connection_id, request.model)
     context = await _build_context(db, conv)
@@ -245,13 +272,15 @@ async def chat_stream(
         except Exception as e:
             logger.error("流式生成错误: %s", e)
             from app.protocols import StreamChunk
+
             yield StreamChunk(type="error", content=f"生成失败：{e!s}").to_sse()
             return
 
         # 保存消息（流结束后）
         try:
             await _save_messages(
-                db, conv,
+                db,
+                conv,
                 user_content=request.message,
                 result_content=full_content,
                 message_type=intent,
@@ -271,9 +300,6 @@ async def chat_stream(
             "X-Conversation-Id": conv.id,
         },
     )
-
-
-import json
 
 
 def _parse_tags(tags_str: str | None) -> list[str]:
@@ -304,7 +330,7 @@ async def list_conversations(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Conversation)
         .options(selectinload(Conversation.messages))
-        .where(Conversation.archived == False)
+        .where(Conversation.archived.is_(False))
         .order_by(Conversation.updated_at.desc())
         .limit(50)
     )
@@ -315,9 +341,7 @@ async def list_conversations(db: AsyncSession = Depends(get_db)):
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(conversation_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Conversation)
-        .options(selectinload(Conversation.messages))
-        .where(Conversation.id == conversation_id)
+        select(Conversation).options(selectinload(Conversation.messages)).where(Conversation.id == conversation_id)
     )
     conv = result.scalar_one_or_none()
     if not conv:

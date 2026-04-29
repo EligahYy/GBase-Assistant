@@ -1,8 +1,9 @@
 """Conversation ORM 模型。"""
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,9 +22,11 @@ class Conversation(Base):
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
 
-    messages: Mapped[list["Message"]] = relationship(  # noqa: F821
+    messages: Mapped[list[Message]] = relationship(  # noqa: F821
         "Message", back_populates="conversation", cascade="all, delete-orphan", lazy="selectin"
     )

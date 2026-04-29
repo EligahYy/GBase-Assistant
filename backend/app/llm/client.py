@@ -1,9 +1,10 @@
 """LiteLLM wrapper: unified LLM interface with multi-model fallback and streaming."""
+
 from __future__ import annotations
 
 import logging
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import litellm
 

@@ -2,6 +2,7 @@
 知识库加载器：实现 Phase 1 的三个 Protocol（文件驱动）。
 升级到 Phase 3 时，在 dependencies.py 中替换为 Qdrant 实现，此文件不改动。
 """
+
 from __future__ import annotations
 
 import json
@@ -18,7 +19,6 @@ from app.protocols import (
     KnowledgeChunk,
     KnowledgeRetriever,
     SQLExample,
-    SchemaRetriever,
     TableSchema,
 )
 
@@ -30,6 +30,7 @@ def _knowledge_dir() -> Path:
 
 
 # ── 方言规则加载 ──────────────────────────────────────────────────────────────────
+
 
 @lru_cache
 def load_dialect_rules() -> dict:
@@ -59,6 +60,7 @@ def load_dialect_rules() -> dict:
 
 
 # ── SchemaRetriever Phase 1 实现 ──────────────────────────────────────────────────
+
 
 class DbSchemaRetriever:
     """
@@ -118,17 +120,20 @@ def _parse_ddl_to_schemas(ddl_text: str) -> list[TableSchema]:
                             for col in schema.expressions:
                                 if isinstance(col, sqlglot.exp.ColumnDef) and col.name:
                                     columns.append(col.name)
-                        schemas.append(TableSchema(
-                            table_name=table_name,
-                            ddl=stmt,
-                            columns=columns,
-                        ))
+                        schemas.append(
+                            TableSchema(
+                                table_name=table_name,
+                                ddl=stmt,
+                                columns=columns,
+                            )
+                        )
                         continue
         except Exception:
             pass
 
         # 回退：正则提取表名和列名
         import re
+
         m = re.search(r"CREATE\s+TABLE\s+[`\"]?([^`\"(\s]+)[`\"]?\s*\((.+)\)", stmt, re.IGNORECASE | re.DOTALL)
         if m:
             table_name = m.group(1).strip()
@@ -140,11 +145,13 @@ def _parse_ddl_to_schemas(ddl_text: str) -> list[TableSchema]:
                     col_name = parts[0].strip("`\"'").lower()
                     if col_name and col_name not in ("primary", "unique", "index", "constraint", "foreign", "key"):
                         columns.append(col_name)
-            schemas.append(TableSchema(
-                table_name=table_name,
-                ddl=stmt,
-                columns=columns,
-            ))
+            schemas.append(
+                TableSchema(
+                    table_name=table_name,
+                    ddl=stmt,
+                    columns=columns,
+                )
+            )
 
     return schemas
 
@@ -155,6 +162,7 @@ def _verify_protocol():
 
 
 # ── ExampleRetriever Phase 1 实现 ──────────────────────────────────────────────────
+
 
 class FileExampleRetriever:
     """
@@ -209,6 +217,7 @@ assert isinstance(FileExampleRetriever(), ExampleRetriever)
 
 # ── KnowledgeRetriever Phase 1 实现 ──────────────────────────────────────────────
 
+
 class FileKnowledgeRetriever:
     """
     KnowledgeRetriever Phase 1 实现：从 faq.json 关键词匹配。
@@ -249,9 +258,8 @@ class FileKnowledgeRetriever:
             keywords = item.get("keywords", [])
             question = item.get("question", "").lower()
             answer = item.get("answer", "")
-            if (
-                any(kw.lower() in query_lower for kw in keywords)
-                or any(word in question for word in query_lower.split() if len(word) > 1)
+            if any(kw.lower() in query_lower for kw in keywords) or any(
+                word in question for word in query_lower.split() if len(word) > 1
             ):
                 matched.append(
                     KnowledgeChunk(
