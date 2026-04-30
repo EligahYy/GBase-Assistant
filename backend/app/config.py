@@ -30,7 +30,12 @@ class Settings(BaseSettings):
     qdrant_api_key: str = ""
 
     # 应用
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
     debug: bool = False
 
     model_config = SettingsConfigDict(
