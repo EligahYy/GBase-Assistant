@@ -51,7 +51,7 @@ class LiteLLMEmbedder:
             # fallback：尝试所有可用的 key
             api_key = settings.openai_api_key or settings.dashscope_api_key
 
-        kwargs: dict = {"model": self._model, "input": texts}
+        kwargs: dict = {"model": self._model, "input": texts, "encoding_format": "float"}
         if self._api_base:
             kwargs["api_base"] = self._api_base
         if api_key:

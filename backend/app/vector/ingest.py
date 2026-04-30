@@ -34,6 +34,16 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
 
+async def _embed_in_batches(embedder: Embedder, texts: list[str], batch_size: int = 10) -> list[list[float]]:
+    """分批 embedding（兼容阿里云 batch size <= 10 限制）。"""
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        embeddings = await embedder.embed(batch)
+        all_embeddings.extend(embeddings)
+    return all_embeddings
+
+
 async def ingest_faq(embedder: Embedder, force: bool = False) -> int:
     """将 FAQ 向量化入库。返回入库条数。"""
     faq_path = _knowledge_dir() / "docs" / "faq.json"
@@ -54,7 +64,7 @@ async def ingest_faq(embedder: Embedder, force: bool = False) -> int:
     collection = get_settings().models_config.get("collections", {}).get("knowledge", "knowledge")
 
     texts = [f"问题：{item['question']}\n答案：{item['answer']}" for item in faq]
-    embeddings = await embedder.embed(texts)
+    embeddings = await _embed_in_batches(embedder, texts)
 
     points = []
     for i, item in enumerate(faq):
@@ -103,7 +113,7 @@ async def ingest_sql_examples(embedder: Embedder, force: bool = False) -> int:
     collection = get_settings().models_config.get("collections", {}).get("sql_examples", "sql_examples")
 
     texts = [f"问题：{ex['question']}\nSQL：{ex['sql']}" for ex in examples]
-    embeddings = await embedder.embed(texts)
+    embeddings = await _embed_in_batches(embedder, texts)
 
     points = []
     for i, ex in enumerate(examples):
@@ -151,7 +161,7 @@ async def ingest_error_codes(embedder: Embedder, force: bool = False) -> int:
     texts = [
         f"错误码：{item['code']}\n描述：{item['description']}\n解决方案：{item.get('solution', '')}" for item in errors
     ]
-    embeddings = await embedder.embed(texts)
+    embeddings = await _embed_in_batches(embedder, texts)
 
     points = []
     for i, item in enumerate(errors):
@@ -204,7 +214,7 @@ async def ingest_schemas(
     texts = [
         f"表名：{s.get('table_name', '')}\nDDL：{s.get('ddl', '')}\n描述：{s.get('description', '')}" for s in schemas
     ]
-    embeddings = await embedder.embed(texts)
+    embeddings = await _embed_in_batches(embedder, texts)
 
     points = []
     for i, s in enumerate(schemas):
