@@ -27,7 +27,14 @@ class BgeM3Embedder:
     def _load(self):
         if self._model is not None:
             return self._model
+        import os
+
         from sentence_transformers import SentenceTransformer
+
+        # 国内网络环境下使用 HF 镜像加速下载
+        if not os.getenv("HF_ENDPOINT"):
+            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+            logger.info("使用 Hugging Face 镜像: %s", os.environ["HF_ENDPOINT"])
 
         logger.info("Loading local embedding model: %s on %s", self._model_name, self._device)
         self._model = SentenceTransformer(self._model_name, device=self._device)

@@ -25,12 +25,13 @@ models:
     max_tokens: 50
 
 embedding:
-  provider: "local"  # local | litellm
+  provider: "litellm"  # local | litellm
   local:
     model: "BAAI/bge-m3"
     device: "cpu"  # cpu | cuda | mps
   litellm:
-    model: "openai/text-embedding-3-small"
+    model: "openai/text-embedding-v4"
+    api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 collections:
   schemas: "schemas"

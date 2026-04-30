@@ -38,7 +38,6 @@ async def lifespan(app: FastAPI):
             qdrant_mgr = get_qdrant_manager()
             embedder = get_embedder()
             await qdrant_mgr.ensure_collections(dimension=embedder.dimension)
-            set_qdrant_available(True)
             logger.info("Qdrant collections 就绪 (dim=%d)", embedder.dimension)
 
             # Qdrant 可用时才预热 Embedding 模型
@@ -47,6 +46,10 @@ async def lifespan(app: FastAPI):
 
             # 同步知识库到 Qdrant（增量）
             await sync_all_to_qdrant(embedder)
+
+            # 全部成功后标记 Qdrant 可用
+            set_qdrant_available(True)
+            logger.info("Qdrant 向量检索已启用")
         except Exception as e:
             logger.warning("Qdrant 初始化失败，回退到文件模式: %s", e)
 

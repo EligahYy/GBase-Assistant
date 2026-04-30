@@ -60,6 +60,7 @@ def get_embedder() -> Embedder:
         litellm_cfg = cfg.get("litellm", {})
         _embedder_instance = LiteLLMEmbedder(
             model=litellm_cfg.get("model", "openai/text-embedding-3-small"),
+            api_base=litellm_cfg.get("api_base"),
         )
         logger.info("Embedder: LiteLLM (%s)", litellm_cfg.get("model", "openai/text-embedding-3-small"))
     else:
