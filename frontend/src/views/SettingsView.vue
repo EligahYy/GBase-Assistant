@@ -32,8 +32,7 @@ onMounted(async () => {
   } catch {
     modelOptions.value = [
       { label: 'DeepSeek Chat', value: 'deepseek/deepseek-chat' },
-      { label: 'DeepSeek Coder', value: 'deepseek/deepseek-coder' },
-      { label: 'Qwen 2.5 Coder 32B', value: 'qwen/qwen2.5-coder-32b-instruct' },
+      { label: 'Qwen 2.5 72B Instruct', value: 'qwen/qwen2.5-72b-instruct' },
       { label: 'GPT-4o', value: 'openai/gpt-4o' },
     ]
   }

@@ -67,8 +67,3 @@ def get_embedder() -> Embedder:
         raise ValueError(f"Unknown embedder provider: {provider}")
 
     return _embedder_instance
-
-
-def set_embedder(embedder: Embedder) -> None:
-    global _embedder_instance
-    _embedder_instance = embedder

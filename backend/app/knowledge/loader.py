@@ -156,11 +156,6 @@ def _parse_ddl_to_schemas(ddl_text: str) -> list[TableSchema]:
     return schemas
 
 
-# 验证实现满足 Protocol
-def _verify_protocol():
-    pass  # DbSchemaRetriever 在实例化时才能验证（需要 session），此处跳过
-
-
 # ── ExampleRetriever Phase 1 实现 ──────────────────────────────────────────────────
 
 

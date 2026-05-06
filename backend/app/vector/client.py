@@ -68,11 +68,6 @@ def get_qdrant_manager() -> QdrantManager:
     return _qdrant_manager
 
 
-def set_qdrant_manager(manager: QdrantManager) -> None:
-    global _qdrant_manager
-    _qdrant_manager = manager
-
-
 def is_qdrant_available() -> bool:
     """返回 Qdrant 是否通过 lifespan 健康检查。"""
     global _qdrant_available

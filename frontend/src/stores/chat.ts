@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ConversationResponse, MessageResponse } from '@/api/chat'
+import type { ConversationResponse } from '@/api/chat'
 import { listConversations, getConversation, updateConversation, deleteConversation } from '@/api/chat'
 
 export interface Message {
@@ -63,17 +63,6 @@ export const useChatStore = defineStore('chat', () => {
     if (msg) {
       msg.isStreaming = false
     }
-    currentConversationId.value = conversationId
-  }
-
-  function addAssistantMessage(response: MessageResponse, conversationId: string) {
-    messages.value.push({
-      id: response.id,
-      role: 'assistant',
-      content: response.content,
-      sql: response.sql_generated,
-      messageType: response.message_type,
-    })
     currentConversationId.value = conversationId
   }
 
@@ -145,7 +134,6 @@ export const useChatStore = defineStore('chat', () => {
     appendStreamToken,
     setStreamSql,
     finalizeStreamMessage,
-    addAssistantMessage,
     loadConversations,
     loadConversation,
     newConversation,
