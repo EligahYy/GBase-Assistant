@@ -435,7 +435,7 @@ gbase8a-assistant/
 - [x] 前端 Settings 页面（模型选择 + 连接管理）
 - [x] 基础测试覆盖（test_sql_validator, test_sql_chain, test_api）
 
-### Phase 2.5：收尾与加固（当前 → Week 5 末）
+### Phase 2.5：收尾与加固 ✅ 已完成
 
 **目标**：补齐 Phase 2 遗留项，为 Phase 3 做准备
 
@@ -447,17 +447,39 @@ gbase8a-assistant/
 - [x] **前端 build 验证**：`npm run build` 通过，产物约 1.5MB（gzip 后 432KB）
 - [x] **模型配置校准**：`sql_generation.primary` 保持 `deepseek/deepseek-chat`。评估结论：DeepSeek-V3（chat）已整合代码生成能力，与专用 coder 模型在 SQL 任务上差距不大；当前配置运行稳定，暂不需要切换。如后续 SQL 准确率不达标，再评估引入 `deepseek-coder`
 
-### Phase 3：智能增强（Week 6-9）
+### Phase 3：智能增强（Week 6-9）🚧 进行中
 
-**目标**：RAG + 向量检索 + 完善 Agent
+**目标**：RAG + 向量检索 + 完善 Agent + 演示打磨
 
-- 引入 Qdrant 向量数据库（此时 Docker 应已就绪）
-- GBase 8a 文档入库 + RAG 检索
-- Schema Linking 向量化（替代全量注入，支持大 Schema）
-- Few-shot 动态检索（替代硬编码）
-- 按需评估是否引入 LangGraph
-- 错误码查询工具
-- Schema 浏览器 UI
+> 详细 Sprint 拆分与任务清单见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+
+**Sprint 1 ✅ 已完成（向量检索核心）**
+- [x] 引入 Qdrant 向量数据库（`backend/app/vector/client.py` + Docker 部署）
+- [x] Embedder 工厂：本地 `BAAI/bge-m3` 与远程 LiteLLM 双实现
+- [x] `QdrantSchema/Example/Knowledge Retriever` 实现 + `dependencies.py` 自动降级回退
+- [x] 连接保存/更新时后台异步触发 Schema 向量化入库
+- [x] Lifespan 集成 Qdrant 健康检查 + 知识库增量同步（按文件 hash）
+
+**Sprint 2 🚧 进行中（RAG + 错误码工具）**
+- [ ] GBase 8a 错误码知识库 (`knowledge/docs/error_codes.json` 50+ 条)
+- [ ] `POST /api/tools/error-code` 错误码查询接口
+- [ ] `POST /api/admin/reindex` 强制全量重建接口
+- [ ] 运维文档分块入库（性能、参数、集群）
+- [ ] 前端 `ErrorCodeTool.vue` + Settings 状态卡 + Reindex 按钮
+- [ ] `MessageBubble` 引用来源展示
+
+**Sprint 3 ⏸ 待启动（Schema 浏览器 + 演示打磨，节选）**
+- [ ] `GET /api/connections/{id}/schema/tables` 结构化表列表接口
+- [ ] Settings 页嵌入 Schema 浏览器
+- [ ] `ConversationSummary` 启用：N 轮后异步生成摘要
+- [ ] `docs/demo-cases.md` 10–15 条标准用例
+
+**Sprint 4 ⏸ 上线前必做（Demo 阶段降权）**
+- [ ] LangGraph 评估文档（预判：不引入）
+- [ ] E2E 测试 + 性能基准
+- [ ] `/metrics` Prometheus 端点
+- [ ] GitHub Actions CI
+- [ ] SQL 反馈闭环 → enrich Few-shot
 
 ### Phase 4：打磨上线（Week 10-12）
 

@@ -8,10 +8,12 @@
 
 **GBase 8a Agent 数据库助手** 是一个面向内部团队的 AI 数据库助手。用户通过自然语言中文对话，系统生成兼容国产 GBase 8a MPP 数据库的 SQL 查询，或回答 GBase 8a 相关的技术问题。
 
-- **当前阶段**：Phase 2 基本完成（MVP 已闭环，多轮对话、模型 fallback、Schema 管理、SQL 反馈、对话历史侧栏等核心功能已实现并可用）
+- **当前阶段**：Phase 3 Sprint 1 已完成，Sprint 2 进行中（向量检索核心已落地：Qdrant + Embedder 工厂 + 三个 retriever + 自动降级回退；待办：错误码工具、RAG 完整接入、管理接口）
 - **目标用户**：<50 人的内部产品/研发/测试团队
-- **部署方式**：单机部署，前后端分离
+- **部署方式**：单机部署，前后端分离 + Qdrant Docker
 - **主要语言**：中文（文档、注释、UI、Prompt 均以中文为主）
+
+> 详细的 Phase 3 任务清单与 Sprint 排期见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 
 ---
 
@@ -48,8 +50,9 @@
 ### 数据层
 
 - **应用数据库**：SQLite（`sqlite+aiosqlite`），零运维，单文件存储
-- **向量数据库**：当前未引入（Phase 3 计划引入 Qdrant）
-- **知识库**：文件驱动（`knowledge/` 目录下的 YAML/JSONL/JSON）
+- **向量数据库**：Qdrant（Docker 部署，本地默认 `http://localhost:6333`）— Phase 3 Sprint 1 已接入，Schema/Few-shot/Knowledge 检索均支持向量化 + 自动降级
+- **Embedding**：默认 LiteLLM + 阿里云 `text-embedding-v4`（dim=1024），可在 `models.yaml` 切换为本地 `BAAI/bge-m3`
+- **知识库**：文件驱动（`knowledge/` 目录下的 YAML/JSONL/JSON），通过 `ingest.py` 同步到 Qdrant
 
 ---
 
@@ -63,19 +66,25 @@ gbase8a-assistant/
 ├── Makefile                   # 常用命令入口
 ├── .env.example               # 环境变量模板
 │
+├── docs/                      # 项目文档
+│   ├── ROADMAP.md             # Phase 3 路线图与 Sprint 任务清单
+│   └── design/
+│       └── redesign-proposal.md   # 前端 redesign 设计方案
+│
 ├── backend/                   # FastAPI 后端
 │   ├── pyproject.toml         # uv 项目配置、依赖、ruff 配置、pytest 配置
 │   ├── uv.lock                # uv 锁定文件
 │   ├── app/
-│   │   ├── main.py            # FastAPI 应用工厂与启动事件
-│   │   ├── config.py          # Pydantic Settings，读取 .env
+│   │   ├── main.py            # FastAPI 应用工厂 + lifespan（含 Qdrant 初始化）
+│   │   ├── config.py          # Pydantic Settings，读取 .env + models.yaml
 │   │   ├── database.py        # SQLite async engine + session factory
-│   │   ├── protocols.py       # 核心接口定义（SchemaRetriever/LLMClient 等 Protocol）
-│   │   ├── dependencies.py    # FastAPI 依赖注入绑定
+│   │   ├── protocols.py       # 核心接口定义（SchemaRetriever/Embedder/LLMClient 等 Protocol）
+│   │   ├── dependencies.py    # FastAPI 依赖注入（Phase 3 已带 Qdrant 自动降级）
 │   │   ├── api/
 │   │   │   ├── router.py      # 路由注册
 │   │   │   ├── chat.py        # 聊天 API（POST /chat, POST /chat/stream, 对话 CRUD）
-│   │   │   ├── connections.py # 数据库连接管理 CRUD
+│   │   │   ├── connections.py # 数据库连接管理 CRUD（保存时自动后台 Schema 向量化）
+│   │   │   ├── models.py      # 模型列表 API（读 models.yaml）
 │   │   │   └── health.py      # 健康检查
 │   │   ├── chains/
 │   │   │   ├── sql_chain.py   # Text-to-SQL 生成链（含自纠错重试）
@@ -85,22 +94,34 @@ gbase8a-assistant/
 │   │   │   ├── dialect.py     # sqlglot GBase8A 方言定义
 │   │   │   └── validator.py   # SQL 语法 + 方言合规 + Schema 交叉引用验证
 │   │   ├── llm/
-│   │   │   ├── client.py      # LiteLLM 封装（complete/stream）
+│   │   │   ├── client.py      # LiteLLM 封装（complete/stream，多模型 fallback）
 │   │   │   └── prompts.py     # Prompt 模板管理
 │   │   ├── knowledge/
-│   │   │   └── loader.py      # 知识库加载器（FileExampleRetriever 等）
+│   │   │   └── loader.py      # 文件驱动 retriever（DbSchemaRetriever / FileExampleRetriever / FileKnowledgeRetriever）
+│   │   ├── vector/            # Phase 3 — 向量检索模块
+│   │   │   ├── client.py      # Qdrant async client + collections 生命周期
+│   │   │   ├── embedder.py    # Embedder 工厂（local bge-m3 / LiteLLM 远程）
+│   │   │   ├── embedders/     # Embedder 实现：local.py + litellm.py
+│   │   │   ├── retrievers.py  # Qdrant Schema/Example/Knowledge Retriever
+│   │   │   └── ingest.py      # FAQ / SQL 示例 / 错误码 / Schema 向量化入库
 │   │   ├── models/
 │   │   │   ├── connection.py  # DbConnection ORM
-│   │   │   ├── conversation.py# Conversation ORM
-│   │   │   └── message.py     # Message ORM（token_usage 用 Text 存 JSON）
+│   │   │   ├── conversation.py# Conversation ORM（含 archived/tags）
+│   │   │   ├── message.py     # Message ORM（token_usage 用 Text 存 JSON）
+│   │   │   ├── sql_feedback.py        # SQL 反馈 ORM
+│   │   │   ├── conversation_summary.py # 对话摘要 ORM（Phase 4 预埋）
+│   │   │   └── user_pattern.py        # 用户查询模式 ORM（Phase 4 预埋）
 │   │   └── schemas/
 │   │       ├── chat.py        # ChatRequest/ChatResponse/MessageResponse Pydantic schema
 │   │       └── connection.py  # ConnectionCreate/Update/Response schema
 │   ├── config/
-│   │   └── models.yaml        # LLM 模型配置（当前未实际使用，配置在 .env 中）
-│   ├── alembic/               # 数据库迁移目录（当前仅有骨架，无实际迁移脚本）
-│   └── tests/
-│       └── __init__.py        # ⚠️ 注意：当前测试目录几乎为空，无实际测试用例
+│   │   └── models.yaml        # LLM + Embedding + Qdrant collections 配置（已深度接入 LiteLLMClientImpl）
+│   ├── alembic/               # 数据库迁移（当前 2 个迁移：archived_tags、conversation_summary/user_pattern）
+│   └── tests/                 # pytest 测试套件（60 测试通过）
+│       ├── test_api.py        # API 集成测试
+│       ├── test_dependencies.py # Phase 3 降级路径测试（9 个用例）
+│       ├── test_sql_chain.py  # SQL 生成链路测试（Mock LLM）
+│       └── test_sql_validator.py # SQL 验证测试
 │
 ├── frontend/                  # Vue 3 前端
 │   ├── package.json           # npm 配置，Node 引擎要求 ^20.19.0 || >=22.12.0
@@ -108,43 +129,49 @@ gbase8a-assistant/
 │   ├── tsconfig*.json         # TypeScript 配置
 │   ├── src/
 │   │   ├── main.ts            # 应用入口：Pinia + Router + Naive UI
-│   │   ├── App.vue            # 根组件（含 sidebar 开关逻辑和全局 CSS 变量）
-│   │   ├── router/index.ts    # 路由定义（目前仅有 HomeView）
+│   │   ├── App.vue            # 根组件（含 sidebar 开关逻辑、主题切换、全局 CSS 变量）
+│   │   ├── router/index.ts    # 路由定义（HomeView + SettingsView）
 │   │   ├── stores/
 │   │   │   ├── chat.ts        # 对话状态管理（消息列表、流式消息处理）
-│   │   │   ├── connection.ts  # 数据库连接状态
-│   │   │   └── counter.ts     # 示例 store（可忽略）
+│   │   │   └── connection.ts  # 数据库连接状态
 │   │   ├── api/
 │   │   │   ├── client.ts      # Axios 实例（baseURL: localhost:8000/api）
 │   │   │   ├── chat.ts        # 聊天 API 封装（含 SSE stream）
-│   │   │   └── connections.ts # 连接管理 API 封装
+│   │   │   ├── connections.ts # 连接管理 API 封装
+│   │   │   ├── models.ts      # 模型列表 API
+│   │   │   └── feedback.ts    # SQL 反馈 API
 │   │   ├── components/
 │   │   │   ├── chat/
 │   │   │   │   ├── ChatPanel.vue       # 聊天主面板（输入、消息列表、空状态提示）
 │   │   │   │   ├── MessageBubble.vue   # 单条消息气泡（含流式光标）
 │   │   │   │   └── SqlBlock.vue        # SQL 代码块展示 + 复制按钮
-│   │   │   ├── layout/
-│   │   │   │   └── Sidebar.vue         # 对话历史侧栏（新建/重命名/删除）
-│   │   │   └── icons/...      # 示例图标组件（可忽略）
+│   │   │   └── layout/
+│   │   │       └── Sidebar.vue         # 对话历史侧栏（新建/重命名/归档/标签/删除）
 │   │   ├── views/
 │   │   │   ├── HomeView.vue   # 首页（仅挂载 ChatPanel）
-│   │   │   └── AboutView.vue  # 示例页面（可忽略）
+│   │   │   └── SettingsView.vue # 设置页（模型选择 + 连接管理）
 │   │   └── composables/
-│   │       ├── useSSE.ts      # SSE 流式请求封装
-│   │       └── useContentParser.ts  # 实时解析 ```sql...``` 代码块
+│   │       ├── useSSE.ts      # SSE 流式请求封装（含 token 缓冲优化）
+│   │       ├── useContentParser.ts  # 实时解析 ```sql...``` 代码块
+│   │       └── useTheme.ts    # 暗色/亮色主题切换
 │   └── public/                # 静态资源
 │
-├── knowledge/                 # GBase 8a 知识库（文件驱动）
+├── knowledge/                 # GBase 8a 知识库（文件驱动 + Qdrant 同步源）
 │   ├── dialect_rules/
 │   │   ├── unsupported_features.yaml  # 不支持的特性清单
 │   │   ├── syntax_differences.yaml    # 语法差异与示例
 │   │   └── function_mapping.yaml      # 函数兼容性映射
 │   ├── examples/
-│   │   └── sql_examples.jsonl         # Few-shot NL→SQL 示例（约 10 条）
+│   │   └── sql_examples.jsonl         # Few-shot NL→SQL 示例（30 条，含 GBase 特有语法）
 │   └── docs/
-│       └── faq.json                   # FAQ 知识库（JSON 数组）
+│       ├── faq.json                   # FAQ 知识库（38 条 JSON 数组）
+│       └── error_codes.json           # ⚠️ Sprint 2 待补：GBase 8a 错误码知识库
 │
-└── deploy/                    # 部署配置（⚠️ 当前为空目录）
+└── deploy/                    # 部署配置
+    ├── docker-compose.yml     # backend + frontend + qdrant + nginx 全链路编排
+    ├── Dockerfile.backend     # 后端镜像
+    ├── Dockerfile.frontend    # 前端镜像
+    └── nginx.conf             # 反向代理配置
 ```
 
 ---
@@ -190,7 +217,7 @@ npm run dev
 
 ### 环境变量
 
-复制 `.env.example` 为 `backend/.env`，至少配置一个 LLM API Key：
+复制 `.env.example` 为 `backend/.env`，至少配置一个 LLM API Key 和（如启用向量检索）Qdrant 地址：
 
 ```bash
 DEEPSEEK_API_KEY=sk-xxx
@@ -202,7 +229,13 @@ DATABASE_URL=sqlite+aiosqlite:///./data/app.db
 DEFAULT_MODEL=deepseek/deepseek-chat
 CORS_ORIGINS=["http://localhost:5173"]
 DEBUG=true
+
+# Phase 3 — 向量检索
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
 ```
+
+> Qdrant 不可用时后端会自动降级到文件/全量模式，开发阶段可以不启动。生产部署需 `cd deploy && docker compose up -d qdrant`。
 
 ---
 
@@ -245,19 +278,20 @@ DEBUG=true
 
 ## 测试说明
 
-**⚠️ 当前状态：测试目录几乎为空。**
+**当前状态：60 个 pytest 用例全部通过。**
 
-- `backend/tests/` 下仅有 `__init__.py`，无任何实际测试用例
-- 项目文档（`CLAUDE.md`）中规划了以下测试，但尚未实现：
-  - `test_sql_validator.py` — SQL 方言验证测试
-  - `test_sql_chain.py` — SQL 生成链路测试（Mock LLM）
-  - `test_api.py` — API 集成测试
+- `backend/tests/test_sql_validator.py`(29) — SQL 方言验证测试
+- `backend/tests/test_sql_chain.py`(9) — SQL 生成链路测试（Mock LLM）
+- `backend/tests/test_api.py`(13) — API 集成测试
+- `backend/tests/test_dependencies.py`(9) — Phase 3 自动降级路径测试
 
 ### 测试运行方式
 
 ```bash
-cd backend && uv run pytest -v
+cd backend && TESTING=1 uv run pytest -v
 ```
+
+`TESTING=1` 环境变量会跳过 Qdrant/Embedding 模型加载（使用 `_FakeEmbedder`），让单元测试不依赖外部服务。
 
 pytest 配置已写在 `pyproject.toml` 中：
 
@@ -270,7 +304,7 @@ testpaths = ["tests"]
 如果你需要添加测试，请遵循以下约定：
 - 单元测试必须 Mock 外部 LLM API 调用（不依赖真实网络）
 - 集成测试如需真实 LLM，标记 `@pytest.mark.integration`
-- SQL 验证测试需准备 GBase 8a 合法/非法 SQL 各 20+ 条
+- 涉及 Qdrant 的测试请通过 `TESTING=1` 让 retriever 走降级路径
 
 ---
 
@@ -280,16 +314,17 @@ testpaths = ["tests"]
 
 `backend/app/protocols.py` 定义了所有核心抽象接口：
 
-- `SchemaRetriever` — Schema 检索
-- `ExampleRetriever` — Few-shot 示例检索
-- `KnowledgeRetriever` — 知识库检索
-- `LLMClient` — LLM 调用（`complete` + `stream`）
+- `SchemaRetriever` — Schema 检索（Phase 3 已支持向量化）
+- `ExampleRetriever` — Few-shot 示例检索（Phase 3 已支持向量化）
+- `KnowledgeRetriever` — 知识库检索（Phase 3 已支持 RAG）
+- `LLMClient` — LLM 调用（`complete` + `stream`，多模型 fallback）
+- `Embedder` — 文本向量化（Phase 3 新增；本地 bge-m3 / 远程 LiteLLM 双实现）
 - `ChatChain` — 对话链抽象
 
 **规则**：
 - 所有 chain 函数必须通过参数接收 Protocol 实例
-- `dependencies.py` 负责将 Protocol 绑定到具体实现
-- 后续升级（如引入 Qdrant、LangGraph）时，**只改 `dependencies.py`，不改调用方代码**
+- `dependencies.py` 负责将 Protocol 绑定到具体实现，并自动处理 Qdrant 不可用时的降级回退
+- 后续升级（如引入 LangGraph）时，**只改 `dependencies.py`，不改调用方代码**
 
 ### Intent 分类 + Chain 路由
 
@@ -303,12 +338,28 @@ testpaths = ["tests"]
 ```
 用户输入
   → 加载方言规则（YAML）
-  → Schema 检索（当前全量返回 db_connection.schema_ddl）
-  → Few-shot 检索（当前返回 sql_examples.jsonl 前 5 条）
+  → Schema 检索（Phase 3：Qdrant 向量检索 → 失败回退全量 DDL）
+  → Few-shot 检索（Phase 3：Qdrant 动态检索 → 失败回退文件前 5 条）
   → LLM 生成 SQL（temperature=0.1）
   → sqlglot 语法解析 + GBase 8a 方言合规检查 + Schema 交叉引用
   → 若验证失败且重试次数 < 3，追加纠错 prompt 重新生成
   → 返回 SQL + 中文解释
+```
+
+### Phase 3 — 向量检索调用链
+
+```
+应用启动 (lifespan)
+  → Qdrant 健康检查 → 失败时 set_qdrant_available(False)
+  → Embedding 模型预热（warmup）
+  → sync_all_to_qdrant：FAQ / SQL examples / 错误码 增量同步（按文件 hash）
+
+请求处理
+  → dependencies.get_xxx_retriever()
+    → is_qdrant_available()？
+      ✅ 是 → QdrantXxxRetriever（向量检索） → 命中则返回
+      ❌ 否（或检索结果为空）→ 回退到 File/Db Retriever
+  → chain 不感知降级，调用代码无变化
 ```
 
 ### SSE 流式输出
@@ -340,35 +391,59 @@ testpaths = ["tests"]
 | 想做什么 | 先看这个文件 |
 |---------|------------|
 | 了解整体架构设计 | `ARCHITECTURE.md` |
+| 看 Phase 3 任务清单 | `docs/ROADMAP.md` |
 | 了解编码规范 | `CLAUDE.md` |
 | 改 API 接口 | `backend/app/api/chat.py` |
 | 改 SQL 生成逻辑 | `backend/app/chains/sql_chain.py` |
 | 改 Prompt 模板 | `backend/app/llm/prompts.py` |
 | 改 SQL 验证规则 | `backend/app/sql/validator.py` + `knowledge/dialect_rules/*.yaml` |
+| 改 Schema/Example/Knowledge 检索 | `backend/app/dependencies.py` + `backend/app/vector/retrievers.py` |
+| 改 Embedding 实现 | `backend/app/vector/embedder.py` + `backend/app/vector/embedders/` |
+| 调整向量入库逻辑 | `backend/app/vector/ingest.py` |
 | 改前端聊天界面 | `frontend/src/components/chat/ChatPanel.vue` |
 | 改流式接收逻辑 | `frontend/src/composables/useSSE.ts` |
 | 改数据库模型 | `backend/app/models/*.py` |
 | 添加 Few-shot 示例 | `knowledge/examples/sql_examples.jsonl` |
 | 添加 FAQ 知识 | `knowledge/docs/faq.json` |
+| 添加错误码（待补） | `knowledge/docs/error_codes.json`（Sprint 2） |
 
 ---
 
 ## 已知短板与下一步（供 Agent 参考）
 
-### 已解决的问题（Phase 2 完成）
-- ~~测试缺失~~：已有 `test_sql_validator.py`、`test_sql_chain.py`、`test_api.py` 三个测试文件，需运行并稳定化
-- ~~模型配置未完全接入~~：`LiteLLMClientImpl` 已深度接入 `models.yaml`，支持任务类型区分（intent/sql_generation/knowledge_qa）和自动 fallback
-- ~~前端路由极简~~：已新增 `/settings` 路由，支持模型选择和数据库连接管理
+> 本节为高频变化区，详细 Sprint 任务请以 [`docs/ROADMAP.md`](docs/ROADMAP.md) 为准。
 
-### 待解决（Phase 2.5 收尾）
-1. **Alembic 迁移脚本为空**：`alembic/versions/` 下没有任何迁移文件。当前靠 `init_db()` 在启动时自动建表，需生成首个正式迁移脚本
-2. **部署目录为空**：`deploy/` 目录没有任何 Docker、Nginx 或 CI 配置，Phase 4 前需要补齐
-3. **FAQ 知识库单薄**：`faq.json` 仅 10 条，需扩展到 30-50 条覆盖更多场景
-4. **SQL 示例可扩展**：`sql_examples.jsonl` 已有 30 条，但缺少 GBase 8a 特有语法（如 `ENCODING`、节点函数 `DBNODE()` 等）的示例
-5. **测试覆盖不足**：已有测试骨架，但缺少 mock LLM 的链路测试和前端组件测试
-6. **模型配置待校准**：`models.yaml` 中 `sql_generation.primary` 为 `deepseek/deepseek-chat`，可评估是否切换为 `deepseek/deepseek-coder` 以提升 SQL 准确率
+### 已解决的问题（Phase 2 → Phase 3 Sprint 1）
+- ~~测试缺失~~：60 个 pytest 用例全部通过（含 9 个 Phase 3 降级路径测试）
+- ~~模型配置未完全接入~~：`LiteLLMClientImpl` 已深度接入 `models.yaml`（intent/sql_generation/knowledge_qa）
+- ~~前端路由极简~~：已新增 `/settings`，支持模型选择 + 连接管理
+- ~~Alembic 迁移脚本为空~~：当前 2 个迁移（archived_tags、conversation_summary/user_pattern）
+- ~~部署目录为空~~：`deploy/` 已补齐 Dockerfile + docker-compose + nginx
+- ~~FAQ 知识库单薄~~：已扩展至 38 条
+- ~~Schema/Few-shot/Knowledge 检索全量注入~~：Phase 3 Sprint 1 已接入 Qdrant 向量检索 + 自动降级
 
-### Phase 3 预备项
-- 评估 Schema 总量是否接近 prompt token 限制（当前全量注入，50+ 表时将成为瓶颈）
-- 准备 Qdrant 向量数据库引入方案（Schema Linking + Few-shot 动态检索 + RAG）
-- 规划错误码查询工具（GBase 8a 错误码知识库）
+### 进行中（Phase 3 Sprint 2 — RAG + 错误码工具）
+1. **错误码知识库**：`knowledge/docs/error_codes.json` 缺失，需准备 50+ 条
+2. **错误码查询接口**：`POST /api/tools/error-code` 待实现
+3. **管理接口**：`POST /api/admin/reindex` 强制全量重建待实现
+4. **运维文档分块**：性能/参数/集群相关 `knowledge/docs/ops_*.json` 待补
+5. **Settings 状态卡**：前端 Qdrant 状态指示 + Reindex 按钮
+6. **MessageBubble sources 区**：RAG 引用来源展示
+
+### 即将处理（阶段 A.2 重构，与 Sprint 2 并行）
+1. **Fallback wrapper 抽象**：`dependencies.py` 三个降级类合并为泛型 `FallbackRetriever[T]`
+2. **Embedding 维度配置化**：`models.yaml` 显式声明，去掉 `litellm.py` 硬编码判断
+3. **Lifespan 异步化**：`main.py` 中 `sync_all_to_qdrant` 改为 `asyncio.create_task` + `SKIP_VECTOR_SYNC` env 开关
+
+### 上线前必做（Phase 3 Sprint 4，本期 Demo 阶段降权）
+- GitHub Actions CI（lint → test → build → docker build）
+- `/metrics` Prometheus 端点
+- LangGraph 评估文档（预判：不引入）
+- 性能基准测试（向量检索 vs 全量注入）
+- SQL 反馈闭环 → 自动 enrich Few-shot 库
+- Vitest + Vue Test Utils 配置
+
+### Phase 4 预备项
+- 长期记忆：复用 `ConversationSummary` / `UserPattern` 模型
+- SQL 执行沙箱（只读连接）
+- 用户认证 + 限流
