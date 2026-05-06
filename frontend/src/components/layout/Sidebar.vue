@@ -12,7 +12,6 @@ import {
   SettingsOutline,
   MenuOutline,
   ChevronBackOutline,
-  ChevronForwardOutline,
 } from '@vicons/ionicons5'
 import { NIcon, NDropdown, NModal, NInput, useMessage, useDialog } from 'naive-ui'
 import { useChatStore } from '@/stores/chat'
@@ -99,22 +98,22 @@ function navigateTo(path: string) { router.push(path) }
 <template>
   <aside class="sidebar" :class="{ 'is-open': open, collapsed }">
     <div v-if="open" class="overlay" @click="$emit('toggle')" />
+    <button
+      class="collapse-handle"
+      :title="collapsed ? '展开侧边栏' : '收起侧边栏'"
+      :aria-label="collapsed ? '展开侧边栏' : '收起侧边栏'"
+      @click.stop="toggleCollapse"
+    >
+      <n-icon :component="ChevronBackOutline" size="14" class="handle-icon" />
+    </button>
     <div class="sidebar-inner" @click="handleSidebarClick">
       <!-- Brand -->
       <div class="brand">
         <button class="menu-btn" @click.stop="$emit('toggle')">
           <n-icon :component="MenuOutline" size="18" />
         </button>
-        <div class="brand-icon-wrap">
-          <div class="brand-icon">G</div>
-          <button class="logo-collapse" title="展开" @click.stop="toggleCollapse">
-            <n-icon :component="ChevronForwardOutline" size="14" />
-          </button>
-        </div>
+        <div class="brand-icon">G</div>
         <span v-if="!collapsed" class="brand-name">GBase 8a</span>
-        <button v-if="!collapsed" class="side-collapse" title="收起" @click.stop="toggleCollapse">
-          <n-icon :component="ChevronBackOutline" size="14" />
-        </button>
       </div>
 
       <!-- New Chat -->
@@ -185,11 +184,14 @@ function navigateTo(path: string) { router.push(path) }
   flex-shrink: 0;
   width: var(--sidebar-width);
   height: 100%;
-  background: var(--bg-sidebar);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border-right: 1px solid var(--border);
+  background: var(--bg-deep);
+  border-right: 1px solid var(--seam-1);
   transition: width var(--duration-normal) var(--ease-smooth);
+}
+/* Subtle top glow — like instrument panel edge light */
+.sidebar::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-dim), transparent);
 }
 .sidebar.collapsed { width: 72px; }
 
@@ -197,7 +199,7 @@ function navigateTo(path: string) { router.push(path) }
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 18px 14px;
+  padding: 20px 14px;
 }
 
 @media (max-width: 768px) {
@@ -208,123 +210,169 @@ function navigateTo(path: string) { router.push(path) }
   }
   .sidebar.is-open { transform: translateX(0); }
   .sidebar.collapsed { width: var(--sidebar-width); }
+  .collapse-handle { display: none; }
   .overlay {
     position: fixed; inset: 0;
-    background: rgba(0,0,0,0.25);
-    backdrop-filter: blur(4px);
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(8px);
     z-index: 99;
   }
 }
 
-/* Brand */
+/* Brand — Signal beacon */
 .brand {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 12px;
   padding: 2px 2px 20px;
 }
 .menu-btn {
   display: none; align-items: center; justify-content: center;
   width: 32px; height: 32px; padding: 0;
-  background: none; border: none; border-radius: var(--radius-sm);
-  color: var(--text-muted); cursor: pointer;
+  background: var(--bg-panel); border: 1px solid var(--seam-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-4); cursor: pointer;
   transition: all var(--duration-fast) var(--ease-smooth);
 }
-.menu-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.menu-btn:hover { border-color: var(--seam-2); color: var(--text-1); }
 @media (max-width: 768px) { .menu-btn { display: flex; } }
 
-.brand-icon-wrap { position: relative; width: 36px; height: 36px; flex-shrink: 0; }
 .brand-icon {
-  width: 36px; height: 36px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  color: #fff; border-radius: 10px;
-  font-size: 15px; font-weight: 700;
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-2);
+  color: var(--accent); border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 700;
+  font-family: var(--font-mono);
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 8px var(--accent-glow);
+  position: relative; overflow: hidden;
 }
-.logo-collapse {
-  position: absolute; inset: 0;
-  width: 36px; height: 36px; border-radius: 10px;
-  background: rgba(0,0,0,0.45); color: #fff;
-  border: none; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-smooth);
+.brand-icon::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, var(--accent), transparent 60%);
+  opacity: 0.4;
 }
-.sidebar.collapsed .brand-icon-wrap:hover .logo-collapse { opacity: 1; }
-
-.side-collapse {
-  width: 26px; height: 26px; margin-left: auto;
-  border-radius: 7px; background: var(--bg-hover);
-  color: var(--text-muted); border: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; padding: 0;
-  transition: all var(--duration-fast) var(--ease-smooth);
-}
-.side-collapse:hover { background: var(--bg-active); color: var(--text-primary); }
 
 .brand-name {
-  font-size: 17px; font-weight: 600;
-  color: var(--text-primary); letter-spacing: -0.03em;
+  font-size: 15px; font-weight: 600;
+  color: var(--text-0); letter-spacing: -0.02em;
   white-space: nowrap;
-  background: linear-gradient(90deg, var(--text-primary), var(--text-secondary));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+/* Collapse handle — floating on seam */
+.collapse-handle {
+  position: absolute;
+  top: 28px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-2);
+  border-radius: 50%;
+  color: var(--text-3);
+  cursor: pointer;
+  z-index: 20;
+  opacity: 0;
+  box-shadow: var(--shadow-sm);
+  transition:
+    opacity var(--duration-fast) var(--ease-smooth),
+    color var(--duration-fast) var(--ease-smooth),
+    border-color var(--duration-fast) var(--ease-smooth),
+    background var(--duration-fast) var(--ease-smooth),
+    transform var(--duration-fast) var(--ease-smooth);
+}
+.sidebar:hover .collapse-handle,
+.sidebar.collapsed .collapse-handle,
+.collapse-handle:focus-visible {
+  opacity: 1;
+}
+.collapse-handle:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent-bright);
+  color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+  transform: scale(1.1);
+}
+.collapse-handle:active {
+  transform: scale(0.92);
+}
+.handle-icon {
+  display: flex;
+  transition: transform var(--duration-normal) var(--ease-spring);
+}
+.sidebar.collapsed .handle-icon {
+  transform: rotate(180deg);
 }
 
 /* New Chat Button */
 .new-chat-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 10px;
-  border-radius: var(--radius-full);
-  border: none;
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  color: #fff;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--seam-2);
+  background: var(--bg-panel);
+  color: var(--text-1);
   font-size: 13px; font-weight: 500; font-family: var(--font-sans);
-  cursor: pointer; margin-bottom: 18px;
-  box-shadow: 0 2px 8px var(--accent-glow);
-  transition: all var(--duration-fast) var(--ease-smooth);
+  cursor: pointer; margin-bottom: 20px;
+  transition: all var(--duration-fast);
+  position: relative; overflow: hidden;
 }
 .new-chat-btn:hover {
-  transform: scale(1.02);
-  box-shadow: 0 4px 16px var(--accent-glow);
+  border-color: var(--seam-3);
+  background: var(--bg-surface);
 }
 .new-chat-btn:active { transform: scale(0.98); }
+.new-chat-btn svg { width: 14px; height: 14px; color: var(--accent); }
 .new-chat-btn.collapsed {
-  padding: 0; width: 40px; height: 40px; margin: 0 auto 18px;
+  padding: 0; width: 40px; height: 40px; margin: 0 auto 20px;
 }
 
 /* Section Label */
 .section-label {
-  font-size: 11px; font-weight: 600;
-  color: var(--text-muted); letter-spacing: 0.06em;
+  font-size: 10px; font-weight: 700;
+  color: var(--text-4); letter-spacing: 0.1em;
   text-transform: uppercase;
-  padding: 6px 8px 10px;
+  padding: 12px 10px 6px;
 }
 
 /* Conversation List */
 .conv-list {
   flex: 1; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 1px;
   min-height: 0;
+  padding: 0 2px;
 }
 
 .conv-item {
-  display: flex; align-items: center; gap: 4px;
-  padding: 2px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  transition: all var(--duration-fast) var(--ease-smooth);
+  color: var(--text-3);
+  font-size: 13px; font-weight: 500;
+  transition: all var(--duration-fast);
   width: 100%;
   animation: slideInLeft var(--duration-normal) var(--ease-out-expo) both;
+  border: 1px solid transparent;
 }
 .conv-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  transform: translateX(2px);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  border-color: var(--seam-1);
 }
 .conv-item.active {
-  background: var(--bg-selected);
+  background: linear-gradient(90deg, var(--accent-dim), transparent);
   color: var(--accent);
-  font-weight: 500;
-  box-shadow: inset 3px 0 0 var(--accent);
+  border-color: var(--accent-bright);
+}
+.conv-item.active::before {
+  content: ''; position: absolute; left: 0; top: 6px; bottom: 6px;
+  width: 2.5px; background: var(--accent);
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 .conv-main {
@@ -334,51 +382,52 @@ function navigateTo(path: string) { router.push(path) }
   background: none; border: none;
   color: inherit; font: inherit;
   cursor: pointer; text-align: left;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
-.conv-icon { flex-shrink: 0; opacity: 0.5; font-size: 15px; }
-.conv-item.active .conv-icon { opacity: 0.8; }
+.conv-icon { flex-shrink: 0; opacity: 0.35; font-size: 14px; }
+.conv-item.active .conv-icon { opacity: 0.7; }
 .conv-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .conv-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-tags { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow: hidden; }
 .tag-pill {
   font-size: 10px; font-weight: 500;
-  color: var(--text-muted); background: var(--bg-active);
+  color: var(--text-4); background: var(--bg-panel);
   padding: 1px 5px; border-radius: 4px; white-space: nowrap;
+  border: 1px solid var(--seam-1);
 }
 
 /* Actions */
 .action-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; padding: 0;
-  background: none; border: none; border-radius: 6px;
-  color: var(--text-muted); cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-smooth);
+  width: 24px; height: 24px; padding: 0;
+  background: none; border: none; border-radius: 5px;
+  color: var(--text-4); cursor: pointer;
+  transition: all var(--duration-fast);
   opacity: 0;
 }
 .conv-item:hover .action-btn,
 .conv-item.active .action-btn { opacity: 1; }
-.action-btn:hover { color: var(--text-primary); background: var(--bg-active); }
-.action-btn.confirm:hover { color: var(--success); background: rgba(52,199,89,0.1); }
-.action-btn.cancel:hover { color: var(--error); background: rgba(255,59,48,0.1); }
+.action-btn:hover { color: var(--text-1); background: var(--bg-active); }
+.action-btn.confirm:hover { color: var(--success); background: rgba(34,197,94,0.1); }
+.action-btn.cancel:hover { color: var(--error); background: rgba(239,68,68,0.1); }
 
 .rename-input {
   flex: 1; min-width: 0; padding: 6px 10px;
   font-size: 13px; font-family: var(--font-sans);
-  border: 1px solid var(--accent); border-radius: 8px;
-  outline: none; background: var(--bg-surface-solid);
-  color: var(--text-primary);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  outline: none; background: var(--bg-panel);
+  color: var(--text-0);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .no-conv {
-  text-align: center; color: var(--text-muted);
+  text-align: center; color: var(--text-4);
   font-size: 12px; padding: 28px 0;
 }
 
 /* Bottom Nav */
 .bottom-nav {
-  border-top: 1px solid var(--divider);
+  border-top: 1px solid var(--seam-1);
   margin-top: 8px; padding-top: 8px;
 }
 .bottom-nav.collapsed { display: flex; justify-content: center; }
@@ -386,13 +435,14 @@ function navigateTo(path: string) { router.push(path) }
   display: flex; align-items: center; gap: 10px;
   width: 100%; padding: 9px 10px;
   border-radius: var(--radius-sm);
-  border: none; background: transparent;
-  color: var(--text-secondary);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
   font-size: 13px; font-weight: 500; font-family: var(--font-sans);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-smooth);
+  transition: all var(--duration-fast);
 }
-.nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-.nav-item.active { background: var(--bg-selected); color: var(--accent); }
+.nav-item:hover { background: var(--bg-surface); color: var(--text-1); border-color: var(--seam-1); }
+.nav-item.active { background: var(--accent-dim); color: var(--accent); }
 .nav-item.collapsed { justify-content: center; padding: 0; width: 40px; height: 40px; }
 </style>

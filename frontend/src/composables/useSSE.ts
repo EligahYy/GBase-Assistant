@@ -20,6 +20,28 @@ export function useSSE() {
     error.value = null
     abortController = new AbortController()
 
+    // 文本 chunk 缓冲：累积短 token 批量触发，减少前端渲染频率
+    let textBuffer = ''
+    let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+    function flushTextBuffer() {
+      if (textBuffer) {
+        onChunk({ type: 'text', content: textBuffer })
+        textBuffer = ''
+      }
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+    }
+
+    function scheduleFlush() {
+      if (flushTimer) return
+      flushTimer = setTimeout(() => {
+        flushTextBuffer()
+      }, 60)
+    }
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -51,15 +73,23 @@ export function useSSE() {
             if (!data || data === '[DONE]') continue
             try {
               const chunk = JSON.parse(data) as SSEChunk
-              onChunk(chunk)
+              if (chunk.type === 'text') {
+                textBuffer += chunk.content
+                scheduleFlush()
+              } else {
+                flushTextBuffer() // 非 text chunk 前立即刷新缓冲区
+                onChunk(chunk)
+              }
             } catch {
               // ignore malformed chunks
             }
           }
         }
       }
+      flushTextBuffer() // 确保尾部文本被刷新
       return conversationId
     } catch (e: any) {
+      flushTextBuffer()
       if (e.name === 'AbortError') {
         error.value = '已停止生成'
         onChunk({ type: 'error', content: '已停止生成' })

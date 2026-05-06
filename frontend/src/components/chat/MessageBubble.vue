@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import SqlBlock from './SqlBlock.vue'
 import { parseContent } from '@/composables/useContentParser'
 import type { Message } from '@/stores/chat'
-import { marked } from 'marked'
 
 const props = defineProps<{ message: Message }>()
 const isUser = computed(() => props.message.role === 'user')
@@ -20,12 +19,36 @@ const isTyping = computed(() =>
   props.message.isStreaming && !props.message.streamContent
 )
 
-function renderMarkdown(text: string): string {
-  try {
-    return marked.parse(text) as string
-  } catch {
-    return text
-  }
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/**
+ * 轻量行内 Markdown 渲染器。
+ * 将文本按 \n\n 分割为 <p> 段落，段落内处理行内格式（加粗、斜体、代码、链接）。
+ * 不使用 marked.parse，避免流式过程中对不完整 Markdown 解析不稳定导致的布局跳动。
+ */
+function renderInlineMarkdown(text: string): string {
+  if (!text) return ''
+  const paragraphs = text.split(/\n\n+/)
+  return paragraphs
+    .map((p) => {
+      const trimmed = p.trim()
+      if (!trimmed) return ''
+      let inline = escapeHtml(trimmed)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      // 单换行在段落内转为空格（符合 Markdown 语义）
+      inline = inline.replace(/\n/g, ' ')
+      return `<p>${inline}</p>`
+    })
+    .filter(Boolean)
+    .join('')
 }
 </script>
 
@@ -41,6 +64,13 @@ function renderMarkdown(text: string): string {
 
       <!-- Content -->
       <div :class="['msg-content', isUser ? 'user-content' : 'assistant-content']">
+        <!-- AI meta info -->
+        <div v-if="!isUser && !isTyping" class="msg-meta">
+          <span class="msg-author">GBase 助手</span>
+          <span class="msg-badge">AI</span>
+          <span class="msg-time">刚刚</span>
+        </div>
+
         <div v-if="isTyping" class="thinking">
           <div class="thinking-inner">
             <span class="dot" /><span class="dot" /><span class="dot" />
@@ -51,13 +81,11 @@ function renderMarkdown(text: string): string {
         <template v-else>
           <template v-for="(seg, i) in segments" :key="i">
             <div v-if="seg.type === 'text' && isUser" class="text-segment" style="white-space: pre-wrap">{{ seg.content }}</div>
-            <div v-else-if="seg.type === 'text'" class="text-segment"
-              :style="message.isStreaming ? 'white-space: pre-wrap' : ''"
-              v-html="renderMarkdown(seg.content)" />
+            <div v-else-if="seg.type === 'text'" class="text-segment" v-html="renderInlineMarkdown(seg.content)" />
             <SqlBlock v-else-if="seg.content" :sql="seg.content" :streaming="!seg.complete" :message-id="message.id" />
           </template>
 
-          <span v-if="message.isStreaming && (segments[segments.length - 1] as any).type !== 'text'" class="stream-cursor">▍</span>
+          <span v-if="message.isStreaming && (segments[segments.length - 1] as any).type !== 'text'" class="stream-cursor"></span>
         </template>
       </div>
 
@@ -74,145 +102,185 @@ function renderMarkdown(text: string): string {
 <style scoped>
 .msg-row {
   padding: 24px 0;
-  animation: fadeInUp var(--duration-normal) var(--ease-out-expo) both;
+  animation: msgEnter 0.5s var(--ease-out-expo) both;
+}
+.msg-row + .msg-row {
+  border-top: 1px solid var(--seam-1);
 }
 
 .msg-wrapper {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
+  gap: 16px;
   max-width: var(--max-content-width);
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 28px;
 }
 @media (max-width: 1024px) {
-  .msg-wrapper { max-width: 100%; padding: 0 18px; }
+  .msg-wrapper { max-width: 100%; padding: 0 24px; }
 }
 @media (max-width: 768px) {
-  .msg-wrapper { gap: 10px; padding: 0 14px; }
+  .msg-wrapper { gap: 12px; padding: 0 16px; }
 }
 
 .avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; margin-top: 3px;
+  flex-shrink: 0; margin-top: 2px;
+  position: relative;
 }
 .assistant-avatar {
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  color: #fff;
-  box-shadow: 0 2px 8px var(--accent-glow);
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-2);
+  color: var(--accent);
+}
+.assistant-avatar::after {
+  content: ''; position: absolute; inset: -2px; border-radius: 50%;
+  border: 1px solid var(--accent-dim);
+  animation: avatarRing 3s ease-out infinite;
 }
 .user-avatar {
-  background: var(--bg-active);
-  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--seam-1);
+  color: var(--text-3);
 }
 
 .msg-content {
   flex: 1; min-width: 0;
-  font-size: 15px;
-  line-height: 1.75;
-  color: var(--text-primary);
+}
+
+/* Meta info for assistant */
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.msg-author {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.msg-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--seam-1);
+  font-family: var(--font-mono);
+}
+.msg-time {
+  font-size: 11px;
+  color: var(--text-4);
+  font-family: var(--font-mono);
 }
 
 .user-content {
   text-align: right;
 }
 .user-content .text-segment {
-  display: inline-block; text-align: left;
-  color: var(--text-primary);
+  display: inline-block;
+  text-align: left;
+  background: var(--bg-surface);
+  padding: 12px 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--seam-1);
   font-weight: 500;
-  padding: 0;
-  max-width: 100%; word-break: break-word;
+  color: var(--text-0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  max-width: 100%;
+  word-break: break-word;
 }
 
 .assistant-content .text-segment {
-  display: block; padding: 2px 0;
-  max-width: 100%; word-break: break-word;
+  display: block;
+  padding: 2px 0;
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text-1);
+  max-width: 100%;
+  word-break: break-word;
 }
 
 .assistant-content :deep(strong),
 .assistant-content :deep(b) {
-  font-weight: 600; color: var(--text-primary);
+  font-weight: 600;
+  color: var(--text-0);
 }
 .assistant-content :deep(code) {
-  font-family: var(--font-mono); font-size: 13px;
-  background: var(--bg-active);
-  padding: 2px 6px; border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--bg-surface);
+  padding: 2px 7px;
+  border-radius: 5px;
   color: var(--accent);
-}
-html[data-theme="dark"] .assistant-content :deep(code) {
-  color: var(--text-primary); background: var(--bg-active);
+  border: 1px solid var(--seam-1);
 }
 .assistant-content :deep(em) { font-style: italic; }
 .assistant-content :deep(del) { text-decoration: line-through; opacity: 0.6; }
 
-.assistant-content .text-segment :deep(p) { margin-bottom: 12px; }
+/* Paragraph spacing */
+.assistant-content .text-segment :deep(p) { margin-bottom: 14px; }
 .assistant-content .text-segment :deep(p:last-child) { margin-bottom: 0; }
 .assistant-content .text-segment :deep(p:empty) { display: none; }
-.assistant-content .text-segment :deep(h1),
-.assistant-content .text-segment :deep(h2),
-.assistant-content .text-segment :deep(h3),
-.assistant-content .text-segment :deep(h4) {
-  font-weight: 600; color: var(--text-primary); margin: 18px 0 10px;
-  letter-spacing: -0.02em;
+
+.assistant-content .text-segment :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--duration-fast);
 }
-.assistant-content .text-segment :deep(h1) { font-size: 20px; }
-.assistant-content .text-segment :deep(h2) { font-size: 18px; }
-.assistant-content .text-segment :deep(h3) { font-size: 16px; }
-.assistant-content .text-segment :deep(h4) { font-size: 15px; }
-.assistant-content .text-segment :deep(ul),
-.assistant-content .text-segment :deep(ol) {
-  padding-left: 22px; margin-bottom: 12px;
-}
-.assistant-content .text-segment :deep(li) { margin-bottom: 5px; }
-.assistant-content .text-segment :deep(pre) {
-  background: var(--code-bg);
-  border: 1px solid var(--code-border);
-  border-radius: var(--radius-md);
-  padding: 14px 18px;
-  margin: 14px 0;
-  overflow-x: auto;
-}
-.assistant-content .text-segment :deep(pre code) {
-  background: transparent; padding: 0;
-  font-family: var(--font-mono); font-size: 13px;
-  color: var(--code-text);
+.assistant-content .text-segment :deep(a:hover) {
+  border-bottom-color: var(--accent);
 }
 
 .stream-cursor {
   display: inline-block;
+  width: 2px;
+  height: 18px;
+  background: var(--accent);
+  vertical-align: middle;
+  margin-left: 2px;
   animation: cursorBlink 1s step-end infinite;
-  color: var(--accent);
-  font-size: 15px; margin-left: 2px;
-  text-shadow: 0 0 6px var(--accent-glow);
+  border-radius: 1px;
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
-/* Thinking dots — spring physics */
+/* Thinking indicator */
 .thinking {
-  display: inline-flex; align-items: center;
-  padding: 8px 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 0;
 }
 .thinking-inner {
-  display: flex; align-items: center; gap: 5px;
-  padding: 8px 14px;
-  background: var(--bg-glass);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: 100px;
 }
 .dot {
-  width: 6px; height: 6px;
+  width: 7px; height: 7px;
   background: var(--accent);
   border-radius: 50%;
-  animation: springDot 1.4s infinite var(--ease-spring) both;
+  animation: signalDot 1.4s infinite ease both;
+  box-shadow: 0 0 4px var(--accent-glow);
 }
 .dot:nth-child(1) { animation-delay: -0.32s; }
 .dot:nth-child(2) { animation-delay: -0.16s; }
 .dot:nth-child(3) { animation-delay: 0s; }
 
 .thinking-text {
-  font-size: 12px; color: var(--text-muted);
-  font-weight: 500; margin-left: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 500;
+  font-family: var(--font-mono);
 }
 </style>

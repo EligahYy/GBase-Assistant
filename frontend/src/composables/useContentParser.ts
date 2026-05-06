@@ -22,8 +22,8 @@ export function parseContent(raw: string): ContentSegment[] {
   let match: RegExpExecArray | null
 
   while ((match = completeRe.exec(raw)) !== null) {
-    const before = raw.slice(lastIndex, match.index)
-    if (before.trim()) segments.push({ type: 'text', content: before, complete: true })
+    const before = raw.slice(lastIndex, match.index).trim()
+    if (before) segments.push({ type: 'text', content: before, complete: true })
     const sql = (match[1] ?? '').replace(/\n$/, '').trim()
     if (sql) segments.push({ type: 'sql', content: sql, complete: true })
     lastIndex = completeRe.lastIndex
@@ -35,14 +35,15 @@ export function parseContent(raw: string): ContentSegment[] {
   // 检查是否有一个未闭合的代码块（流式进行中）
   const openIdx = tail.search(/```(?:sql)?\n?/i)
   if (openIdx >= 0) {
-    const before = tail.slice(0, openIdx)
-    if (before.trim()) segments.push({ type: 'text', content: before, complete: true })
+    const before = tail.slice(0, openIdx).trim()
+    if (before) segments.push({ type: 'text', content: before, complete: true })
     const m = tail.slice(openIdx).match(/```(?:sql)?\n?/i)
     const prefixLen = m ? m[0].length : 6
     const partialSql = tail.slice(openIdx + prefixLen).replace(/^\n/, '')
     if (partialSql) segments.push({ type: 'sql', content: partialSql, complete: false })
   } else {
-    if (tail.trim()) segments.push({ type: 'text', content: tail, complete: true })
+    const trimmedTail = tail.trim()
+    if (trimmedTail) segments.push({ type: 'text', content: trimmedTail, complete: true })
   }
 
   return segments
