@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 
 export interface SSEChunk {
-  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error'
+  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error' | 'result' | 'result_error'
   content: string
   token_usage?: Record<string, unknown>
 }

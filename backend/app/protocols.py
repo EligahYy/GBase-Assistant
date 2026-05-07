@@ -65,6 +65,20 @@ class ValidationResult:
     corrected_sql: str | None = None
 
 
+# ── 生产数据库连接（Phase 4 新增）──
+
+
+@dataclass
+class QueryResult:
+    """SQL 执行结果。"""
+
+    columns: list[str]
+    rows: list[list[Any]]
+    row_count: int
+    execution_time_ms: float
+    truncated: bool  # 是否因超出行数限制被截断
+
+
 @dataclass
 class ChatResult:
     content: str
@@ -73,9 +87,7 @@ class ChatResult:
     sources: list[dict] = field(default_factory=list)
     token_usage: dict | None = None
     validation: ValidationResult | None = None
-
-
-# ── 生产数据库连接（Phase 4 新增）──
+    query_result: QueryResult | None = None  # SQL 自动执行结果
 
 
 @dataclass
@@ -89,17 +101,6 @@ class ConnectionConfig:
     password: str
     driver_type: str
     connection_timeout: int = 30
-
-
-@dataclass
-class QueryResult:
-    """SQL 执行结果。"""
-
-    columns: list[str]
-    rows: list[list[Any]]
-    row_count: int
-    execution_time_ms: float
-    truncated: bool  # 是否因超出行数限制被截断
 
 
 @runtime_checkable

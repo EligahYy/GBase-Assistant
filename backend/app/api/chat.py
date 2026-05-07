@@ -16,12 +16,16 @@ from app.chains.intent import classify_intent
 from app.chains.qa_chain import run_qa_chain, stream_qa_chain
 from app.chains.sql_chain import run_sql_chain, stream_sql_chain
 from app.database import get_db
+from app.db_connectors.connector_factory import get_connector
 from app.dependencies import get_example_retriever, get_knowledge_retriever, get_llm_client, get_schema_retriever
+from app.models.connection import DbConnection
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.sql_feedback import SQLFeedback
-from app.protocols import ChatContext, ExampleRetriever, KnowledgeRetriever, LLMClient
+from app.protocols import ChatContext, ConnectionConfig, ExampleRetriever, KnowledgeRetriever, LLMClient
 from app.schemas.chat import ChatRequest, ChatResponse, ConversationResponse, MessageResponse
+from app.security.crypto import decrypt_password
+from app.sql.sandbox import SQLSandbox, SQLSandboxError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -117,6 +121,57 @@ async def _build_context(db: AsyncSession, conv: Conversation) -> ChatContext:
     )
 
 
+async def _execute_sql_in_chat(
+    db: AsyncSession,
+    db_connection_id: str,
+    sql: str,
+    max_rows: int = 100,
+) -> dict | None:
+    """在 chat flow 中自动执行 SQL，返回结果字典（用于序列化）。"""
+    result = await db.execute(select(DbConnection).where(DbConnection.id == db_connection_id))
+    conn = result.scalar_one_or_none()
+    if not conn or conn.driver_type == "manual":
+        return None
+
+    connector = get_connector(conn.driver_type)
+    if not connector:
+        return None
+
+    password = decrypt_password(conn.password) or ""
+    config = ConnectionConfig(
+        host=conn.host or "",
+        port=conn.port or 5258,
+        database=conn.database_name or "",
+        username=conn.username or "",
+        password=password,
+        driver_type=conn.driver_type,
+    )
+    sandbox = SQLSandbox()
+
+    try:
+        query_result = await sandbox.execute_readonly(
+            connector,
+            config,
+            sql,
+            max_rows=max_rows,
+            timeout_seconds=30,
+        )
+        return {
+            "columns": query_result.columns,
+            "rows": query_result.rows,
+            "row_count": query_result.row_count,
+            "execution_time_ms": query_result.execution_time_ms,
+            "truncated": query_result.truncated,
+        }
+    except SQLSandboxError as e:
+        return {"error": str(e)}
+    except TimeoutError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        logger.warning("Chat SQL 执行失败: %s", e)
+        return {"error": f"执行失败: {e}"}
+
+
 async def _save_messages(
     db: AsyncSession,
     conv: Conversation,
@@ -190,6 +245,29 @@ async def chat(
         from app.protocols import ChatResult
 
         chat_result = ChatResult(content=content, message_type="general", token_usage=token_usage)
+
+    # SQL 意图下，验证通过后自动执行
+    query_result = None
+    if (
+        intent == "sql"
+        and chat_result.sql
+        and chat_result.validation
+        and chat_result.validation.is_valid
+        and conv.db_connection_id
+    ):
+        query_result = await _execute_sql_in_chat(db, conv.db_connection_id, chat_result.sql)
+
+    # 如果有执行结果，追加到内容中
+    if query_result and not query_result.get("error"):
+        chat_result.query_result = query_result
+        # 追加结果摘要到 content
+        result_summary = f"\n\n📊 查询结果：{query_result['row_count']} 行"
+        if query_result.get("truncated"):
+            result_summary += "（已截断，最多展示 100 行）"
+        result_summary += f" | 耗时 {query_result['execution_time_ms']}ms"
+        chat_result.content += result_summary
+    elif query_result and query_result.get("error"):
+        chat_result.content += f"\n\n⚠️ 执行失败：{query_result['error']}"
 
     _, assistant_msg = await _save_messages(
         db,
@@ -268,6 +346,24 @@ async def chat_stream(
             # If sql was generated but no validation warning was issued, mark as valid
             if sql_content is not None and sql_validated is None:
                 sql_validated = True
+
+            # SQL 验证通过后，自动执行并追加结果
+            if intent == "sql" and sql_content and sql_validated and conv.db_connection_id:
+                query_result = await _execute_sql_in_chat(db, conv.db_connection_id, sql_content)
+                if query_result and not query_result.get("error"):
+                    from app.protocols import StreamChunk
+
+                    yield StreamChunk(type="result", content=json.dumps(query_result, ensure_ascii=False)).to_sse()
+                    result_summary = f"\n\n📊 查询结果：{query_result['row_count']} 行"
+                    if query_result.get("truncated"):
+                        result_summary += "（已截断，最多展示 100 行）"
+                    result_summary += f" | 耗时 {query_result['execution_time_ms']}ms"
+                    full_content += result_summary
+                elif query_result and query_result.get("error"):
+                    from app.protocols import StreamChunk
+
+                    yield StreamChunk(type="result_error", content=query_result["error"]).to_sse()
+                    full_content += f"\n\n⚠️ 执行失败：{query_result['error']}"
 
         except Exception as e:
             logger.error("流式生成错误: %s", e)

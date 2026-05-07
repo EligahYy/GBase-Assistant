@@ -3,6 +3,14 @@ import { ref } from 'vue'
 import type { ConversationResponse } from '@/api/chat'
 import { listConversations, getConversation, updateConversation, deleteConversation } from '@/api/chat'
 
+export interface QueryResult {
+  columns: string[]
+  rows: unknown[][]
+  row_count: number
+  execution_time_ms: number
+  truncated: boolean
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -10,6 +18,7 @@ export interface Message {
   sql?: string | null
   messageType?: string | null
   sources?: string | null
+  queryResult?: QueryResult | null
   isStreaming?: boolean
   streamContent?: string
   streamSql?: string
@@ -63,6 +72,13 @@ export const useChatStore = defineStore('chat', () => {
     const msg = messages.value.find((m) => m.id === id)
     if (msg) {
       msg.sources = sources
+    }
+  }
+
+  function setStreamQueryResult(id: string, result: QueryResult) {
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg) {
+      msg.queryResult = result
     }
   }
 
@@ -142,6 +158,7 @@ export const useChatStore = defineStore('chat', () => {
     appendStreamToken,
     setStreamSql,
     setStreamSources,
+    setStreamQueryResult,
     finalizeStreamMessage,
     loadConversations,
     loadConversation,

@@ -19,6 +19,15 @@ const isTyping = computed(() =>
   props.message.isStreaming && !props.message.streamContent
 )
 
+const queryResult = computed(() => props.message.queryResult)
+const hasQueryResult = computed(() => !!queryResult.value && queryResult.value.row_count > 0)
+
+function formatCell(val: unknown): string {
+  if (val === null || val === undefined) return 'NULL'
+  if (typeof val === 'string') return val
+  return String(val)
+}
+
 const sourceList = computed(() => {
   const raw = props.message.sources
   if (!raw) return []
@@ -96,6 +105,29 @@ function renderInlineMarkdown(text: string): string {
 
           <span v-if="message.isStreaming && (segments[segments.length - 1] as any).type !== 'text'" class="stream-cursor"></span>
         </template>
+
+        <!-- Query Result Table -->
+        <div v-if="!isUser && !isTyping && hasQueryResult" class="result-block">
+          <div class="result-header">
+            <span class="result-label">查询结果</span>
+            <span class="result-meta">{{ queryResult!.row_count }} 行 | {{ queryResult!.execution_time_ms }}ms</span>
+          </div>
+          <div class="result-table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr>
+                  <th v-for="col in queryResult!.columns" :key="col">{{ col }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, ri) in queryResult!.rows" :key="ri">
+                  <td v-for="(cell, ci) in row" :key="ci">{{ formatCell(cell) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="queryResult!.truncated" class="result-truncated">结果已截断，最多展示 100 行</div>
+        </div>
 
         <!-- RAG sources -->
         <details v-if="!isUser && !isTyping && sourceList.length" class="sources-block">
@@ -302,6 +334,73 @@ function renderInlineMarkdown(text: string): string {
   color: var(--text-3);
   font-weight: 500;
   font-family: var(--font-mono);
+}
+
+/* Query Result Table */
+.result-block {
+  margin-top: 16px;
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--seam-1);
+}
+.result-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-0);
+  font-family: var(--font-mono);
+}
+.result-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.result-table-wrap {
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.result-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface);
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-0);
+  border-bottom: 1px solid var(--seam-1);
+  white-space: nowrap;
+}
+.result-table tbody td {
+  padding: 6px 12px;
+  color: var(--text-1);
+  border-bottom: 1px solid var(--seam-1);
+  white-space: nowrap;
+}
+.result-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+.result-truncated {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--warning);
+  text-align: center;
+  border-top: 1px solid var(--seam-1);
+  background: var(--bg-surface);
 }
 
 /* RAG sources */

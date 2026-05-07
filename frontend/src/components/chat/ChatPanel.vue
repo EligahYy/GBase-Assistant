@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, inject } from 'vue'
+import { ref, nextTick, watch, computed, inject, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import { SendOutline, ServerOutline, MenuOutline, SunnyOutline, MoonOutline, StopCircleOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -30,6 +30,8 @@ const modelDisplayName = computed(() => {
 const activeConn = computed(() =>
   connStore.connections.find(c => c.id === connStore.activeConnectionId)
 )
+
+onMounted(() => { connStore.loadConnections().catch(() => {}) })
 
 watch(() => chatStore.messages.length, async () => {
   await nextTick()
@@ -71,6 +73,13 @@ async function sendMessage() {
       chatStore.setStreamSql(streamingId, chunk.content)
     } else if (chunk.type === 'sources') {
       chatStore.setStreamSources(streamingId, chunk.content)
+    } else if (chunk.type === 'result') {
+      try {
+        const result = JSON.parse(chunk.content)
+        chatStore.setStreamQueryResult(streamingId, result)
+      } catch {
+        // ignore invalid result JSON
+      }
     } else if (chunk.type === 'error') {
       naiveMsg.error(chunk.content)
     }

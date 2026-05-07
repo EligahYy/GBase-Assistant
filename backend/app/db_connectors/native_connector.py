@@ -63,13 +63,13 @@ except Exception:
 
 
 def _build_connection_kwargs(config: ConnectionConfig) -> dict:
-    """构建 gbase.connector.connect 参数。"""
+    """构建 gbase.connector.connect 参数（对齐官方 API）。"""
     return {
         "host": config.host or "127.0.0.1",
         "port": config.port or 5258,
+        "database": config.database or "",
         "user": config.username or "",
         "passwd": config.password or "",
-        "db": config.database or "",
         "connection_timeout": int(config.connection_timeout),
         "charset": "utf8mb4",
     }
@@ -83,11 +83,16 @@ class NativeConnector:
         return "native"
 
     def is_available(self) -> bool:
+        if _DRIVER_AVAILABLE:
+            return True
+        # 动态重试：可能在首次导入后才安装驱动
+        _try_import()
         return _DRIVER_AVAILABLE
 
     async def test(self, config: ConnectionConfig) -> tuple[bool, str]:
         if not _DRIVER_AVAILABLE:
             return False, "gbase-connector-python 未安装"
+        conn = None
         try:
             kwargs = _build_connection_kwargs(config)
             conn = _DRIVER_MODULE.connect(**kwargs)
@@ -95,10 +100,12 @@ class NativeConnector:
             cursor.execute("SELECT 1")
             cursor.fetchall()
             cursor.close()
-            conn.close()
             return True, "连接成功"
         except Exception as e:
             return False, f"连接失败: {e}"
+        finally:
+            if conn and conn.is_connected():
+                conn.close()
 
     async def fetch_schema(self, config: ConnectionConfig) -> list[TableSchema]:
         if not _DRIVER_AVAILABLE:
@@ -106,10 +113,10 @@ class NativeConnector:
 
         kwargs = _build_connection_kwargs(config)
         conn = _DRIVER_MODULE.connect(**kwargs)
-        cursor = conn.cursor()
         schemas: list[TableSchema] = []
 
         try:
+            cursor = conn.cursor()
             # 获取所有表
             cursor.execute("SHOW TABLES")
             tables = [row[0] for row in cursor.fetchall()]
@@ -157,9 +164,10 @@ class NativeConnector:
                         columns=columns,
                     )
                 )
-        finally:
             cursor.close()
-            conn.close()
+        finally:
+            if conn.is_connected():
+                conn.close()
 
         return schemas
 
@@ -175,10 +183,10 @@ class NativeConnector:
 
         kwargs = _build_connection_kwargs(config)
         conn = _DRIVER_MODULE.connect(**kwargs)
-        cursor = conn.cursor()
         start_time = time.perf_counter()
 
         try:
+            cursor = conn.cursor()
             cursor.execute(sql)
             # 获取列名
             if cursor.description:
@@ -206,6 +214,7 @@ class NativeConnector:
 
             # 耗尽剩余结果
             cursor.fetchall()
+            cursor.close()
 
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             from app.protocols import QueryResult
@@ -218,5 +227,5 @@ class NativeConnector:
                 truncated=truncated,
             )
         finally:
-            cursor.close()
-            conn.close()
+            if conn.is_connected():
+                conn.close()
