@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,17 @@ from app.database import init_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+async def _background_sync_all_to_qdrant(embedder) -> None:
+    """后台任务：同步所有知识库到 Qdrant。不阻塞应用启动。"""
+    try:
+        from app.vector.ingest import sync_all_to_qdrant
+
+        results = await sync_all_to_qdrant(embedder)
+        logger.info("后台知识库同步完成: %s", results)
+    except Exception as e:
+        logger.warning("后台知识库同步失败: %s", e)
 
 
 @asynccontextmanager
@@ -29,11 +41,9 @@ async def lifespan(app: FastAPI):
     if os.getenv("TESTING"):
         logger.info("测试模式：跳过 Qdrant 和 Embedding 初始化")
     else:
-        # Qdrant 初始化和知识库同步
         try:
             from app.vector.client import get_qdrant_manager, set_qdrant_available
             from app.vector.embedder import get_embedder
-            from app.vector.ingest import sync_all_to_qdrant
 
             qdrant_mgr = get_qdrant_manager()
             embedder = get_embedder()
@@ -44,12 +54,16 @@ async def lifespan(app: FastAPI):
             await embedder.embed(["warmup"])
             logger.info("Embedding 模型预热完成")
 
-            # 同步知识库到 Qdrant（增量）
-            await sync_all_to_qdrant(embedder)
-
-            # 全部成功后标记 Qdrant 可用
+            # collections 就绪后即可标记 Qdrant 可用（请求走 Qdrant 路径，空结果由 FallbackRetriever 回退）
             set_qdrant_available(True)
             logger.info("Qdrant 向量检索已启用")
+
+            # 知识库同步放入后台任务，不阻塞启动
+            if os.getenv("SKIP_VECTOR_SYNC"):
+                logger.info("SKIP_VECTOR_SYNC: 跳过知识库同步")
+            else:
+                asyncio.create_task(_background_sync_all_to_qdrant(embedder))
+                logger.info("知识库同步已放入后台任务")
         except Exception as e:
             logger.warning("Qdrant 初始化失败，回退到文件模式: %s", e)
 

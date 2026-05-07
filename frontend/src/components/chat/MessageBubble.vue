@@ -19,6 +19,15 @@ const isTyping = computed(() =>
   props.message.isStreaming && !props.message.streamContent
 )
 
+const sourceList = computed(() => {
+  const raw = props.message.sources
+  if (!raw) return []
+  return raw
+    .split('\n')
+    .map((line) => line.replace(/^[\s\-•·]+/, '').trim())
+    .filter(Boolean)
+})
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -87,6 +96,17 @@ function renderInlineMarkdown(text: string): string {
 
           <span v-if="message.isStreaming && (segments[segments.length - 1] as any).type !== 'text'" class="stream-cursor"></span>
         </template>
+
+        <!-- RAG sources -->
+        <details v-if="!isUser && !isTyping && sourceList.length" class="sources-block">
+          <summary class="sources-summary">
+            <span class="sources-label">引用来源</span>
+            <span class="sources-count">{{ sourceList.length }}</span>
+          </summary>
+          <ul class="sources-list">
+            <li v-for="(src, i) in sourceList" :key="`${src}-${i}`" class="sources-item">{{ src }}</li>
+          </ul>
+        </details>
       </div>
 
       <!-- User avatar -->
@@ -282,5 +302,62 @@ function renderInlineMarkdown(text: string): string {
   color: var(--text-3);
   font-weight: 500;
   font-family: var(--font-mono);
+}
+
+/* RAG sources */
+.sources-block {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md, 10px);
+  max-width: 100%;
+}
+.sources-block[open] { padding-bottom: 12px; }
+.sources-summary {
+  display: flex; align-items: center; gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.sources-summary::-webkit-details-marker { display: none; }
+.sources-summary::before {
+  content: '▸';
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-4);
+  transition: transform var(--duration-fast) var(--ease-smooth);
+}
+.sources-block[open] .sources-summary::before {
+  transform: rotate(90deg);
+}
+.sources-label {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sources-count {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--seam-1);
+}
+.sources-list {
+  margin: 10px 0 0;
+  padding: 0 0 0 20px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sources-item {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.6;
+  font-family: var(--font-mono);
+  word-break: break-word;
 }
 </style>

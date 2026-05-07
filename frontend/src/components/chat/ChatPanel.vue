@@ -69,6 +69,8 @@ async function sendMessage() {
       chatStore.appendStreamToken(streamingId, chunk.content)
     } else if (chunk.type === 'sql') {
       chatStore.setStreamSql(streamingId, chunk.content)
+    } else if (chunk.type === 'sources') {
+      chatStore.setStreamSources(streamingId, chunk.content)
     } else if (chunk.type === 'error') {
       naiveMsg.error(chunk.content)
     }

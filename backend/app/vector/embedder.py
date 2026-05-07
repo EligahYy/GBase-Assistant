@@ -61,8 +61,13 @@ def get_embedder() -> Embedder:
         _embedder_instance = LiteLLMEmbedder(
             model=litellm_cfg.get("model", "openai/text-embedding-3-small"),
             api_base=litellm_cfg.get("api_base"),
+            dimension=cfg.get("dimension"),
         )
-        logger.info("Embedder: LiteLLM (%s)", litellm_cfg.get("model", "openai/text-embedding-3-small"))
+        logger.info(
+            "Embedder: LiteLLM (%s, dim=%d)",
+            litellm_cfg.get("model", "openai/text-embedding-3-small"),
+            _embedder_instance.dimension,
+        )
     else:
         raise ValueError(f"Unknown embedder provider: {provider}")
 

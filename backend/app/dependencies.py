@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
+from typing import Any
 
 from app.knowledge.loader import DbSchemaRetriever, FileExampleRetriever, FileKnowledgeRetriever
 from app.llm.client import LiteLLMClientImpl
@@ -26,6 +27,38 @@ def _get_file_knowledge_retriever() -> FileKnowledgeRetriever:
     return FileKnowledgeRetriever()
 
 
+# ── Phase 3 泛型降级检索器────────────────────────────────────────────────────────
+
+
+class FallbackRetriever:
+    """泛型降级检索器：先尝试 primary retriever，空结果或异常则回退到 fallback。
+
+    对调用方透明（实现 retrieve() 方法），chain 层无感知差异。
+    """
+
+    def __init__(
+        self,
+        primary: Any | None,
+        fallback: Any | None,
+        name: str = "retriever",
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+        self._name = name
+
+    async def retrieve(self, *args: Any, **kwargs: Any) -> list[Any]:
+        if self._primary is not None:
+            try:
+                results = await self._primary.retrieve(*args, **kwargs)
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning("%s primary 失败，回退: %s", self._name, e)
+        if self._fallback is not None:
+            return await self._fallback.retrieve(*args, **kwargs)
+        return []
+
+
 # ── Phase 3 Qdrant 实现（带自动降级）──────────────────────────────────────────────
 
 
@@ -33,44 +66,25 @@ def get_schema_retriever(db_session=None) -> SchemaRetriever:
     """SchemaRetriever：优先 Qdrant 向量检索，未命中时回退全量 DB DDL。"""
     from app.vector.client import is_qdrant_available
 
-    # 如果 lifespan 中已确认 Qdrant 不可用，直接返回 DB 全量模式
     if not is_qdrant_available():
         if db_session is None:
             raise RuntimeError("DbSchemaRetriever 需要 db_session，但当前上下文未提供")
         return DbSchemaRetriever(db_session)
 
-    # Qdrant 标记为可用时，返回带降级能力的 wrapper
-    return _QdrantSchemaRetrieverWithFallback(db_session)
+    primary = None
+    try:
+        from app.vector.retrievers import QdrantSchemaRetriever
 
+        primary = QdrantSchemaRetriever()
+    except Exception as e:
+        logger.debug("QdrantSchemaRetriever 实例化失败: %s", e)
 
-class _QdrantSchemaRetrieverWithFallback:
-    """包装器：先尝试 Qdrant 向量检索，返回空则回退到 DbSchemaRetriever 全量。"""
-
-    def __init__(self, db_session) -> None:
-        self._qdrant = None
-        self._db_fallback = None
-        if db_session is not None:
-            self._db_fallback = DbSchemaRetriever(db_session)
-        try:
-            from app.vector.retrievers import QdrantSchemaRetriever
-
-            self._qdrant = QdrantSchemaRetriever()
-        except Exception as e:
-            logger.debug("QdrantSchemaRetriever 实例化失败: %s", e)
-
-    async def retrieve(self, query: str, db_id: str) -> list:
-        if self._qdrant is not None:
-            try:
-                results = await self._qdrant.retrieve(query, db_id)
-                if results:
-                    return results
-            except Exception as e:
-                logger.warning("Qdrant schema 检索失败，回退到全量: %s", e)
-
-        if self._db_fallback is not None:
-            return await self._db_fallback.retrieve(query, db_id)
-
-        return []
+    fallback = DbSchemaRetriever(db_session) if db_session is not None else None
+    return FallbackRetriever(
+        primary=primary,
+        fallback=fallback,
+        name="SchemaRetriever",
+    )  # type: ignore[return-value]
 
 
 def get_example_retriever() -> ExampleRetriever:
@@ -79,32 +93,20 @@ def get_example_retriever() -> ExampleRetriever:
 
     if not is_qdrant_available():
         return _get_file_example_retriever()
-    return _QdrantExampleRetrieverWithFallback()
 
+    primary = None
+    try:
+        from app.vector.retrievers import QdrantExampleRetriever
 
-class _QdrantExampleRetrieverWithFallback:
-    """包装器：先尝试 Qdrant 向量检索，返回空则回退到 FileExampleRetriever。"""
+        primary = QdrantExampleRetriever()
+    except Exception as e:
+        logger.debug("QdrantExampleRetriever 实例化失败: %s", e)
 
-    def __init__(self) -> None:
-        self._qdrant = None
-        self._file_fallback = _get_file_example_retriever()
-        try:
-            from app.vector.retrievers import QdrantExampleRetriever
-
-            self._qdrant = QdrantExampleRetriever()
-        except Exception as e:
-            logger.debug("QdrantExampleRetriever 实例化失败: %s", e)
-
-    async def retrieve(self, query: str, top_k: int = 5) -> list:
-        if self._qdrant is not None:
-            try:
-                results = await self._qdrant.retrieve(query, top_k)
-                if results:
-                    return results
-            except Exception as e:
-                logger.warning("Qdrant example 检索失败，回退到文件: %s", e)
-
-        return await self._file_fallback.retrieve(query, top_k)
+    return FallbackRetriever(
+        primary=primary,
+        fallback=_get_file_example_retriever(),
+        name="ExampleRetriever",
+    )  # type: ignore[return-value]
 
 
 def get_knowledge_retriever() -> KnowledgeRetriever:
@@ -113,32 +115,20 @@ def get_knowledge_retriever() -> KnowledgeRetriever:
 
     if not is_qdrant_available():
         return _get_file_knowledge_retriever()
-    return _QdrantKnowledgeRetrieverWithFallback()
 
+    primary = None
+    try:
+        from app.vector.retrievers import QdrantKnowledgeRetriever
 
-class _QdrantKnowledgeRetrieverWithFallback:
-    """包装器：先尝试 Qdrant 向量检索，返回空则回退到 FileKnowledgeRetriever。"""
+        primary = QdrantKnowledgeRetriever()
+    except Exception as e:
+        logger.debug("QdrantKnowledgeRetriever 实例化失败: %s", e)
 
-    def __init__(self) -> None:
-        self._qdrant = None
-        self._file_fallback = _get_file_knowledge_retriever()
-        try:
-            from app.vector.retrievers import QdrantKnowledgeRetriever
-
-            self._qdrant = QdrantKnowledgeRetriever()
-        except Exception as e:
-            logger.debug("QdrantKnowledgeRetriever 实例化失败: %s", e)
-
-    async def retrieve(self, query: str, category: str | None = None) -> list:
-        if self._qdrant is not None:
-            try:
-                results = await self._qdrant.retrieve(query, category)
-                if results:
-                    return results
-            except Exception as e:
-                logger.warning("Qdrant knowledge 检索失败，回退到文件: %s", e)
-
-        return await self._file_fallback.retrieve(query, category)
+    return FallbackRetriever(
+        primary=primary,
+        fallback=_get_file_knowledge_retriever(),
+        name="KnowledgeRetriever",
+    )  # type: ignore[return-value]
 
 
 def get_llm_client(model: str | None = None, task_type: str = "general") -> LLMClient:

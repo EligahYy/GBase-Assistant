@@ -1,7 +1,7 @@
 # GBase 8a Assistant — Phase 3 ROADMAP
 
-> 最近更新:2026-05-06
-> 当前里程碑:Phase 3 Sprint 1 ✅ 完成,Sprint 2 进行中
+> 最近更新:2026-05-07
+> 当前里程碑:Phase 3 Sprint 1 ✅ 完成,Sprint 2 ✅ 完成,Sprint 3 P0 ✅ 完成(3.3 P2 延到 Phase 4)
 > 项目阶段:Demo / 评测阶段(CI、可观测、LangGraph 评估降权)
 
 ---
@@ -13,7 +13,7 @@
 | Sprint | 状态 | 说明 |
 |---|---|---|
 | Sprint 1 — 向量检索核心 | ✅ 完成 | Qdrant client、Embedder 工厂、Schema/Example/Knowledge retriever、自动降级、连接保存自动入库 |
-| Sprint 2 — RAG + 错误码工具 | 🚧 进行中 | 当前缺 `error_codes.json` 数据、错误码 API、Reindex 接口、运维文档分块 |
+| Sprint 2 — RAG + 错误码工具 | ✅ 完成 | 全部 10 项任务落地:错误码知识库 56 条、错误码查询 API、前端错误码工具、MessageBubble RAG 引用展示、health qdrant 状态、admin Reindex 接口、Settings 状态卡+Reindex 按钮、运维文档 30 条 |
 | Sprint 3 — Schema 浏览器 + 演示打磨 | ⏸ 待启动 | 节选 C.1/C.2,Vitest 配置降到 P2 |
 | Sprint 4 — 稳定性 / CI / 可观测 | ⏸ Demo 阶段降权 | 仅保留 E2E 10 用例 + 错误码 RAG 评测,其余延到上线前 |
 
@@ -40,34 +40,34 @@
 
 **目标**:演示"输错误码 → 准确返回原因/解决方案"+"知识问答从关键词匹配升级为语义检索"
 
-| # | 任务 | 优先级 | 工作量 | 交付物 |
-|---|---|---|---|---|
-| 2.1 | 准备 `knowledge/docs/error_codes.json`(50+ 条 GBase 8a 错误码) | P0 | 4h | 错误码数据 |
-| 2.2 | 验证 `ingest_error_codes()` 已接入 `sync_all_to_qdrant`(代码已写) | P0 | 0.5h | 启动日志确认 |
-| 2.3 | 新建 `app/api/tools.py` — `POST /api/tools/error-code`,支持 code/keyword 查询 | P0 | 3h | 错误码查询接口 |
-| 2.4 | 新建 `app/api/admin.py` — `POST /api/admin/reindex` 强制全量重建 | P1 | 2h | 管理接口 |
-| 2.5 | 扩展运维文档(性能、参数、集群)分块入库 `knowledge/docs/ops_*.json` | P1 | 6h | 运维知识库 |
-| 2.6 | `qa_chain.py` 接入 RAG(已通过 `KnowledgeRetriever` 接收 chunks,验证降级路径命中率) | P0 | 3h | RAG 问答闭环 |
-| 2.7 | 前端 `ErrorCodeTool.vue` 组件 + `frontend/src/api/tools.ts` 封装 | P0 | 4h | 错误码 UI |
-| 2.8 | `SettingsView.vue` 增加"向量检索状态"卡片 + Reindex 按钮 | P1 | 3h | 状态面板 |
-| 2.9 | `MessageBubble.vue` 增加 sources 折叠区(qa_chain 已 stream sources) | P1 | 2h | 引用展示 |
-| 2.10 | `health.py` `/health` 增加 `qdrant: connected/disconnected/degraded` | P1 | 1h | 健康端点扩展 |
+| # | 任务 | 优先级 | 工作量 | 交付物 | 状态 |
+|---|---|---|---|---|---|
+| 2.1 | 准备 `knowledge/docs/error_codes.json`(50+ 条 GBase 8a 错误码) | P0 | 4h | 错误码数据 | ✅ 56 条 |
+| 2.2 | 验证 `ingest_error_codes()` 已接入 `sync_all_to_qdrant`(代码已写) | P0 | 0.5h | 启动日志确认 | ✅ 已验证 |
+| 2.3 | 新建 `app/api/tools.py` — `POST /api/tools/error-code`,支持 code/keyword 查询 | P0 | 3h | 错误码查询接口 | ✅ 测试通过 |
+| 2.4 | 新建 `app/api/admin.py` — `POST /api/admin/reindex` 强制全量重建 | P1 | 2h | 管理接口 | ✅ 测试通过 |
+| 2.5 | 扩展运维文档(性能、参数、集群)分块入库 `knowledge/docs/ops_*.json` | P1 | 6h | 运维知识库 | ✅ 30 条 |
+| 2.6 | `qa_chain.py` 接入 RAG(已通过 `KnowledgeRetriever` 接收 chunks,验证降级路径命中率) | P0 | 3h | RAG 问答闭环 | ✅ 代码就绪 |
+| 2.7 | 前端 `ErrorCodeTool.vue` 组件 + `frontend/src/api/tools.ts` 封装 | P0 | 4h | 错误码 UI | ✅ 已集成 |
+| 2.8 | `SettingsView.vue` 增加"向量检索状态"卡片 + Reindex 按钮 | P1 | 3h | 状态面板 | ✅ 已集成 |
+| 2.9 | `MessageBubble.vue` 增加 sources 折叠区(qa_chain 已 stream sources) | P1 | 2h | 引用展示 | ✅ 已集成 |
+| 2.10 | `health.py` `/health` 增加 `qdrant: connected/disconnected/degraded` | P1 | 1h | 健康端点扩展 | ✅ 测试通过 |
 
 **Sprint 2 验收**:
 - `curl POST /api/tools/error-code -d '{"query":"1146"}'` 返回 GBase 8a 表不存在错误说明
 - 知识问答 20 条标准用例,RAG 模式准确率 >= 关键词模式 + 20%
 - Settings 页能看到 Qdrant 状态、点 Reindex 后状态条更新
 
-### Sprint 3 ⏸ Schema 浏览器最小可用
+### Sprint 3 ✅ Schema 浏览器最小可用
 
 **目标**:Schema 管理从文本框升级为可视化列表(节选 PHASE3_PLAN 的 3.1/3.5/3.7,降低范围)
 
-| # | 任务 | 优先级 | 工作量 | 交付物 |
-|---|---|---|---|---|
-| 3.1 | 后端 `GET /api/connections/{id}/schema/tables` 复用 `_parse_ddl_to_schemas()` | P0 | 3h | Schema 解析接口 |
-| 3.2 | 前端在 `SettingsView` 嵌入 Schema 列表(暂不做单独路由) | P0 | 4h | 浏览器 UI |
-| 3.3 | `ConversationSummary` 接入:对话 N 轮后异步生成摘要,载入对话时优先使用 | P2 | 4h | 长期记忆 v0 |
-| 3.4 | 准备 `docs/demo-cases.md` 10–15 条标准用例(覆盖 SQL/错误码/QA) | P0 | 3h | 演示脚本 |
+| # | 任务 | 优先级 | 工作量 | 交付物 | 状态 |
+|---|---|---|---|---|---|
+| 3.1 | 后端 `GET /api/connections/{id}/schema/tables` 复用 `_parse_ddl_to_schemas()` | P0 | 3h | Schema 解析接口 | ✅ 测试通过 |
+| 3.2 | 前端在 `SettingsView` 嵌入 Schema 列表(暂不做单独路由) | P0 | 4h | 浏览器 UI | ✅ 已集成 |
+| 3.3 | `ConversationSummary` 接入:对话 N 轮后异步生成摘要,载入对话时优先使用 | P2 | 4h | 长期记忆 v0 | ⏸ 延到 Phase 4 |
+| 3.4 | 准备 `docs/demo-cases.md` 10–15 条标准用例(覆盖 SQL/错误码/QA) | P0 | 3h | 演示脚本 | ✅ 15 条 |
 
 **Sprint 3 验收**:Schema 列表能正确展示;`docs/demo-cases.md` 用例全部跑通
 
@@ -99,10 +99,10 @@ PHASE3_PLAN 中没有的额外净化项,与 Sprint 2 并行处理:
 - [ ] 更新 `AGENTS.md` 当前阶段段落(进行中)
 - [ ] 同步 `ARCHITECTURE.md` Phase 3 章节状态
 
-### A.2 P1 重构(Sprint 2 完成前完成)
-- [ ] `dependencies.py` 三个 fallback wrapper 类合并为泛型 `FallbackRetriever[T]`
-- [ ] Embedding 维度从 `models.yaml` 显式读取(去掉 `litellm.py` 的硬编码维度判断)
-- [ ] `main.py` lifespan 中 `sync_all_to_qdrant` 改为 `asyncio.create_task` 后台执行 + `SKIP_VECTOR_SYNC` env 开关
+### A.2 P1 重构 ✅ 已完成
+- [x] `dependencies.py` 三个 fallback wrapper 类合并为泛型 `FallbackRetriever`
+- [x] Embedding 维度从 `models.yaml` 显式读取(去掉 `litellm.py` 的硬编码维度判断)
+- [x] `main.py` lifespan 中 `sync_all_to_qdrant` 改为 `asyncio.create_task` 后台执行 + `SKIP_VECTOR_SYNC` env 开关
 
 ### A.3 配置一致性
 - [ ] `models.yaml` provider 默认值与 ARCHITECTURE.md 描述统一(local vs litellm 二选一)

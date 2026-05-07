@@ -1,0 +1,62 @@
+[
+  {
+    "question": "GBase 8a 如何选择分布键？",
+    "answer": "分布键选择是 GBase 8a 查询性能的核心因素。\n\n**选择原则**：\n1. **高基数列**：选择重复值少的列（如用户ID、订单ID），避免数据倾斜\n2. **JOIN 条件列**：让 JOIN 的关联列与分布键一致，减少跨节点数据传输\n3. **GROUP BY 列**：选择常用于聚合的列，提升本地聚合效率\n4. **避免 NULL 多的列**：NULL 值会全部落到节点 0，造成热点\n\n**检查数据分布均匀性**：\n```sql\nSELECT DBNODE(), COUNT(*) FROM t GROUP BY DBNODE();\n```\n\n**调整分布键**：只能重建表：\n```sql\nCREATE TABLE new_table AS SELECT * FROM old_table DISTRIBUTED BY ('new_col');\nDROP TABLE old_table;\nRENAME TABLE new_table TO old_table;\n```",
+    "category": "performance",
+    "keywords": ["分布键", "DISTRIBUTED BY", "数据倾斜", "DBNODE", "高基数"]
+  },
+  {
+    "question": "什么时候使用 REPLICATED 表？",
+    "answer": "REPLICATED 表在每个计算节点保存完整数据副本，适合**小型维度表**。\n\n**适用场景**：\n- 数据量小（建议 < 100MB）\n- 需要频繁与大表 JOIN\n- 读多写少\n\n**示例**：\n```sql\nCREATE TABLE dim_region (\n  region_id INT,\n  region_name VARCHAR(100)\n) REPLICATED;\n```\n\n**注意事项**：\n- 写入性能差（需写入所有节点）\n- 不适合大表（浪费存储空间）\n- 超过阈值会自动产生警告",
+    "category": "performance",
+    "keywords": ["REPLICATED", "复制表", "维度表", "JOIN", "小表"]
+  },
+  {
+    "question": "GBase 8a 查询优化有哪些通用建议？",
+    "answer": "**查询优化核心原则**：\n\n1. **避免 SELECT ***：明确指定列，减少数据传输\n2. **合适的 WHERE 条件**：尽早过滤数据，减少扫描量\n3. **小表放左边 JOIN**：优化执行计划\n4. **使用 REPLICATED 维度表**：减少跨节点 shuffle\n5. **避免笛卡尔积**：确保 JOIN 有关联条件\n6. **合理使用分区**：大表按时间分区，分区裁剪减少扫描\n7. **列级压缩**：对高重复值列使用 ENCODING 'RLE'\n8. **窗口函数替代子查询**：通常更高效\n9. **大 OFFSET 分页优化**：改用游标分页（基于最后记录的条件过滤）\n10. **避免函数包裹索引列**：WHERE YEAR(dt) = 2024 → WHERE dt BETWEEN '2024-01-01' AND '2024-12-31'",
+    "category": "performance",
+    "keywords": ["查询优化", "性能", "SELECT *", "WHERE", "JOIN", "分区"]
+  },
+  {
+    "question": "如何检测和解决数据倾斜？",
+    "answer": "**检测数据倾斜**：\n```sql\nSELECT\n  DBNODE() AS node_id,\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT user_id) AS unique_users\nFROM orders\nGROUP BY DBNODE()\nORDER BY row_count DESC;\n```\n\n**判断标准**：某节点数据量超过平均值的 30% 即认为倾斜。\n\n**解决方案**：\n1. **重新选择分布键**：选择更高基数的列\n2. **复合分布键**：`DISTRIBUTED BY ('col1','col2')`\n3. **数据预处理**：对热点数据加盐或打散\n4. **重建表迁移数据**：\n```sql\nCREATE TABLE new_table AS\nSELECT * FROM old_table\nDISTRIBUTED BY ('better_col');\n```",
+    "category": "performance",
+    "keywords": ["数据倾斜", "DBNODE", "分布键", "重建表"]
+  },
+  {
+    "question": "大表分区策略怎么做？",
+    "answer": "GBase 8a 支持按时间等维度对大表分区，实现分区裁剪减少扫描。\n\n**分区类型**：\n- **RANGE 分区**：按时间范围\n- **LIST 分区**：按离散值\n- **HASH 分区**：按哈希值\n\n**示例（按月分区）**：\n```sql\nCREATE TABLE logs (\n  log_id BIGINT,\n  event_type VARCHAR(50),\n  created_at DATETIME,\n  message TEXT\n) DISTRIBUTED BY ('log_id')\nPARTITION BY RANGE (YEAR(created_at) * 100 + MONTH(created_at)) (\n  PARTITION p202401 VALUES LESS THAN (202402),\n  PARTITION p202402 VALUES LESS THAN (202403),\n  PARTITION p202403 VALUES LESS THAN (202404)\n);\n```\n\n**分区裁剪效果**：\n```sql\n-- 只扫描对应分区，无需全表扫描\nSELECT * FROM logs WHERE created_at >= '2024-02-01' AND created_at < '2024-03-01';\n```",
+    "category": "performance",
+    "keywords": ["分区", "PARTITION", "RANGE", "裁剪", "大表"]
+  },
+  {
+    "question": "ENCODING 列级压缩怎么选？",
+    "answer": "ENCODING 是 GBase 8a 列级压缩编码，正确选择可大幅提升查询性能。\n\n**编码类型**：\n- **RLE**（Run-Length Encoding）：适合重复值多的列（如状态码、类型、布尔值）\n- **LZO/LZ4**：适合字符串列，通用压缩\n- **DICT**（字典编码）：适合基数较低的列（如性别、省份、分类）\n- **NULL**：NULL 值多的列自动优化\n\n**示例**：\n```sql\nCREATE TABLE events (\n  event_id BIGINT,\n  event_type VARCHAR(50) ENCODING 'RLE',    -- 类型少，重复多\n  region VARCHAR(20) ENCODING 'DICT',       -- 省份，基数低\n  log_message TEXT ENCODING 'LZO',          -- 长文本\n  created_at DATETIME\n) DISTRIBUTED BY ('event_id');\n```\n\n**不指定时**：系统自动选择最优编码。",
+    "category": "performance",
+    "keywords": ["ENCODING", "压缩", "RLE", "LZO", "DICT", "列存储"]
+  },
+  {
+    "question": "大表分页查询怎么优化？",
+    "answer": "GBase 8a 支持 LIMIT/OFFSET，但大 OFFSET 性能差（需扫描并丢弃大量数据）。\n\n**基础分页**：\n```sql\n-- 第1页，每页100条\nSELECT * FROM orders ORDER BY order_id LIMIT 100 OFFSET 0;\n\n-- 第100页（OFFSET 9900）—— 性能急剧下降\nSELECT * FROM orders ORDER BY order_id LIMIT 100 OFFSET 9900;\n```\n\n**优化方案——游标分页**：\n```sql\n-- 第一次查询\nSELECT * FROM orders ORDER BY order_id LIMIT 100;\n-- 记录最后一条的 order_id = 12345\n\n-- 下一页：基于游标条件过滤\nSELECT * FROM orders\nWHERE order_id > 12345\nORDER BY order_id\nLIMIT 100;\n```\n\n**适用场景**：\n- 日志查询、时间序列数据\n- 不需要跳转到任意页码\n- 需要连续翻页",
+    "category": "performance",
+    "keywords": ["分页", "LIMIT", "OFFSET", "游标分页", "性能"]
+  },
+  {
+    "question": "JOIN 查询优化要点是什么？",
+    "answer": "GBase 8a JOIN 优化核心：**减少跨节点数据传输**。\n\n**优化策略**：\n1. **分布键一致 JOIN**：让 JOIN 键与两张表的分布键一致，JOIN 在节点本地完成\n2. **小表用 REPLICATED**：维度表用 REPLICATED，每个节点都有完整副本\n3. **避免大表×大表 JOIN**：先过滤再 JOIN，或用中间结果表\n4. **JOIN 条件加索引**（列存场景下索引收益有限，优先关注分布键）\n5. **避免隐式类型转换**：确保 JOIN 列类型一致\n\n**示例（优化前 vs 优化后）**：\n```sql\n-- 优化前：orders 和 users 分布键不同，跨节点 shuffle\nSELECT * FROM orders o JOIN users u ON o.user_id = u.id;\n\n-- 优化后：两张表都用 user_id 做分布键\nCREATE TABLE orders (...) DISTRIBUTED BY ('user_id');\nCREATE TABLE users (...) DISTRIBUTED BY ('user_id');\n```",
+    "category": "performance",
+    "keywords": ["JOIN", "优化", "分布键", "REPLICATED", "跨节点"]
+  },
+  {
+    "question": "窗口函数性能注意事项？",
+    "answer": "GBase 8a 支持窗口函数，但性能受数据量和分区数影响。\n\n**性能优化**：\n1. **PARTITION BY 列与分布键一致**：窗口计算可在节点本地完成\n2. **避免超大 PARTITION BY**：分区数过多（如每行一个分区）性能极差\n3. **优先使用 ROWS 而非 RANGE**：RANGE 帧在某些版本支持有限\n4. **大窗口函数考虑物化**：复杂窗口计算结果可存入临时表复用\n\n**示例**：\n```sql\n-- 好的：PARTITION BY dept_id（分布键也是 dept_id）\nSELECT\n  user_id,\n  ROW_NUMBER() OVER(PARTITION BY dept_id ORDER BY salary DESC) AS rn\nFROM employees;\n\n-- 差的：PARTITION BY user_id（每行独立分区）\nSELECT\n  user_id,\n  ROW_NUMBER() OVER(PARTITION BY user_id ORDER BY created_at) AS rn\nFROM logs;\n```",
+    "category": "performance",
+    "keywords": ["窗口函数", "OVER", "PARTITION BY", "性能", "ROWS"]
+  },
+  {
+    "question": "大批量 DELETE/UPDATE 后如何回收空间？",
+    "answer": "GBase 8a 中 DELETE 不会立即释放磁盘空间，需要执行 VACUUM 或重建表。\n\n**方案 1：VACUUM（部分释放）**：\n```sql\nVACUUM TABLE orders;\n```\n\n**方案 2：重建表（完全释放，推荐）**：\n```sql\n-- 创建新表并迁移数据\nCREATE TABLE orders_new AS\nSELECT * FROM orders\nWHERE created_at >= '2023-01-01'\nDISTRIBUTED BY ('order_id');\n\n-- 替换旧表\nDROP TABLE orders;\nRENAME TABLE orders_new TO orders;\n```\n\n**方案 3：分区直接删除（最高效）**：\n```sql\n-- 直接删除旧分区，瞬间释放空间\nALTER TABLE logs DROP PARTITION p202301;\n```\n\n**建议**：\n- 定期按时间分区 + DROP PARTITION 清理历史数据\n- 避免频繁 UPDATE/DELETE（OLAP 场景建议用重建表替代）",
+    "category": "performance",
+    "keywords": ["VACUUM", "空间回收", "DELETE", "重建表", "分区删除"]
+  }
+]

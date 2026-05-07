@@ -9,6 +9,7 @@ export interface Message {
   content: string
   sql?: string | null
   messageType?: string | null
+  sources?: string | null
   isStreaming?: boolean
   streamContent?: string
   streamSql?: string
@@ -55,6 +56,13 @@ export const useChatStore = defineStore('chat', () => {
     if (msg) {
       msg.streamSql = sql
       msg.sql = sql
+    }
+  }
+
+  function setStreamSources(id: string, sources: string) {
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg) {
+      msg.sources = sources
     }
   }
 
@@ -133,6 +141,7 @@ export const useChatStore = defineStore('chat', () => {
     addStreamingMessage,
     appendStreamToken,
     setStreamSql,
+    setStreamSources,
     finalizeStreamMessage,
     loadConversations,
     loadConversation,

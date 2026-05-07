@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.knowledge.loader import _parse_ddl_to_schemas
 from app.models.connection import DbConnection
-from app.schemas.connection import ConnectionCreate, ConnectionResponse, ConnectionUpdate
+from app.schemas.connection import ConnectionCreate, ConnectionResponse, ConnectionUpdate, TableSchemaResponse
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 logger = logging.getLogger(__name__)
@@ -121,3 +121,25 @@ async def delete_connection(connection_id: str, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=404, detail="连接不存在")
     conn.is_active = False
     await db.commit()
+
+
+@router.get("/{connection_id}/schema/tables", response_model=list[TableSchemaResponse])
+async def list_schema_tables(connection_id: str, db: AsyncSession = Depends(get_db)):
+    """解析连接的 schema_ddl，返回结构化表列表。"""
+    result = await db.execute(select(DbConnection).where(DbConnection.id == connection_id))
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=404, detail="连接不存在")
+    if not conn.schema_ddl:
+        return []
+
+    schemas = _parse_ddl_to_schemas(conn.schema_ddl)
+    return [
+        TableSchemaResponse(
+            table_name=s.table_name,
+            columns=s.columns,
+            ddl=s.ddl,
+            description=s.description or "",
+        )
+        for s in schemas
+    ]

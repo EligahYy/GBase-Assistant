@@ -251,6 +251,65 @@ async def ingest_schemas(
     return len(schemas)
 
 
+async def ingest_ops_docs(embedder: Embedder, force: bool = False) -> int:
+    """将运维文档（性能/参数/集群）向量化入库。返回入库条数。"""
+    ops_dir = _knowledge_dir() / "docs"
+    ops_files = sorted(ops_dir.glob("ops_*.json"))
+    if not ops_files:
+        logger.info("运维文档不存在，跳过索引")
+        return 0
+
+    # 合并所有 ops 文件的内容计算 hash
+    combined_content = b""
+    all_docs: list[dict] = []
+    for path in ops_files:
+        combined_content += path.read_bytes()
+        try:
+            with open(path, encoding="utf-8") as f:
+                docs = json.load(f) or []
+                for doc in docs:
+                    doc["_source_file"] = path.name
+                all_docs.extend(docs)
+        except Exception as e:
+            logger.warning("加载运维文档 %s 失败: %s", path, e)
+
+    if not all_docs:
+        return 0
+
+    state = _get_index_state()
+    current_hash = hashlib.sha256(combined_content).hexdigest()[:16]
+    if not force and state.get("ops_docs_hash") == current_hash:
+        logger.info("运维文档未变更，跳过索引")
+        return 0
+
+    qdrant = get_qdrant_manager().client
+    collection = get_settings().models_config.get("collections", {}).get("knowledge", "knowledge")
+
+    texts = [f"问题：{item['question']}\n答案：{item['answer']}" for item in all_docs]
+    embeddings = await _embed_in_batches(embedder, texts)
+
+    points = []
+    for i, item in enumerate(all_docs):
+        points.append(
+            {
+                "id": f"ops_{i}",
+                "vector": embeddings[i],
+                "payload": {
+                    "source": f"运维文档 - {item.get('_source_file', 'ops').replace('.json', '')}",
+                    "category": item.get("category", "ops"),
+                    "content": f"问题：{item['question']}\n\n答案：{item['answer']}",
+                },
+            }
+        )
+
+    await qdrant.upsert(collection_name=collection, points=points, wait=True)
+
+    state["ops_docs_hash"] = current_hash
+    _save_index_state(state)
+    logger.info("运维文档索引完成：%d 条（来自 %d 个文件）", len(all_docs), len(ops_files))
+    return len(all_docs)
+
+
 async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
     """一键同步所有知识库到 Qdrant。返回各 collection 入库条数。"""
     await get_qdrant_manager().ensure_collections(dimension=embedder.dimension)
@@ -258,5 +317,6 @@ async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
     results["faq"] = await ingest_faq(embedder, force=force)
     results["sql_examples"] = await ingest_sql_examples(embedder, force=force)
     results["error_codes"] = await ingest_error_codes(embedder, force=force)
+    results["ops_docs"] = await ingest_ops_docs(embedder, force=force)
     logger.info("全量索引完成: %s", results)
     return results

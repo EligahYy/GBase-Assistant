@@ -21,6 +21,13 @@ class ConnectionUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class TableSchemaResponse(BaseModel):
+    table_name: str
+    columns: list[str]
+    ddl: str
+    description: str = ""
+
+
 class ConnectionResponse(BaseModel):
     id: str
     name: str

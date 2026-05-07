@@ -26,6 +26,7 @@ models:
 
 embedding:
   provider: "litellm"  # local | litellm
+  dimension: 1024  # 显式声明，避免模型切换时维度不匹配
   local:
     model: "BAAI/bge-m3"
     device: "cpu"  # cpu | cuda | mps

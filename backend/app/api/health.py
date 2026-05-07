@@ -21,11 +21,12 @@ class DependencyStatus(BaseModel):
     database: str = "unknown"
     llm_api: str = "unknown"
     default_model: str = "unknown"
+    vector_db: str = "unknown"
 
 
 class HealthResponse(BaseModel):
     status: str
-    version: str = "0.2.0"
+    version: str = "0.3.0"
     dependencies: DependencyStatus
 
 
@@ -42,12 +43,30 @@ async def _check_llm_api() -> str:
     try:
         settings = get_settings()
         client = LiteLLMClientImpl(model=settings.default_model)
-        # Lightweight check: send a minimal prompt
         await client.complete([{"role": "user", "content": "hi"}], max_tokens=1)
         return "connected"
     except Exception as e:
         logger.warning("LLM API health check failed: %s", e)
         return "unreachable"
+
+
+async def _check_vector_db() -> str:
+    """检查 Qdrant 状态：connected / degraded / disconnected。"""
+    try:
+        from app.vector.client import get_qdrant_manager, is_qdrant_available
+    except Exception as e:
+        logger.debug("vector 模块加载失败: %s", e)
+        return "disconnected"
+
+    if not is_qdrant_available():
+        return "disconnected"
+
+    try:
+        await get_qdrant_manager().client.get_collections()
+        return "connected"
+    except Exception as e:
+        logger.warning("Qdrant 健康检查失败: %s", e)
+        return "degraded"
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -57,6 +76,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         database=await _check_database(db),
         llm_api=await _check_llm_api(),
         default_model=settings.default_model,
+        vector_db=await _check_vector_db(),
     )
     overall = "ok" if deps.database == "connected" and deps.llm_api == "connected" else "degraded"
     return HealthResponse(status=overall, dependencies=deps)

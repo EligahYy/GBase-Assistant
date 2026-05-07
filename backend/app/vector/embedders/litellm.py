@@ -25,11 +25,14 @@ class LiteLLMEmbedder:
         self,
         model: str = "openai/text-embedding-3-small",
         api_base: str | None = None,
+        dimension: int | None = None,
     ) -> None:
         self._model = model
         self._api_base = api_base
-        # 维度映射
-        if "text-embedding-v4" in model:
+        # 优先使用配置中的维度，否则按模型名推断（向后兼容）
+        if dimension is not None:
+            self._dimension = dimension
+        elif "text-embedding-v4" in model:
             self._dimension = DASHSCOPE_DIM
         elif "large" in model:
             self._dimension = 3072

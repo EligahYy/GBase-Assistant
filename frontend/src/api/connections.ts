@@ -39,3 +39,15 @@ export async function updateConnection(id: string, payload: Partial<ConnectionCr
 export async function deleteConnection(id: string): Promise<void> {
   await apiClient.delete(`/connections/${id}`)
 }
+
+export interface TableSchemaItem {
+  table_name: string
+  columns: string[]
+  ddl: string
+  description: string
+}
+
+export async function getSchemaTables(connectionId: string): Promise<TableSchemaItem[]> {
+  const { data } = await apiClient.get<TableSchemaItem[]>(`/connections/${connectionId}/schema/tables`)
+  return data
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "question": "gcadmin 常用命令有哪些？",
+    "answer": "`gcadmin` 是 GBase 8a 集群管理的核心命令行工具。\n\n**常用命令**：\n```bash\n# 查看集群状态\ngcadmin showcluster\n\n# 查看节点详细状态\ngcadmin showcluster -v\n\n# 查看 VC（Virtual Cluster）状态\ngcadmin showcluster vc\n\n# 查看 License\ngcadmin showLicense\n\n# 停止/启动集群\ngcadmin stopcluster\ngcadmin startcluster\n\n# 查看数据分布\ngcadmin showdistribution\n\n# 查看表分布信息\ngcadmin showtable distribution db_name.table_name\n```\n\n**输出字段说明**：\n- `Status`: ONLINE/OFFLINE/RECOVERING\n- `IP`: 节点 IP\n- `DataState`: 数据同步状态\n- `VC`: 所属虚拟集群",
+    "category": "cluster",
+    "keywords": ["gcadmin", "集群管理", "showcluster", "节点状态"]
+  },
+  {
+    "question": "集群节点离线怎么排查？",
+    "answer": "当 `gcadmin showcluster` 显示某节点为 OFFLINE 时的排查流程：\n\n**步骤 1：检查网络连通性**\n```bash\nping 节点IP\ntelnet 节点IP 5258\n```\n\n**步骤 2：检查节点服务状态**\n```bash\nssh 节点IP\nps -ef | grep gbase\nps -ef | grep gcware\n```\n\n**步骤 3：查看日志**\n```bash\n# GCluster 日志\ntail -n 100 /opt/gbase/log/gcluster/system.log\n\n# GNode 日志\ntail -n 100 /opt/gbase/log/gbase/system.log\n\n# gcware 日志\ntail -n 100 /opt/gbase/log/gcware/system.log\n```\n\n**步骤 4：重启节点服务**\n```bash\nservice gcware restart\nservice gbased restart\n# 或\ngcadmin recovernode 节点IP\n```\n\n**步骤 5：检查数据同步**\n```bash\ngcadmin showcluster -v\n# 确认 DataState 为 0（同步完成）\n```",
+    "category": "cluster",
+    "keywords": ["节点离线", "OFFLINE", "gcadmin", "排查", "日志"]
+  },
+  {
+    "question": "什么是 VC（Virtual Cluster）？怎么管理？",
+    "answer": "VC（Virtual Cluster）是 GBase 8a 的多租户隔离机制，一个物理集群可划分为多个逻辑集群。\n\n**查看 VC 列表**：\n```bash\ngcadmin showcluster vc\n```\n\n**切换 VC**：\n```sql\nSET gcluster_vc = 'vc01';\n```\n\n**创建 VC**：\n```bash\ngcadmin createvc vc02 '192.168.1.10,192.168.1.11'\n```\n\n**删除 VC**：\n```bash\ngcadmin dropvc vc02\n```\n\n**使用场景**：\n- 开发/测试/生产环境隔离\n- 不同业务部门独立资源池\n- 敏感数据隔离\n\n**注意事项**：\n- VC 间数据不共享\n- 每个 VC 有独立的 Coordinator\n- 跨 VC 查询需通过外部工具实现\n- License 可能限制 VC 数量",
+    "category": "cluster",
+    "keywords": ["VC", "Virtual Cluster", "虚拟集群", "多租户", "隔离"]
+  },
+  {
+    "question": "集群扩容（添加新节点）怎么操作？",
+    "answer": "GBase 8a 支持在线扩容，添加新计算节点提升集群处理能力。\n\n**步骤 1：准备新节点**\n- 安装 GBase 8a 软件\n- 配置网络，确保与现有节点互通\n- 同步配置文件\n\n**步骤 2：添加节点到集群**\n```bash\ngcadmin addnodes '新节点IP'\n```\n\n**步骤 3：重新分布数据**\n```sql\n-- 对现有表重新分布\nALTER TABLE orders redistribute;\n```\n\n**步骤 4：验证**\n```bash\ngcadmin showcluster\n# 确认新节点状态为 ONLINE\n```\n\n**注意事项**：\n- 扩容期间集群可读，但重新分布数据会影响性能\n- 建议在业务低峰期执行\n- 新节点硬件配置应与现有节点一致\n- License 需支持扩容后的节点数",
+    "category": "cluster",
+    "keywords": ["扩容", "添加节点", "addnodes", "重新分布", "集群扩展"]
+  },
+  {
+    "question": "集群备份策略怎么做？",
+    "answer": "GBase 8a 备份策略应覆盖全量备份和增量备份。\n\n**方案 1：逻辑备份（mysqldump）**\n```bash\n# 单库备份\nmysqldump -h host -P 5258 -u root -p db_name > db_name_$(date +%Y%m%d).sql\n\n# 全库备份\nmysqldump -h host -P 5258 -u root -p --all-databases > full_$(date +%Y%m%d).sql\n```\n\n**方案 2：物理备份（冷备份）**\n```bash\n# 停止服务后复制数据目录\nservice gclusterd stop\ntar czvf gbase_backup_$(date +%Y%m%d).tar.gz /opt/gbase/data/\nservice gclusterd start\n```\n\n**方案 3：集群级备份工具**\n```bash\n# 使用 GBase 提供的备份工具\ngcadmin backup /backup/path\n```\n\n**推荐策略**：\n| 类型 | 频率 | 保留期 |\n|------|------|--------|\n| 全量逻辑备份 | 每周 | 4 周 |\n| 增量逻辑备份 | 每天 | 7 天 |\n| 物理冷备份 | 每月 | 3 月 |\n| 配置文件备份 | 每次变更 | 永久 |\n\n**注意事项**：\n- 备份时加 `--single-transaction` 保证一致性\n- 大表建议分片备份\n- 定期验证备份可恢复性",
+    "category": "cluster",
+    "keywords": ["备份", "mysqldump", "冷备份", "恢复", "gcadmin backup"]
+  },
+  {
+    "question": "集群日志怎么管理和清理？",
+    "answer": "GBase 8a 日志管理对故障排查和性能监控至关重要。\n\n**日志目录结构**：\n```\n/opt/gbase/log/\n├── gcluster/          # 协调节点日志\n│   ├── system.log\n│   ├── query.log\n│   └── error.log\n├── gbase/             # 计算节点日志\n│   ├── system.log\n│   └── error.log\n├── gcware/            # 集群管理日志\n│   └── system.log\n└── loader/            # 导入工具日志\n    └── loader.log\n```\n\n**日志轮转配置**：\n```bash\n# 在 logrotate 中添加配置\n/opt/gbase/log/*/*.log {\n    daily\n    rotate 30\n    compress\n    delaycompress\n    missingok\n    notifempty\n    create 644 gbase gbase\n}\n```\n\n**手动清理**：\n```bash\n# 清理 30 天前的日志\nfind /opt/gbase/log -name '*.log*' -mtime +30 -delete\n```\n\n**注意事项**：\n- 生产环境建议启用 query.log 记录慢查询\n- 磁盘空间紧张时应优先清理 loader 日志\n- 重要故障排查期间不要清理日志",
+    "category": "cluster",
+    "keywords": ["日志", "logrotate", "清理", "system.log", "query.log"]
+  },
+  {
+    "question": "License 过期怎么更新？",
+    "answer": "GBase 8a License 过期会导致集群功能受限或无法启动。\n\n**查看 License 状态**：\n```bash\ngcadmin showLicense\n```\n\n**更新 License 步骤**：\n\n1. **获取新 License**：联系 GBase 厂商申请新 License 文件\n\n2. **替换 License 文件**：\n```bash\n# 备份旧 License\ncp /opt/gbase/license/license.dat /opt/gbase/license/license.dat.bak\n\n# 复制新 License\ncp /path/to/new_license.dat /opt/gbase/license/license.dat\n```\n\n3. **重启集群服务**：\n```bash\ngcadmin stopcluster\ngcadmin startcluster\n```\n\n4. **验证**：\n```bash\ngcadmin showLicense\n```\n\n**常见问题**：\n- License 与节点数不匹配：需申请对应节点数的 License\n- License 功能受限：确认是否包含所需功能模块\n- 测试环境：可申请临时试用 License",
+    "category": "cluster",
+    "keywords": ["License", "授权", "过期", "showLicense", "更新"]
+  },
+  {
+    "question": "数据重分布（Redistribute）什么时候需要？",
+    "answer": "数据重分布在以下场景需要执行：\n\n**触发场景**：\n1. **集群扩容后**：新节点加入后，现有数据未分布到新节点\n2. **修改分布键后**：表结构变更需要重新分布数据\n3. **数据倾斜严重**：某节点数据量远超其他节点\n4. **节点故障恢复后**：故障节点重新上线后数据不同步\n\n**执行重分布**：\n```sql\n-- 单表重分布\nALTER TABLE orders REDISTRIBUTE;\n\n-- 全库重分布（谨慎使用）\n-- 需遍历所有表逐一执行\n```\n\n**监控进度**：\n```bash\ngcadmin showcluster -v\n# 关注 DataState 字段\n# 0 = 同步完成，非 0 = 正在同步\n```\n\n**注意事项**：\n- 重分布期间集群可用，但性能受影响\n- 大表重分布耗时较长，建议在低峰期执行\n- 重分布前确保磁盘空间充足（约需表大小 2 倍空间）\n- 频繁重分布影响集群稳定性",
+    "category": "cluster",
+    "keywords": ["重分布", "REDISTRIBUTE", "扩容", "数据同步", "DataState"]
+  },
+  {
+    "question": "节点故障恢复流程是什么？",
+    "answer": "GBase 8a 节点故障后的恢复流程：\n\n**步骤 1：确认故障范围**\n```bash\ngcadmin showcluster\n# 记录故障节点 IP 和状态\n```\n\n**步骤 2：排查故障原因**\n```bash\nssh 故障节点\n# 检查磁盘空间\ndf -h\n# 检查内存\nfree -h\n# 检查进程\nps -ef | grep gbase\n# 查看系统日志\ntail -n 200 /var/log/messages\n```\n\n**步骤 3：修复问题**\n- 磁盘满：清理日志或扩容磁盘\n- 内存不足：释放内存或重启服务\n- 进程崩溃：检查日志定位原因\n\n**步骤 4：重启节点服务**\n```bash\nservice gcware restart\nservice gbased restart\nservice gclusterd restart\n```\n\n**步骤 5：数据恢复**\n```bash\n# 自动恢复数据同步\ngcadmin recovernode 故障节点IP\n\n# 监控恢复进度\ngcadmin showcluster -v\n```\n\n**步骤 6：验证**\n```bash\n# 确认节点状态为 ONLINE\n# 确认 DataState 为 0\n# 执行测试查询验证数据完整性\n```",
+    "category": "cluster",
+    "keywords": ["故障恢复", "recovernode", "节点故障", "数据同步", "磁盘满"]
+  },
+  {
+    "question": "GBase 8a 集群缩容（移除节点）怎么操作？",
+    "answer": "集群缩容在硬件老化或业务收缩时需要执行。\n\n**步骤 1：确认节点数据可迁移**\n```bash\ngcadmin showcluster\n# 确保其他节点有足够空间容纳迁移数据\n```\n\n**步骤 2：将节点设为只读/下线**\n```bash\ngcadmin setnodestate 节点IP readonly\n```\n\n**步骤 3：迁移数据**\n```sql\n-- 对所有分布在该节点的表执行重分布\nALTER TABLE table_name REDISTRIBUTE;\n```\n\n**步骤 4：移除节点**\n```bash\ngcadmin removenodes '节点IP'\n```\n\n**步骤 5：验证**\n```bash\ngcadmin showcluster\n# 确认节点已从集群中移除\n```\n\n**注意事项**：\n- 缩容前必须确保数据已完整迁移\n- 缩容操作不可逆，操作前备份\n- License 节点数需同步调整\n- 建议在业务低峰期执行",
+    "category": "cluster",
+    "keywords": ["缩容", "removenodes", "移除节点", "迁移", "集群缩减"]
+  }
+]

@@ -12,6 +12,7 @@ import {
   SettingsOutline,
   MenuOutline,
   ChevronBackOutline,
+  AlertCircleOutline,
 } from '@vicons/ionicons5'
 import { NIcon, NDropdown, NModal, NInput, useMessage, useDialog } from 'naive-ui'
 import { useChatStore } from '@/stores/chat'
@@ -164,6 +165,10 @@ function navigateTo(path: string) { router.push(path) }
 
       <!-- Bottom Nav -->
       <div class="bottom-nav" :class="{ collapsed }">
+        <button :class="['nav-item', { active: route.path === '/tools/error-code', collapsed }]" @click.stop="navigateTo('/tools/error-code')">
+          <n-icon :component="AlertCircleOutline" size="16" />
+          <span v-if="!collapsed">错误码查询</span>
+        </button>
         <button :class="['nav-item', { active: route.path === '/settings', collapsed }]" @click.stop="navigateTo('/settings')">
           <n-icon :component="SettingsOutline" size="16" />
           <span v-if="!collapsed">设置</span>
