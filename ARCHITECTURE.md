@@ -460,19 +460,20 @@ gbase8a-assistant/
 - [x] 连接保存/更新时后台异步触发 Schema 向量化入库
 - [x] Lifespan 集成 Qdrant 健康检查 + 知识库增量同步（按文件 hash）
 
-**Sprint 2 🚧 进行中（RAG + 错误码工具）**
-- [ ] GBase 8a 错误码知识库 (`knowledge/docs/error_codes.json` 50+ 条)
-- [ ] `POST /api/tools/error-code` 错误码查询接口
-- [ ] `POST /api/admin/reindex` 强制全量重建接口
-- [ ] 运维文档分块入库（性能、参数、集群）
-- [ ] 前端 `ErrorCodeTool.vue` + Settings 状态卡 + Reindex 按钮
-- [ ] `MessageBubble` 引用来源展示
+**Sprint 2 ✅ 已完成（RAG + 错误码工具）**
+- [x] GBase 8a 错误码知识库 56 条 (`knowledge/docs/error_codes.json`)
+- [x] `POST /api/tools/error-code` 错误码查询接口（精确/语义/关键词三模态）
+- [x] `POST /api/admin/reindex` 强制全量重建接口（X-Admin-Token 鉴权）
+- [x] 运维文档分块入库 30 条（`ops_cluster.json`、`ops_parameters.json`、`ops_performance.json`）
+- [x] 前端 `ErrorCodeView.vue` + Settings 状态卡 + Reindex 按钮
+- [x] `MessageBubble` RAG 引用来源折叠展示
+- [x] Health 扩展：`/health` 返回 qdrant/llm/database 三态
 
-**Sprint 3 ⏸ 待启动（Schema 浏览器 + 演示打磨，节选）**
-- [ ] `GET /api/connections/{id}/schema/tables` 结构化表列表接口
-- [ ] Settings 页嵌入 Schema 浏览器
-- [ ] `ConversationSummary` 启用：N 轮后异步生成摘要
-- [ ] `docs/demo-cases.md` 10–15 条标准用例
+**Sprint 3 ✅ 已完成（Schema 浏览器 + 演示打磨）**
+- [x] `GET /api/connections/{id}/schema/tables` 结构化表列表接口
+- [x] Settings 页嵌入 Schema 浏览器（表列表折叠展开）
+- [x] `ConversationSummary` 启用：N 轮后异步生成摘要 ⏸ 延到 Phase 4
+- [x] `docs/demo-cases.md` 15 条标准用例（覆盖 SQL/错误码/QA/Schema/多轮）
 
 **Sprint 4 ⏸ 上线前必做（Demo 阶段降权）**
 - [ ] LangGraph 评估文档（预判：不引入）

@@ -8,7 +8,7 @@
 
 **GBase 8a Agent 数据库助手** 是一个面向内部团队的 AI 数据库助手。用户通过自然语言中文对话，系统生成兼容国产 GBase 8a MPP 数据库的 SQL 查询，或回答 GBase 8a 相关的技术问题。
 
-- **当前阶段**：Phase 3 Sprint 1 已完成，Sprint 2 进行中（向量检索核心已落地：Qdrant + Embedder 工厂 + 三个 retriever + 自动降级回退；待办：错误码工具、RAG 完整接入、管理接口）
+- **当前阶段**：Phase 3 Sprint 1-3 P0 ✅ 全部完成，A.1/A.2 P1 重构 ✅ 全部完成。Sprint 3.3（ConversationSummary 长期记忆）延到 Phase 4。当前进入 **Demo/评测阶段**，Sprint 4（CI、可观测、LangGraph 评估）延到上线前执行。
 - **目标用户**：<50 人的内部产品/研发/测试团队
 - **部署方式**：单机部署，前后端分离 + Qdrant Docker
 - **主要语言**：中文（文档、注释、UI、Prompt 均以中文为主）
@@ -130,7 +130,7 @@ gbase8a-assistant/
 │   ├── src/
 │   │   ├── main.ts            # 应用入口：Pinia + Router + Naive UI
 │   │   ├── App.vue            # 根组件（含 sidebar 开关逻辑、主题切换、全局 CSS 变量）
-│   │   ├── router/index.ts    # 路由定义（HomeView + SettingsView）
+│   │   ├── router/index.ts    # 路由定义（HomeView + SettingsView + ErrorCodeView）
 │   │   ├── stores/
 │   │   │   ├── chat.ts        # 对话状态管理（消息列表、流式消息处理）
 │   │   │   └── connection.ts  # 数据库连接状态
@@ -139,6 +139,8 @@ gbase8a-assistant/
 │   │   │   ├── chat.ts        # 聊天 API 封装（含 SSE stream）
 │   │   │   ├── connections.ts # 连接管理 API 封装
 │   │   │   ├── models.ts      # 模型列表 API
+│   │   │   ├── tools.ts       # 错误码查询 API
+│   │   │   ├── admin.ts       # 管理接口（Reindex）
 │   │   │   └── feedback.ts    # SQL 反馈 API
 │   │   ├── components/
 │   │   │   ├── chat/
@@ -148,8 +150,9 @@ gbase8a-assistant/
 │   │   │   └── layout/
 │   │   │       └── Sidebar.vue         # 对话历史侧栏（新建/重命名/归档/标签/删除）
 │   │   ├── views/
-│   │   │   ├── HomeView.vue   # 首页（仅挂载 ChatPanel）
-│   │   │   └── SettingsView.vue # 设置页（模型选择 + 连接管理）
+│   │   │   ├── HomeView.vue       # 首页（仅挂载 ChatPanel）
+│   │   │   ├── SettingsView.vue   # 设置页（模型选择 + Schema 浏览器 + 系统状态）
+│   │   │   └── ErrorCodeView.vue  # 错误码查询工具页
 │   │   └── composables/
 │   │       ├── useSSE.ts      # SSE 流式请求封装（含 token 缓冲优化）
 │   │       ├── useContentParser.ts  # 实时解析 ```sql...``` 代码块
@@ -165,7 +168,10 @@ gbase8a-assistant/
 │   │   └── sql_examples.jsonl         # Few-shot NL→SQL 示例（30 条，含 GBase 特有语法）
 │   └── docs/
 │       ├── faq.json                   # FAQ 知识库（38 条 JSON 数组）
-│       └── error_codes.json           # ⚠️ Sprint 2 待补：GBase 8a 错误码知识库
+│       ├── error_codes.json           # 错误码知识库（56 条）
+│       ├── ops_cluster.json           # 运维文档：集群管理
+│       ├── ops_parameters.json        # 运维文档：参数调优
+│       └── ops_performance.json       # 运维文档：性能优化
 │
 └── deploy/                    # 部署配置
     ├── docker-compose.yml     # backend + frontend + qdrant + nginx 全链路编排
@@ -405,7 +411,7 @@ testpaths = ["tests"]
 | 改数据库模型 | `backend/app/models/*.py` |
 | 添加 Few-shot 示例 | `knowledge/examples/sql_examples.jsonl` |
 | 添加 FAQ 知识 | `knowledge/docs/faq.json` |
-| 添加错误码（待补） | `knowledge/docs/error_codes.json`（Sprint 2） |
+| 添加错误码 | `knowledge/docs/error_codes.json` |
 
 ---
 
@@ -422,17 +428,19 @@ testpaths = ["tests"]
 - ~~FAQ 知识库单薄~~：已扩展至 38 条
 - ~~Schema/Few-shot/Knowledge 检索全量注入~~：Phase 3 Sprint 1 已接入 Qdrant 向量检索 + 自动降级
 
-### 进行中（Phase 3 Sprint 2 — RAG + 错误码工具）
-1. **错误码知识库**：`knowledge/docs/error_codes.json` 缺失，需准备 50+ 条
-2. **错误码查询接口**：`POST /api/tools/error-code` 待实现
-3. **管理接口**：`POST /api/admin/reindex` 强制全量重建待实现
-4. **运维文档分块**：性能/参数/集群相关 `knowledge/docs/ops_*.json` 待补
-5. **Settings 状态卡**：前端 Qdrant 状态指示 + Reindex 按钮
-6. **MessageBubble sources 区**：RAG 引用来源展示
+### 已完成（Phase 3 Sprint 2 — RAG + 错误码工具）✅
+1. **错误码知识库**：`knowledge/docs/error_codes.json` 56 条已入库
+2. **错误码查询接口**：`POST /api/tools/error-code` 已上线（精确/语义/关键词三模态）
+3. **管理接口**：`POST /api/admin/reindex` 强制全量重建已上线（X-Admin-Token 鉴权）
+4. **运维文档分块**：`ops_cluster.json`、`ops_parameters.json`、`ops_performance.json` 共 30 条已入库
+5. **Settings 状态卡**：系统状态面板 + Reindex 按钮已集成
+6. **MessageBubble sources 区**：RAG 引用来源折叠展示已集成
+7. **前端错误码页面**：`/tools/error-code` 路由 + `ErrorCodeView.vue` 已上线
+8. **Health 扩展**：`/health` 返回 qdrant/llm/database 三态
 
-### 即将处理（阶段 A.2 重构，与 Sprint 2 并行）
+### 已完成（阶段 A.2 重构）✅
 1. **Fallback wrapper 抽象**：`dependencies.py` 三个降级类合并为泛型 `FallbackRetriever[T]`
-2. **Embedding 维度配置化**：`models.yaml` 显式声明，去掉 `litellm.py` 硬编码判断
+2. **Embedding 维度配置化**：`models.yaml` 显式声明 `dimension: 1024`
 3. **Lifespan 异步化**：`main.py` 中 `sync_all_to_qdrant` 改为 `asyncio.create_task` + `SKIP_VECTOR_SYNC` env 开关
 
 ### 上线前必做（Phase 3 Sprint 4，本期 Demo 阶段降权）
