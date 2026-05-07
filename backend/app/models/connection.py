@@ -19,8 +19,13 @@ class DbConnection(Base):
     host: Mapped[str | None] = mapped_column(String(255), nullable=True)
     port: Mapped[int | None] = mapped_column(nullable=True, default=5258)
     database_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    password: Mapped[str | None] = mapped_column(Text, nullable=True)  # AES-GCM 加密存储
+    driver_type: Mapped[str] = mapped_column(String(20), default="manual")  # native | manual
+    connection_tested: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    schema_ddl: Mapped[str | None] = mapped_column(Text, nullable=True)  # 手动粘贴的 DDL
+    schema_ddl: Mapped[str | None] = mapped_column(Text, nullable=True)  # 手动粘贴或自动同步
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(

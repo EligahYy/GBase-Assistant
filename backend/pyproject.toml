@@ -19,7 +19,11 @@ dependencies = [
     "sqlalchemy>=2.0",
     "sqlglot>=30.4.2",
     "uvicorn[standard]>=0.44.0",
+    "cryptography>=44.0",
 ]
+
+# NOTE: gbase-connector-python 不在 PyPI，需从官网下载源码安装
+# https://www.gbase.cn/download/gbase-8a?category=DRIVER_PACKAGE
 
 [dependency-groups]
 dev = [

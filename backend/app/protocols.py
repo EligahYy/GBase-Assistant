@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -73,6 +73,61 @@ class ChatResult:
     sources: list[dict] = field(default_factory=list)
     token_usage: dict | None = None
     validation: ValidationResult | None = None
+
+
+# ── 生产数据库连接（Phase 4 新增）──
+
+
+@dataclass
+class ConnectionConfig:
+    """GBase 8a 实时数据库连接配置。"""
+
+    host: str
+    port: int
+    database: str
+    username: str
+    password: str
+    driver_type: str
+    connection_timeout: int = 30
+
+
+@dataclass
+class QueryResult:
+    """SQL 执行结果。"""
+
+    columns: list[str]
+    rows: list[list[Any]]
+    row_count: int
+    execution_time_ms: float
+    truncated: bool  # 是否因超出行数限制被截断
+
+
+@runtime_checkable
+class DatabaseConnector(Protocol):
+    """GBase 8a 实时数据库连接接口。JDBC/ODBC 后续可替换实现。"""
+
+    @property
+    def driver_name(self) -> str:
+        """驱动名称标识。"""
+        ...
+
+    async def test(self, config: ConnectionConfig) -> tuple[bool, str]:
+        """测试连通性，返回 (成功, 消息)。"""
+        ...
+
+    async def fetch_schema(self, config: ConnectionConfig) -> list[TableSchema]:
+        """从数据库获取所有表结构。"""
+        ...
+
+    async def execute(
+        self,
+        config: ConnectionConfig,
+        sql: str,
+        max_rows: int = 1000,
+        timeout: int = 30,
+    ) -> QueryResult:
+        """执行 SQL 查询，返回结果。"""
+        ...
 
 
 @runtime_checkable

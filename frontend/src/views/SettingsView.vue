@@ -2,7 +2,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { NInput, NButton, NSelect, NEmpty, NTag, useMessage, useDialog } from 'naive-ui'
 import { useConnectionStore } from '@/stores/connection'
-import { listConnections, createConnection, updateConnection, deleteConnection, getSchemaTables, type ConnectionCreate, type TableSchemaItem } from '@/api/connections'
+import { listConnections, createConnection, updateConnection, deleteConnection, getSchemaTables, testConnection, syncSchema, type ConnectionCreate, type TableSchemaItem } from '@/api/connections'
 import { listModels, type ModelInfo } from '@/api/models'
 import { ArrowBackOutline, ServerOutline, TrashOutline, CreateOutline, RefreshOutline, CheckmarkCircleOutline, CloseCircleOutline, WarningOutline, ChevronDownOutline, ChevronUpOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -18,10 +18,14 @@ const modelOptions = ref<{ label: string; value: string }[]>([])
 const selectedModel = ref(localStorage.getItem('gbase_model') || 'deepseek/deepseek-chat')
 watch(selectedModel, (val) => { localStorage.setItem('gbase_model', val) })
 
+const driverOptions = [
+  { label: '手动模式（粘贴 DDL）', value: 'manual' },
+  { label: '原生 Python 驱动', value: 'native' },
+]
 const showAddForm = ref(false)
 const editingId = ref<string | null>(null)
 const newConn = ref<ConnectionCreate & { id?: string }>({
-  name: '', host: '', port: 5258, database_name: '', description: '', schema_ddl: '',
+  name: '', host: '', port: 5258, database_name: '', username: '', password: '', driver_type: 'manual', description: '', schema_ddl: '',
 })
 const connections = ref(connStore.connections)
 
@@ -31,6 +35,10 @@ const healthLoading = ref(false)
 const adminToken = ref('')
 const reindexLoading = ref(false)
 const reindexResult = ref<string | null>(null)
+
+// ── Connection actions ──
+const testingConn = ref<Set<string>>(new Set())
+const syncingConn = ref<Set<string>>(new Set())
 
 onMounted(async () => {
   connections.value = await listConnections()
@@ -92,6 +100,42 @@ const statusColor = (s: string) => {
   if (s === 'degraded') return 'var(--warning)'
   return 'var(--error)'
 }
+async function handleTestConnection(connId: string) {
+  testingConn.value.add(connId)
+  try {
+    const resp = await testConnection(connId)
+    if (resp.status === 'ok') {
+      naiveMsg.success(resp.message)
+    } else {
+      naiveMsg.error(resp.message)
+    }
+    connections.value = await listConnections()
+  } catch (e: any) {
+    naiveMsg.error(e.message || '测试失败')
+  } finally {
+    testingConn.value.delete(connId)
+  }
+}
+
+async function handleSyncSchema(connId: string) {
+  syncingConn.value.add(connId)
+  try {
+    const resp = await syncSchema(connId)
+    naiveMsg.success(`已同步 ${resp.tables} 个表`)
+    connections.value = await listConnections()
+    // 刷新 schema 缓存
+    if (expandedSchemas.value.has(connId)) {
+      schemaCache.value.delete(connId)
+      const tables = await getSchemaTables(connId)
+      schemaCache.value.set(connId, tables)
+    }
+  } catch (e: any) {
+    naiveMsg.error(e.message || '同步失败')
+  } finally {
+    syncingConn.value.delete(connId)
+  }
+}
+
 const statusLabel = (s: string) => {
   if (s === 'connected' || s === 'ok') return '正常'
   if (s === 'degraded') return '降级'
@@ -151,14 +195,15 @@ function startEdit(conn: any) {
   editingId.value = conn.id
   newConn.value = {
     name: conn.name, host: conn.host || '', port: conn.port || 5258,
-    database_name: conn.database_name || '', description: conn.description || '', schema_ddl: conn.schema_ddl || '',
+    database_name: conn.database_name || '', username: conn.username || '', password: '', driver_type: conn.driver_type || 'manual',
+    description: conn.description || '', schema_ddl: conn.schema_ddl || '',
   }
   showAddForm.value = true
 }
 
 function resetForm() {
   editingId.value = null
-  newConn.value = { name: '', host: '', port: 5258, database_name: '', description: '', schema_ddl: '' }
+  newConn.value = { name: '', host: '', port: 5258, database_name: '', username: '', password: '', driver_type: 'manual', description: '', schema_ddl: '' }
   showAddForm.value = false
 }
 
@@ -297,12 +342,32 @@ function handleDelete(id: string, name: string) {
                 <n-input v-model:value="newConn.host" placeholder="localhost" />
               </div>
               <div class="field">
+                <label>端口</label>
+                <n-input :value="String(newConn.port || '')" @update:value="v => newConn.port = v ? Number(v) : 5258" placeholder="5258" />
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
                 <label>数据库名</label>
                 <n-input v-model:value="newConn.database_name" placeholder="gbase_db" />
               </div>
+              <div class="field">
+                <label>驱动类型</label>
+                <n-select v-model:value="newConn.driver_type" :options="driverOptions" />
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label>用户名</label>
+                <n-input v-model:value="newConn.username" placeholder="gbase_user" />
+              </div>
+              <div class="field">
+                <label>密码</label>
+                <n-input v-model:value="newConn.password" type="password" placeholder="••••••••" />
+              </div>
             </div>
             <div class="field">
-              <label>Schema DDL</label>
+              <label>Schema DDL <span v-if="newConn.driver_type !== 'manual'" class="field-hint">（驱动模式下可留空，通过「同步 Schema」自动获取）</span></label>
               <n-input v-model:value="newConn.schema_ddl" type="textarea" placeholder="粘贴 CREATE TABLE 语句..." :autosize="{ minRows: 4, maxRows: 10 }" />
             </div>
             <n-button v-if="editingId" type="primary" @click="handleUpdate">更新连接</n-button>
@@ -324,11 +389,21 @@ function handleDelete(id: string, name: string) {
                   <div class="conn-meta">
                     <n-tag v-if="c.has_schema" size="small" type="success">已配置 Schema</n-tag>
                     <n-tag v-else size="small" type="default">无 Schema</n-tag>
+                    <n-tag size="small" :type="c.driver_type === 'manual' ? 'default' : 'info'">{{ c.driver_type === 'manual' ? '手动' : '原生驱动' }}</n-tag>
+                    <n-tag v-if="c.driver_type !== 'manual'" size="small" :type="c.connection_tested ? 'success' : 'warning'">{{ c.connection_tested ? '已连通' : '未测试' }}</n-tag>
                     <span class="conn-time">{{ new Date(c.created_at).toLocaleDateString() }}</span>
                   </div>
                 </div>
               </div>
               <div class="conn-actions">
+                <template v-if="c.driver_type !== 'manual'">
+                  <n-button size="tiny" quaternary :loading="testingConn.has(c.id)" @click="handleTestConnection(c.id)">
+                    测试
+                  </n-button>
+                  <n-button size="tiny" quaternary :loading="syncingConn.has(c.id)" @click="handleSyncSchema(c.id)">
+                    同步
+                  </n-button>
+                </template>
                 <button v-if="c.has_schema" class="action-btn schema-toggle" :class="{ active: expandedSchemas.has(c.id) }" @click="toggleSchemaView(c.id)">
                   <n-icon :component="expandedSchemas.has(c.id) ? ChevronUpOutline : ChevronDownOutline" size="15" />
                 </button>
@@ -433,6 +508,7 @@ function handleDelete(id: string, name: string) {
 }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 480px) { .field-row { grid-template-columns: 1fr; } }
+.field-hint { font-size: 11px; color: var(--text-muted); font-weight: normal; }
 
 /* Connection list */
 .conn-list { display: flex; flex-direction: column; gap: 2px; }
