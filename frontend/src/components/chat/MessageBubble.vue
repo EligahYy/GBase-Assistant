@@ -44,29 +44,73 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
 }
 
-/**
- * 轻量行内 Markdown 渲染器。
- * 将文本按 \n\n 分割为 <p> 段落，段落内处理行内格式（加粗、斜体、代码、链接）。
- * 不使用 marked.parse，避免流式过程中对不完整 Markdown 解析不稳定导致的布局跳动。
- */
 function renderInlineMarkdown(text: string): string {
   if (!text) return ''
-  const paragraphs = text.split(/\n\n+/)
-  return paragraphs
-    .map((p) => {
-      const trimmed = p.trim()
-      if (!trimmed) return ''
-      let inline = escapeHtml(trimmed)
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/`(.+?)`/g, '<code>$1</code>')
-        .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-      // 单换行在段落内转为空格（符合 Markdown 语义）
-      inline = inline.replace(/\n/g, ' ')
-      return `<p>${inline}</p>`
-    })
-    .filter(Boolean)
-    .join('')
+
+  const lines = text.split('\n')
+  const blocks: string[] = []
+  let listItems: string[] = []
+
+  const flushList = () => {
+    if (listItems.length) {
+      const items = listItems.map((item) => `<li>${renderInline(item)}</li>`).join('')
+      blocks.push(`<ul class="md-list">${items}</ul>`)
+      listItems = []
+    }
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd()
+    if (!line) {
+      flushList()
+      continue
+    }
+
+    const listMatch = line.match(/^(\s*)[-*+]\s+(.*)$/)
+    if (listMatch && listMatch[2] !== undefined) {
+      listItems.push(listMatch[2])
+      continue
+    }
+
+    flushList()
+
+    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/)
+    if (headingMatch && headingMatch[1] !== undefined && headingMatch[2] !== undefined) {
+      const level = headingMatch[1].length
+      const content = headingMatch[2]
+      const sizes = ['18px', '16px', '15px', '14px', '13px', '12px']
+      blocks.push(
+        `<h${level} style="margin:12px 0 8px;font-size:${sizes[level - 1]};font-weight:600;color:var(--text-0);letter-spacing:-0.01em">${renderInline(content)}</h${level}>`
+      )
+      continue
+    }
+
+    const quoteMatch = line.match(/^>\s?(.*)$/)
+    if (quoteMatch && quoteMatch[1] !== undefined) {
+      blocks.push(
+        `<blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid var(--text-3);background:var(--bg-panel);border-radius:0 6px 6px 0;color:var(--text-2);font-style:italic">${renderInline(quoteMatch[1])}</blockquote>`
+      )
+      continue
+    }
+
+    blocks.push(`<p style="margin:0 0 10px;line-height:1.75">${renderInline(line)}</p>`)
+  }
+
+  flushList()
+  return blocks.join('')
+}
+
+function renderInline(text: string): string {
+  let s = escapeHtml(text)
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  const boldOpen = (s.match(/\*\*/g) || []).length
+  if (boldOpen % 2 === 1) {
+    s = s.replace(/\*\*(?![^<]*>)/, '')
+  }
+  s = s.replace(/(^|[^*])\*(?!\*)(.+?)\*(?!\*)/g, '$1<em>$2</em>')
+  s = s.replace(/`(.+?)`/g, '<code>$1</code>')
+  s = s.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+  return s
 }
 </script>
 
@@ -86,7 +130,6 @@ function renderInlineMarkdown(text: string): string {
         <div v-if="!isUser && !isTyping" class="msg-meta">
           <span class="msg-author">GBase 助手</span>
           <span class="msg-badge">AI</span>
-          <span class="msg-time">刚刚</span>
         </div>
 
         <div v-if="isTyping" class="thinking">
@@ -153,8 +196,8 @@ function renderInlineMarkdown(text: string): string {
 
 <style scoped>
 .msg-row {
-  padding: 24px 0;
-  animation: msgEnter 0.5s var(--ease-out-expo) both;
+  padding: 20px 0;
+  animation: msgEnter 0.4s var(--ease-out-expo) both;
 }
 .msg-row + .msg-row {
   border-top: 1px solid var(--seam-1);
@@ -163,7 +206,7 @@ function renderInlineMarkdown(text: string): string {
 .msg-wrapper {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
+  gap: 14px;
   max-width: var(--max-content-width);
   margin: 0 auto;
   padding: 0 28px;
@@ -172,7 +215,7 @@ function renderInlineMarkdown(text: string): string {
   .msg-wrapper { max-width: 100%; padding: 0 24px; }
 }
 @media (max-width: 768px) {
-  .msg-wrapper { gap: 12px; padding: 0 16px; }
+  .msg-wrapper { gap: 10px; padding: 0 16px; }
 }
 
 .avatar {
@@ -180,20 +223,14 @@ function renderInlineMarkdown(text: string): string {
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; margin-top: 2px;
-  position: relative;
 }
 .assistant-avatar {
   background: var(--bg-panel);
-  border: 1px solid var(--seam-2);
-  color: var(--accent);
-}
-.assistant-avatar::after {
-  content: ''; position: absolute; inset: -2px; border-radius: 50%;
-  border: 1px solid var(--accent-dim);
-  animation: avatarRing 3s ease-out infinite;
+  border: 1px solid var(--seam-1);
+  color: var(--text-2);
 }
 .user-avatar {
-  background: var(--bg-surface);
+  background: var(--bg-panel);
   border: 1px solid var(--seam-1);
   color: var(--text-3);
 }
@@ -207,7 +244,7 @@ function renderInlineMarkdown(text: string): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .msg-author {
   font-size: 13px;
@@ -221,14 +258,9 @@ function renderInlineMarkdown(text: string): string {
   letter-spacing: 0.06em;
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--bg-deep);
+  color: var(--text-3);
   border: 1px solid var(--seam-1);
-  font-family: var(--font-mono);
-}
-.msg-time {
-  font-size: 11px;
-  color: var(--text-4);
   font-family: var(--font-mono);
 }
 
@@ -238,13 +270,12 @@ function renderInlineMarkdown(text: string): string {
 .user-content .text-segment {
   display: inline-block;
   text-align: left;
-  background: var(--bg-surface);
-  padding: 12px 18px;
+  background: var(--bg-panel);
+  padding: 10px 16px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--seam-1);
   font-weight: 500;
   color: var(--text-0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   max-width: 100%;
   word-break: break-word;
 }
@@ -267,67 +298,95 @@ function renderInlineMarkdown(text: string): string {
 .assistant-content :deep(code) {
   font-family: var(--font-mono);
   font-size: 13px;
-  background: var(--bg-surface);
+  background: var(--bg-panel);
   padding: 2px 7px;
   border-radius: 5px;
-  color: var(--accent);
+  color: var(--text-0);
   border: 1px solid var(--seam-1);
 }
 .assistant-content :deep(em) { font-style: italic; }
 .assistant-content :deep(del) { text-decoration: line-through; opacity: 0.6; }
 
-/* Paragraph spacing */
-.assistant-content .text-segment :deep(p) { margin-bottom: 14px; }
+.assistant-content .text-segment :deep(p) { margin-bottom: 12px; }
 .assistant-content .text-segment :deep(p:last-child) { margin-bottom: 0; }
 .assistant-content .text-segment :deep(p:empty) { display: none; }
 
 .assistant-content .text-segment :deep(a) {
-  color: var(--accent);
+  color: var(--text-0);
   text-decoration: none;
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid var(--seam-2);
   transition: border-color var(--duration-fast);
 }
 .assistant-content .text-segment :deep(a:hover) {
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--text-0);
+}
+
+.assistant-content :deep(.md-list) {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+  list-style: disc;
+}
+.assistant-content :deep(.md-list li) {
+  margin-bottom: 4px;
+  color: var(--text-1);
+  line-height: 1.7;
+}
+
+.assistant-content :deep(blockquote) {
+  margin: 8px 0;
+}
+
+.assistant-content :deep(h1),
+.assistant-content :deep(h2),
+.assistant-content :deep(h3),
+.assistant-content :deep(h4),
+.assistant-content :deep(h5),
+.assistant-content :deep(h6) {
+  margin: 10px 0 6px;
+  font-weight: 600;
+  color: var(--text-0);
 }
 
 .stream-cursor {
   display: inline-block;
   width: 2px;
   height: 18px;
-  background: var(--accent);
+  background: var(--text-0);
   vertical-align: middle;
   margin-left: 2px;
   animation: cursorBlink 1s step-end infinite;
   border-radius: 1px;
-  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 /* Thinking indicator */
 .thinking {
   display: inline-flex;
   align-items: center;
-  padding: 10px 0;
+  padding: 8px 0;
 }
 .thinking-inner {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 8px 14px;
   background: var(--bg-panel);
   border: 1px solid var(--seam-1);
   border-radius: 100px;
 }
 .dot {
-  width: 7px; height: 7px;
-  background: var(--accent);
+  width: 6px; height: 6px;
+  background: var(--text-3);
   border-radius: 50%;
   animation: signalDot 1.4s infinite ease both;
-  box-shadow: 0 0 4px var(--accent-glow);
 }
 .dot:nth-child(1) { animation-delay: -0.32s; }
 .dot:nth-child(2) { animation-delay: -0.16s; }
 .dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes signalDot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
 
 .thinking-text {
   font-size: 12px;
@@ -338,7 +397,7 @@ function renderInlineMarkdown(text: string): string {
 
 /* Query Result Table */
 .result-block {
-  margin-top: 16px;
+  margin-top: 14px;
   border: 1px solid var(--seam-1);
   border-radius: var(--radius-md);
   background: var(--bg-panel);
@@ -349,7 +408,7 @@ function renderInlineMarkdown(text: string): string {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: var(--bg-surface);
+  background: var(--bg-deep);
   border-bottom: 1px solid var(--seam-1);
 }
 .result-label {
@@ -377,7 +436,7 @@ function renderInlineMarkdown(text: string): string {
 .result-table thead th {
   position: sticky;
   top: 0;
-  background: var(--bg-surface);
+  background: var(--bg-deep);
   padding: 8px 12px;
   text-align: left;
   font-weight: 600;
@@ -400,16 +459,16 @@ function renderInlineMarkdown(text: string): string {
   color: var(--warning);
   text-align: center;
   border-top: 1px solid var(--seam-1);
-  background: var(--bg-surface);
+  background: var(--bg-deep);
 }
 
 /* RAG sources */
 .sources-block {
-  margin-top: 14px;
+  margin-top: 12px;
   padding: 10px 14px;
   background: var(--bg-panel);
   border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--radius-md);
   max-width: 100%;
 }
 .sources-block[open] { padding-bottom: 12px; }
@@ -434,8 +493,8 @@ function renderInlineMarkdown(text: string): string {
   transform: rotate(90deg);
 }
 .sources-label {
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-3);
 }
@@ -443,8 +502,8 @@ function renderInlineMarkdown(text: string): string {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 100px;
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--bg-deep);
+  color: var(--text-2);
   border: 1px solid var(--seam-1);
 }
 .sources-list {

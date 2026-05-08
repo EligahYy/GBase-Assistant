@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -15,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.chains.intent import classify_intent
 from app.chains.qa_chain import run_qa_chain, stream_qa_chain
 from app.chains.sql_chain import run_sql_chain, stream_sql_chain
-from app.database import get_db
+from app.database import async_session_factory, get_db
 from app.db_connectors.connector_factory import get_connector
 from app.dependencies import get_example_retriever, get_knowledge_retriever, get_llm_client, get_schema_retriever
 from app.models.connection import DbConnection
@@ -211,6 +212,22 @@ async def _save_messages(
     return user_msg, assistant_msg
 
 
+async def _trigger_summary_generation(
+    conversation_id: str,
+    model: str | None,
+) -> None:
+    """后台任务：对话 N 轮后生成摘要。"""
+    try:
+        from app.jobs.summary_generator import generate_conversation_summary
+        from app.llm.litellm_client import LiteLLMClient
+
+        async with async_session_factory() as db:
+            llm_client = LiteLLMClient(model=model) if model else LiteLLMClient()
+            await generate_conversation_summary(db, conversation_id, llm_client, min_messages=5)
+    except Exception as e:
+        logger.warning("摘要生成后台任务失败: %s", e)
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
@@ -280,6 +297,9 @@ async def chat(
         token_usage=chat_result.token_usage,
     )
 
+    # 后台生成对话摘要
+    asyncio.create_task(_trigger_summary_generation(conv.id, request.model))
+
     return ChatResponse(
         conversation_id=conv.id,
         message=MessageResponse.from_orm_model(assistant_msg),
@@ -336,7 +356,6 @@ async def chat_stream(
                     sql_content = chunk.content
                 elif chunk.type == "warning":
                     full_content += f"\n\n{chunk.content}"
-                    # If warning from SQL validation, mark as invalid
                     if sql_content and "⚠️" in chunk.content:
                         sql_validated = False
                 elif chunk.type == "done":
@@ -372,9 +391,9 @@ async def chat_stream(
             yield StreamChunk(type="error", content=f"生成失败：{e!s}").to_sse()
             return
 
-        # 保存消息（流结束后）
+        # 保存消息（流结束后），并从返回值获取服务端消息 ID
         try:
-            await _save_messages(
+            user_msg, assistant_msg = await _save_messages(
                 db,
                 conv,
                 user_content=request.message,
@@ -384,6 +403,17 @@ async def chat_stream(
                 sql_validated=sql_validated,
                 token_usage=token_usage,
             )
+            # 将服务端消息 ID 发送给前端，避免前端额外请求同步
+            from app.protocols import StreamChunk
+
+            yield StreamChunk(
+                type="message_ids",
+                content=json.dumps({
+                    "user_message_id": user_msg.id,
+                    "assistant_message_id": assistant_msg.id,
+                }, ensure_ascii=False),
+            ).to_sse()
+            asyncio.create_task(_trigger_summary_generation(conv.id, request.model))
         except Exception as e:
             logger.error("保存消息失败: %s", e)
 
@@ -445,6 +475,34 @@ async def get_conversation(conversation_id: str, db: AsyncSession = Depends(get_
     return _serialize_conversation(conv)
 
 
+@router.get("/conversations/{conversation_id}/summary")
+async def get_conversation_summary(conversation_id: str, db: AsyncSession = Depends(get_db)):
+    """获取对话摘要（长期记忆）。"""
+    from app.models.conversation_summary import ConversationSummary
+
+    result = await db.execute(
+        select(ConversationSummary).where(ConversationSummary.conversation_id == conversation_id)
+    )
+    summary = result.scalar_one_or_none()
+    if not summary:
+        return {"has_summary": False}
+
+    key_topics = []
+    if summary.key_topics:
+        try:
+            key_topics = json.loads(summary.key_topics)
+        except json.JSONDecodeError:
+            pass
+
+    return {
+        "has_summary": True,
+        "summary": summary.summary,
+        "key_sql": summary.key_sql,
+        "key_topics": key_topics,
+        "created_at": summary.created_at.isoformat() if summary.created_at else None,
+    }
+
+
 @router.patch("/conversations/{conversation_id}")
 async def update_conversation(
     conversation_id: str,
@@ -484,23 +542,24 @@ async def create_feedback(
     payload: dict = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Submit SQL feedback: { message_id, action, modified_sql?, feedback_note? }"""
+    """Submit SQL feedback: { message_id, action, original_sql?, modified_sql?, feedback_note? }"""
     message_id = payload.get("message_id")
     action = payload.get("action")
+    original_sql = payload.get("original_sql")
 
     if action not in ("accepted", "rejected", "modified"):
         raise HTTPException(status_code=422, detail="action must be accepted/rejected/modified")
 
     result = await db.execute(select(Message).where(Message.id == message_id))
     msg = result.scalar_one_or_none()
-    if not msg:
-        raise HTTPException(status_code=404, detail="消息不存在")
+    if not msg and not original_sql:
+        raise HTTPException(status_code=404, detail="消息不存在且未提供 original_sql")
 
     feedback = SQLFeedback(
         id=str(uuid.uuid4()),
-        message_id=message_id,
+        message_id=msg.id if msg else None,
         action=action,
-        original_sql=msg.sql_generated,
+        original_sql=original_sql or (msg.sql_generated if msg else None),
         modified_sql=payload.get("modified_sql"),
         feedback_note=payload.get("feedback_note"),
     )

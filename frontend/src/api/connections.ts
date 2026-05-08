@@ -34,6 +34,15 @@ export interface TestConnectionResponse {
   driver: string
 }
 
+export interface ConnectionStatusItem {
+  id: string
+  status: string  // "ok" | "error" | "unknown" | "testing"
+}
+
+export interface ConnectionStatusResponse {
+  connections: ConnectionStatusItem[]
+}
+
 export interface SyncSchemaResponse {
   tables: number
   synced_at: string
@@ -80,6 +89,11 @@ export async function getSchemaTables(connectionId: string): Promise<TableSchema
 
 export async function testConnection(connectionId: string): Promise<TestConnectionResponse> {
   const { data } = await apiClient.post<TestConnectionResponse>(`/connections/${connectionId}/test`)
+  return data
+}
+
+export async function getConnectionsStatus(): Promise<ConnectionStatusResponse> {
+  const { data } = await apiClient.get<ConnectionStatusResponse>('/connections/status')
   return data
 }
 

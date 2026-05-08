@@ -3,6 +3,7 @@ import { apiClient } from './client'
 export interface FeedbackRequest {
   message_id: string
   action: 'accepted' | 'rejected' | 'modified'
+  original_sql?: string
   modified_sql?: string
   feedback_note?: string
 }

@@ -1,45 +1,45 @@
-/* GBase 8a — Deep Space Terminal Design System */
+/* GBase 8a — Minimal Monochrome Design System */
 
 :root {
-  /* Depth layers — like instrument panels */
-  --bg-void:    #050810;
-  --bg-deep:    #080e1c;
-  --bg-panel:   #0c1424;
-  --bg-surface: #111d30;
-  --bg-raised:  #182640;
-  --bg-edge:    #1e3050;
+  /* Background layers — clean whites and soft grays */
+  --bg-void:    #ffffff;
+  --bg-deep:    #f7f7f8;
+  --bg-panel:   #f5f5f5;
+  --bg-surface: #ffffff;
+  --bg-raised:  #fafafa;
+  --bg-edge:    #eeeeee;
 
-  /* Signal — teal for data flow */
-  --accent:       #2dd4bf;
-  --accent-dim:   rgba(45, 212, 191, 0.10);
-  --accent-glow:  rgba(45, 212, 191, 0.20);
-  --accent-bright:rgba(45, 212, 191, 0.40);
+  /* Accent — near-black for minimal elegance */
+  --accent:       #1a1a1a;
+  --accent-dim:   rgba(0, 0, 0, 0.04);
+  --accent-glow:  rgba(0, 0, 0, 0.06);
+  --accent-bright:rgba(0, 0, 0, 0.12);
 
-  /* Status — amber for warm indicators */
-  --status:       #fbbf24;
-  --status-dim:   rgba(251, 191, 36, 0.12);
+  /* Status colors — muted */
+  --status:       #f59e0b;
+  --status-dim:   rgba(245, 158, 11, 0.10);
 
-  /* Readout text */
-  --text-0: #f1f5f9;
-  --text-1: #cbd5e1;
-  --text-2: #94a3b8;
-  --text-3: #64748b;
-  --text-4: #475569;
+  /* Text — black to gray scale */
+  --text-0: #1a1a1a;
+  --text-1: #333333;
+  --text-2: #666666;
+  --text-3: #999999;
+  --text-4: #bbbbbb;
 
-  /* Seams — panel borders */
-  --seam-1: rgba(45, 212, 191, 0.04);
-  --seam-2: rgba(45, 212, 191, 0.08);
-  --seam-3: rgba(45, 212, 191, 0.14);
+  /* Borders — subtle grays */
+  --seam-1: #e8e8e8;
+  --seam-2: #d0d0d0;
+  --seam-3: #b0b0b0;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.5);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,0.5);
+  /* Shadows — very subtle */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
 
   /* Geometry */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
   --radius-xl: 20px;
   --radius-full: 999px;
   --sidebar-width: 260px;
@@ -55,14 +55,14 @@
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 150ms;
-  --duration-normal: 300ms;
-  --duration-slow: 500ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
 
   /* Legacy compat */
   --bg-body: var(--bg-void);
-  --bg-surface-solid: var(--bg-panel);
-  --bg-hover: rgba(255,255,255,0.03);
-  --bg-active: rgba(255,255,255,0.05);
+  --bg-surface-solid: var(--bg-surface);
+  --bg-hover: rgba(0,0,0,0.03);
+  --bg-active: rgba(0,0,0,0.05);
   --bg-selected: var(--accent-dim);
   --text-primary: var(--text-0);
   --text-secondary: var(--text-2);
@@ -71,44 +71,44 @@
   --border: var(--seam-1);
   --border-strong: var(--seam-2);
   --divider: var(--seam-1);
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --error: #ef4444;
+  --success: #16a34a;
+  --warning: #d97706;
+  --error: #dc2626;
   --info: var(--accent);
 }
 
-html[data-theme="light"] {
-  --bg-void:    #f8fafc;
-  --bg-deep:    #f1f5f9;
-  --bg-panel:   #e2e8f0;
-  --bg-surface: #ffffff;
-  --bg-raised:  #f8fafc;
-  --bg-edge:    #e2e8f0;
+html[data-theme="dark"] {
+  --bg-void:    #0a0a0a;
+  --bg-deep:    #111111;
+  --bg-panel:   #1a1a1a;
+  --bg-surface: #141414;
+  --bg-raised:  #1e1e1e;
+  --bg-edge:    #2a2a2a;
 
-  --text-0: #0f172a;
-  --text-1: #1e293b;
-  --text-2: #475569;
-  --text-3: #64748b;
-  --text-4: #94a3b8;
+  --text-0: #f5f5f5;
+  --text-1: #d4d4d4;
+  --text-2: #a3a3a3;
+  --text-3: #737373;
+  --text-4: #525252;
 
-  --seam-1: rgba(15, 23, 42, 0.04);
-  --seam-2: rgba(15, 23, 42, 0.08);
-  --seam-3: rgba(15, 23, 42, 0.14);
+  --seam-1: rgba(255,255,255,0.06);
+  --seam-2: rgba(255,255,255,0.10);
+  --seam-3: rgba(255,255,255,0.16);
 
-  --accent:       #0d9486;
-  --accent-dim:   rgba(13, 148, 136, 0.08);
-  --accent-glow:  rgba(13, 148, 136, 0.15);
-  --accent-bright:rgba(13, 148, 136, 0.35);
-  --status-dim: rgba(245, 158, 11, 0.12);
+  --accent:       #e5e5e5;
+  --accent-dim:   rgba(255,255,255,0.05);
+  --accent-glow:  rgba(255,255,255,0.08);
+  --accent-bright:rgba(255,255,255,0.15);
+  --status-dim: rgba(245, 158, 11, 0.10);
 
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.06);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,0.08);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
 
   --bg-body: var(--bg-void);
   --bg-surface-solid: var(--bg-surface);
-  --bg-hover: rgba(0,0,0,0.025);
-  --bg-active: rgba(0,0,0,0.04);
+  --bg-hover: rgba(255,255,255,0.04);
+  --bg-active: rgba(255,255,255,0.06);
   --bg-selected: var(--accent-dim);
   --text-primary: var(--text-0);
   --text-secondary: var(--text-2);
@@ -147,17 +147,17 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--seam-2); border-radius: 4px; }
 
 /* Focus */
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--text-3); outline-offset: 2px; }
 
 /* Naive UI patches */
 .n-base-selection {
   --n-border: 1px solid var(--seam-1) !important;
-  --n-color: var(--bg-panel) !important;
+  --n-color: var(--bg-surface) !important;
 }
 .n-input {
-  --n-color: var(--bg-panel) !important;
+  --n-color: var(--bg-surface) !important;
   --n-border: 1px solid var(--seam-1) !important;
-  --n-color-focus: var(--bg-panel) !important;
+  --n-color-focus: var(--bg-surface) !important;
 }
 .n-card {
   --n-color: var(--bg-panel) !important;
@@ -172,7 +172,7 @@ body {
   border: 1px solid var(--seam-1) !important;
 }
 .n-dropdown-menu {
-  --n-color: var(--bg-panel) !important;
+  --n-color: var(--bg-surface) !important;
   --n-border: 1px solid var(--seam-1) !important;
   --n-option-color-hover: var(--bg-hover) !important;
 }

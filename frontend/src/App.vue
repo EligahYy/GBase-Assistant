@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch, provide } from 'vue'
+import { onMounted, ref, watch, provide } from 'vue'
 import { NMessageProvider, NDialogProvider, NConfigProvider, zhCN, dateZhCN } from 'naive-ui'
 import Sidebar from './components/layout/Sidebar.vue'
 import { RouterView } from 'vue-router'
@@ -10,7 +10,6 @@ const connStore = useConnectionStore()
 const { init: initTheme } = useTheme()
 
 const STORAGE_KEY = 'sidebar:collapsed'
-const sidebarOpen = ref(true)
 const sidebarCollapsed = ref(false)
 
 // Restore collapsed state
@@ -24,7 +23,7 @@ watch(sidebarCollapsed, (val) => {
   try { localStorage.setItem(STORAGE_KEY, val ? '1' : '0') } catch {}
 })
 
-provide('toggleSidebar', () => { sidebarOpen.value = !sidebarOpen.value })
+provide('toggleSidebar', () => { sidebarCollapsed.value = !sidebarCollapsed.value })
 provide('sidebarCollapsed', sidebarCollapsed)
 
 function handleKeydown(e: KeyboardEvent) {
@@ -43,12 +42,7 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   initTheme()
   connStore.loadConnections()
-  if (window.innerWidth < 768) sidebarOpen.value = false
   window.addEventListener('keydown', handleKeydown)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -58,12 +52,13 @@ onBeforeUnmount(() => {
       <n-message-provider>
         <div class="app-shell">
           <Sidebar
-            :open="sidebarOpen"
             :collapsed="sidebarCollapsed"
-            @toggle="sidebarOpen = !sidebarOpen"
             @update:collapsed="sidebarCollapsed = $event"
           />
-          <main class="main-stage">
+          <main
+            class="main-stage"
+            :class="{ 'sidebar-collapsed': sidebarCollapsed }"
+          >
             <RouterView />
           </main>
         </div>
@@ -74,7 +69,8 @@ onBeforeUnmount(() => {
 
 <style>
 #app, #app > div, #app > div > div, #app > div > div > div {
-  height: 100%; width: 100%;
+  height: 100%;
+  width: 100%;
 }
 </style>
 
@@ -137,5 +133,15 @@ html[data-theme="light"] .app-shell::before {
   overflow: hidden;
   position: relative;
   z-index: 1;
+  margin-left: var(--sidebar-width);
+  transition: margin-left var(--duration-normal) var(--ease-smooth);
+}
+.main-stage.sidebar-collapsed {
+  margin-left: 48px;
+}
+@media (max-width: 768px) {
+  .main-stage {
+    margin-left: 0 !important;
+  }
 }
 </style>

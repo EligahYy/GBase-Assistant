@@ -46,7 +46,7 @@ class ChatContext:
 
 @dataclass
 class StreamChunk:
-    type: str  # "text" | "sql" | "done" | "error"
+    type: str  # "text" | "sql" | "sources" | "warning" | "done" | "error" | "result" | "result_error" | "message_ids"
     content: str = ""
     token_usage: dict | None = None
 

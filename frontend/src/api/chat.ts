@@ -68,3 +68,16 @@ export async function updateConversation(
 export async function deleteConversation(id: string): Promise<void> {
   await apiClient.delete(`/chat/conversations/${id}`)
 }
+
+export interface ConversationSummary {
+  has_summary: boolean
+  summary?: string
+  key_sql?: string
+  key_topics?: string[]
+  created_at?: string
+}
+
+export async function getConversationSummary(id: string): Promise<ConversationSummary> {
+  const { data } = await apiClient.get<ConversationSummary>(`/chat/conversations/${id}/summary`)
+  return data
+}

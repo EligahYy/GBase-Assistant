@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +33,67 @@ from app.sql.sandbox import SQLSandbox, SQLSandboxError
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 logger = logging.getLogger(__name__)
+
+# ── 内存连接状态缓存（避免频繁 SELECT 1 轮询） ──
+# key: connection_id, value: (timestamp, 'ok' | 'error')
+_status_cache: dict[str, tuple[float, str]] = {}
+_CACHE_TTL = 30  # 缓存有效期 30 秒
+# 防止同一连接并发测试
+_testing_locks: set[str] = set()
+
+
+def _get_cached_status(connection_id: str) -> str | None:
+    """读取缓存的状态，超过 TTL 返回 None。"""
+    entry = _status_cache.get(connection_id)
+    if entry and (time.monotonic() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _set_cached_status(connection_id: str, status: str) -> None:
+    _status_cache[connection_id] = (time.monotonic(), status)
+
+
+class ConnectionStatusItem(BaseModel):
+    id: str
+    status: str  # "ok" | "error" | "unknown" | "testing"
+
+
+class ConnectionStatusResponse(BaseModel):
+    connections: list[ConnectionStatusItem]
+
+
+async def _background_test_connection(connection_id: str) -> None:
+    """后台异步测试连接并更新缓存（不阻塞请求）。"""
+    if connection_id in _testing_locks:
+        return
+    _testing_locks.add(connection_id)
+    try:
+        from app.database import async_session_factory
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(DbConnection).where(DbConnection.id == connection_id)
+            )
+            conn = result.scalar_one_or_none()
+            if not conn or conn.driver_type == "manual":
+                _set_cached_status(connection_id, "ok")
+                return
+
+            connector = get_connector(conn.driver_type)
+            if not connector:
+                _set_cached_status(connection_id, "error")
+                return
+
+            config = _to_connection_config(conn)
+            # 测试用短超时（5s），避免卡住
+            config.connection_timeout = 5
+            ok, _ = await connector.test(config)
+            _set_cached_status(connection_id, "ok" if ok else "error")
+    except Exception:
+        _set_cached_status(connection_id, "error")
+    finally:
+        _testing_locks.discard(connection_id)
 
 
 async def _trigger_schema_indexing(db_id: str, schema_ddl: str | None) -> None:
@@ -115,6 +178,45 @@ async def create_connection(data: ConnectionCreate, db: AsyncSession = Depends(g
     return ConnectionResponse.from_orm_model(conn)
 
 
+@router.get("/drivers/available")
+async def available_drivers():
+    """返回当前环境中可用的驱动类型列表。"""
+    return {"drivers": get_available_drivers()}
+
+
+@router.get("/status", response_model=ConnectionStatusResponse)
+async def get_connections_status(db: AsyncSession = Depends(get_db)):
+    """获取所有活跃连接的状态。无缓存时触发后台测试，不阻塞响应。"""
+    result = await db.execute(
+        select(DbConnection).where(DbConnection.is_active.is_(True))
+    )
+    connections = result.scalars().all()
+
+    items: list[ConnectionStatusItem] = []
+    pending_tests: list[str] = []
+
+    for c in connections:
+        if c.driver_type == "manual":
+            items.append(ConnectionStatusItem(id=c.id, status="ok"))
+        else:
+            cached = _get_cached_status(c.id)
+            if cached is not None:
+                items.append(ConnectionStatusItem(id=c.id, status=cached))
+            elif c.connection_tested:
+                items.append(ConnectionStatusItem(id=c.id, status="ok"))
+            else:
+                if c.id in _testing_locks:
+                    items.append(ConnectionStatusItem(id=c.id, status="testing"))
+                else:
+                    items.append(ConnectionStatusItem(id=c.id, status="testing"))
+                    pending_tests.append(c.id)
+
+    for cid in pending_tests:
+        asyncio.create_task(_background_test_connection(cid))
+
+    return ConnectionStatusResponse(connections=items)
+
+
 @router.get("/{connection_id}", response_model=ConnectionResponse)
 async def get_connection(connection_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(DbConnection).where(DbConnection.id == connection_id))
@@ -181,17 +283,19 @@ async def list_schema_tables(connection_id: str, db: AsyncSession = Depends(get_
 
 @router.post("/{connection_id}/test", response_model=TestConnectionResponse)
 async def test_connection(connection_id: str, db: AsyncSession = Depends(get_db)):
-    """测试数据库连通性。"""
+    """测试数据库连通性（执行真实 SELECT 1 并更新缓存）。"""
     result = await db.execute(select(DbConnection).where(DbConnection.id == connection_id))
     conn = result.scalar_one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="连接不存在")
 
     if conn.driver_type == "manual":
+        _set_cached_status(connection_id, "ok")
         return TestConnectionResponse(status="ok", message="手动模式（无需连接测试）", driver="manual")
 
     connector = get_connector(conn.driver_type)
     if not connector:
+        _set_cached_status(connection_id, "error")
         return TestConnectionResponse(
             status="error", message=f"驱动 {conn.driver_type} 未安装或不可用", driver=conn.driver_type
         )
@@ -199,11 +303,12 @@ async def test_connection(connection_id: str, db: AsyncSession = Depends(get_db)
     config = _to_connection_config(conn)
     ok, message = await connector.test(config)
 
-    # 更新测试状态
+    # 更新持久化状态 + 内存缓存
     conn.connection_tested = ok
     await db.commit()
 
     status = "ok" if ok else "error"
+    _set_cached_status(connection_id, status)
     return TestConnectionResponse(status=status, message=message, driver=conn.driver_type)
 
 
@@ -289,9 +394,3 @@ async def execute_query(connection_id: str, body: QueryRequest, db: AsyncSession
         execution_time_ms=query_result.execution_time_ms,
         truncated=query_result.truncated,
     )
-
-
-@router.get("/drivers/available")
-async def available_drivers():
-    """返回当前环境中可用的驱动类型列表。"""
-    return {"drivers": get_available_drivers()}

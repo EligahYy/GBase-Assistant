@@ -5,10 +5,14 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.database import get_db
+from app.models.sql_feedback import SQLFeedback
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -56,3 +60,49 @@ async def reindex(request: Request, body: ReindexRequest | None = None) -> Reind
     except Exception as e:
         logger.error("重建索引失败: %s", e)
         raise HTTPException(status_code=500, detail=f"重建索引失败: {e}") from e
+
+
+@router.get("/feedback-stats")
+async def feedback_stats(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """SQL 反馈统计。"""
+    if not _verify_admin_token(request):
+        raise HTTPException(status_code=403, detail="需要管理权限")
+
+    total = await db.scalar(select(func.count()).select_from(SQLFeedback))
+    accepted = await db.scalar(select(func.count()).where(SQLFeedback.action == "accepted"))
+    rejected = await db.scalar(select(func.count()).where(SQLFeedback.action == "rejected"))
+    modified = await db.scalar(select(func.count()).where(SQLFeedback.action == "modified"))
+    enriched = await db.scalar(select(func.count()).where(SQLFeedback.enriched_at.is_not(None)))  # noqa: E712
+    pending = (total or 0) - (enriched or 0)
+
+    return {
+        "total": total or 0,
+        "accepted": accepted or 0,
+        "rejected": rejected or 0,
+        "modified": modified or 0,
+        "enriched": enriched or 0,
+        "pending": pending,
+    }
+
+
+@router.post("/enrich-feedback")
+async def enrich_feedback(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """手动触发 SQL 反馈 enrich。"""
+    if not _verify_admin_token(request):
+        raise HTTPException(status_code=403, detail="需要管理权限")
+
+    from app.jobs.feedback_enricher import enrich_feedback_examples
+
+    try:
+        result = await enrich_feedback_examples(db, max_items=50)
+        logger.info("手动 enrich feedback 完成: %s", result)
+        return result
+    except Exception as e:
+        logger.error("Enrich feedback 失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"Enrich 失败: {e}") from e

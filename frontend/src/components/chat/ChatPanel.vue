@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, inject, onMounted } from 'vue'
+import { ref, computed, nextTick, watch, inject, onMounted, onBeforeUnmount } from 'vue'
 import { useMessage } from 'naive-ui'
-import { SendOutline, ServerOutline, MenuOutline, SunnyOutline, MoonOutline, StopCircleOutline } from '@vicons/ionicons5'
+import {
+  SendOutline, ServerOutline, SunnyOutline, MoonOutline,
+  StopCircleOutline, BookOutline, SparklesOutline,
+} from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 
 import MessageBubble from './MessageBubble.vue'
@@ -9,6 +12,7 @@ import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useSSE } from '@/composables/useSSE'
 import { createStreamUrl } from '@/api/chat'
+import { getConnectionsStatus } from '@/api/connections'
 import { useTheme } from '@/composables/useTheme'
 
 const chatStore = useChatStore()
@@ -31,7 +35,66 @@ const activeConn = computed(() =>
   connStore.connections.find(c => c.id === connStore.activeConnectionId)
 )
 
-onMounted(() => { connStore.loadConnections().catch(() => {}) })
+// ── 连接状态实时检测 ──
+const connStatusMap = ref<Record<string, 'ok' | 'error' | 'testing'>>({})
+const connStatusLoading = ref(false)
+const POLL_INTERVAL = 5000
+
+async function checkConnectionStatus() {
+  connStatusLoading.value = true
+  try {
+    const resp = await getConnectionsStatus()
+    for (const item of resp.connections) {
+      if (item.status === 'ok') {
+        connStatusMap.value[item.id] = 'ok'
+      } else if (item.status === 'testing') {
+        connStatusMap.value[item.id] = 'testing'
+      } else {
+        connStatusMap.value[item.id] = 'error'
+      }
+    }
+  } catch {
+    // ignore
+  } finally {
+    connStatusLoading.value = false
+  }
+}
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function startPolling() {
+  checkConnectionStatus()
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = setInterval(checkConnectionStatus, POLL_INTERVAL)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    checkConnectionStatus()
+  }
+}
+
+onMounted(() => {
+  connStore.loadConnections().catch(() => {})
+  startPolling()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
+
+watch(() => connStore.activeConnectionId, () => {
+  startPolling()
+})
 
 watch(() => chatStore.messages.length, async () => {
   await nextTick()
@@ -78,13 +141,30 @@ async function sendMessage() {
         const result = JSON.parse(chunk.content)
         chatStore.setStreamQueryResult(streamingId, result)
       } catch {
-        // ignore invalid result JSON
+        // ignore
       }
     } else if (chunk.type === 'error') {
       naiveMsg.error(chunk.content)
+    } else if (chunk.type === 'result_error') {
+      naiveMsg.warning(chunk.content)
+    } else if (chunk.type === 'message_ids') {
+      try {
+        const ids = JSON.parse(chunk.content)
+        chatStore.syncMessageIdsFromStream(streamingId, ids)
+      } catch {
+        // ignore parse errors
+      }
     }
   })
-  chatStore.finalizeStreamMessage(streamingId, serverConversationId ?? conversationId ?? crypto.randomUUID())
+
+  // 流结束后立即从后端同步服务端消息 ID（必须在 finalizeStreamMessage 之前完成）
+  let finalAsstId: string | null = streamingId
+  if (serverConversationId) {
+    const syncedId = await chatStore.syncMessageIds(serverConversationId)
+    if (syncedId) finalAsstId = syncedId
+  }
+
+  chatStore.finalizeStreamMessage(finalAsstId, serverConversationId ?? conversationId ?? crypto.randomUUID())
   await chatStore.loadConversations()
 }
 
@@ -111,12 +191,21 @@ const hints = [
     <header class="chat-header">
       <div class="header-left">
         <button class="header-icon-btn" @click="toggleSidebar">
-          <n-icon :component="MenuOutline" size="18" />
+          <n-icon :component="SparklesOutline" size="18" />
         </button>
-        <div v-if="activeConn" class="conn-badge">
-          <div class="dot" />
+        <div
+          v-if="activeConn"
+          class="conn-badge"
+          :class="{
+            'status-ok': connStatusMap[activeConn.id] === 'ok',
+            'status-error': connStatusMap[activeConn.id] === 'error',
+            'status-testing': connStatusMap[activeConn.id] === 'testing',
+          }"
+        >
+          <div class="dot" :class="{ pulsing: connStatusMap[activeConn.id] !== 'error' }" />
           <n-icon :component="ServerOutline" size="12" />
           <span>{{ activeConn.name }}</span>
+          <span v-if="connStatusMap[activeConn.id] === 'testing'" class="status-checking">检测中</span>
         </div>
         <div v-else class="conn-badge muted">
           <div class="dot" />
@@ -126,7 +215,11 @@ const hints = [
       </div>
       <div class="header-right">
         <span class="model-label" :title="selectedModel">{{ modelDisplayName }}</span>
-        <button class="theme-toggle" :title="theme === 'light' ? '切换深色模式' : '切换浅色模式'" @click="toggleTheme">
+        <button
+          class="theme-toggle"
+          :title="theme === 'light' ? '切换深色模式' : '切换浅色模式'"
+          @click="toggleTheme"
+        >
           <n-icon :component="theme === 'light' ? SunnyOutline : MoonOutline" size="18" />
         </button>
       </div>
@@ -139,20 +232,49 @@ const hints = [
         <div class="empty-brand">
           <div class="monogram-wrap">
             <div class="monogram">G</div>
-            <div class="monogram-glow" />
           </div>
-          <h2 class="empty-title">建立连接</h2>
-          <p class="empty-sub">输入自然语言查询，GBase 助手将自动生成 SQL 并执行</p>
+          <h2 class="empty-title">GBase 助手</h2>
+          <p class="empty-sub">输入自然语言查询，自动生成 SQL 并执行</p>
         </div>
         <div class="hint-grid">
-          <button v-for="hint in hints" :key="hint" class="hint-card" @click="inputText = hint">
+          <button
+            v-for="hint in hints"
+            :key="hint"
+            class="hint-card"
+            @click="inputText = hint"
+          >
             {{ hint }}
           </button>
         </div>
       </div>
 
       <div v-else class="messages-list">
-        <MessageBubble v-for="msg in chatStore.messages" :key="msg.id" :message="msg" />
+        <!-- Conversation Summary -->
+        <div
+          v-if="chatStore.conversationSummary?.has_summary"
+          class="summary-card"
+        >
+          <div class="summary-header">
+            <n-icon :component="BookOutline" size="14" />
+            <span>对话摘要</span>
+          </div>
+          <div class="summary-body">{{ chatStore.conversationSummary!.summary }}</div>
+          <div v-if="chatStore.conversationSummary!.key_sql" class="summary-sql">
+            <code>{{ chatStore.conversationSummary!.key_sql }}</code>
+          </div>
+          <div v-if="chatStore.conversationSummary!.key_topics?.length" class="summary-topics">
+            <span
+              v-for="topic in chatStore.conversationSummary!.key_topics"
+              :key="topic"
+              class="topic-tag"
+            >{{ topic }}</span>
+          </div>
+        </div>
+        <MessageBubble
+          v-for="msg in chatStore.messages"
+          :key="msg.id"
+          :message="msg"
+        />
       </div>
     </div>
 
@@ -170,18 +292,22 @@ const hints = [
           @compositionstart="isComposing = true"
           @compositionend="isComposing = false"
         />
-        <button v-if="isStreaming" class="send-circle stop" @click="handleStop">
+        <button
+          v-if="isStreaming"
+          class="send-circle stop"
+          @click="handleStop"
+        >
           <n-icon :component="StopCircleOutline" size="16" />
         </button>
-        <button v-else class="send-circle" :class="{ active: inputText.trim() }" :disabled="!inputText.trim()" @click="sendMessage">
+        <button
+          v-else
+          class="send-circle"
+          :class="{ active: inputText.trim() }"
+          :disabled="!inputText.trim()"
+          @click="sendMessage"
+        >
           <n-icon :component="SendOutline" size="16" />
         </button>
-      </div>
-      <div class="quick-chips">
-        <button class="quick-chip" @click="inputText = '解释这段 SQL'">解释 SQL</button>
-        <button class="quick-chip" @click="inputText = '优化这个查询'">优化查询</button>
-        <button class="quick-chip" @click="inputText = '帮我写一个建表语句'">建表语句</button>
-        <button class="quick-chip" @click="inputText = 'GBase 8a 支持哪些数据类型'">数据类型</button>
       </div>
       <p class="input-hint">GBase 助手可能生成不准确的 SQL，请验证后使用</p>
     </div>
@@ -199,53 +325,74 @@ const hints = [
   position: relative;
 }
 
-/* Header */
+/* ── Header ── */
 .chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
+  padding: 0 24px;
   height: var(--header-height);
   flex-shrink: 0;
-  background: linear-gradient(180deg, var(--bg-void), transparent);
+  background: var(--bg-void);
+  border-bottom: 1px solid var(--seam-1);
   position: relative;
   z-index: 10;
 }
+
 .header-left, .header-right {
   display: flex;
   align-items: center;
   gap: 12px;
 }
+
 .header-icon-btn {
   display: none;
-  align-items: center; justify-content: center;
-  width: 32px; height: 32px; padding: 0;
-  background: var(--bg-panel); border: 1px solid var(--seam-1);
-  border-radius: var(--radius-sm);
-  color: var(--text-3); cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+  cursor: pointer;
   transition: all var(--duration-fast);
 }
-.header-icon-btn:hover { border-color: var(--seam-2); color: var(--text-1); }
-@media (max-width: 768px) { .header-icon-btn { display: flex; } }
+.header-icon-btn:hover {
+  border-color: var(--seam-2);
+  color: var(--text-1);
+}
+@media (max-width: 768px) {
+  .header-icon-btn { display: flex; }
+}
 
 .theme-toggle {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; padding: 0;
-  background: var(--bg-panel); border: 1px solid var(--seam-1);
-  border-radius: var(--radius-sm);
-  color: var(--text-3); cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+  cursor: pointer;
   transition: all var(--duration-fast);
 }
 .theme-toggle:hover {
-  background: var(--bg-surface);
-  border-color: var(--accent-bright);
-  color: var(--accent);
-  box-shadow: 0 0 10px var(--accent-glow);
+  background: var(--bg-hover);
+  border-color: var(--seam-2);
+  color: var(--text-1);
 }
 
 .conn-badge {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-3);
   background: var(--bg-panel);
   padding: 5px 12px;
@@ -254,27 +401,61 @@ const hints = [
   font-family: var(--font-mono);
   transition: all var(--duration-fast);
 }
-.conn-badge:hover { border-color: var(--seam-2); }
-.conn-badge .dot {
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--status);
-  box-shadow: 0 0 6px var(--status-dim);
-  position: relative;
+.conn-badge:hover {
+  border-color: var(--seam-2);
 }
-.conn-badge .dot::after {
-  content: ''; position: absolute; inset: -2px; border-radius: 50%;
-  border: 1px solid rgba(251,191,36,0.3);
+.conn-badge .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-4);
+  position: relative;
+  transition: background var(--duration-fast);
+}
+.conn-badge.status-ok .dot {
+  background: var(--success);
+}
+.conn-badge.status-ok .dot.pulsing::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid rgba(22, 163, 74, 0.3);
   animation: pulseRing 2.5s ease-out infinite;
 }
+/* 状态：检测中（琥珀色脉冲） */
+.conn-badge.status-testing .dot {
+  background: var(--warning);
+}
+.conn-badge.status-testing .dot.pulsing::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  animation: pulseRing 2.5s ease-out infinite;
+}
+.conn-badge.status-error .dot {
+  background: var(--error);
+}
+.conn-badge.muted .dot {
+  background: var(--text-4);
+}
+
 @keyframes pulseRing {
   0% { transform: scale(1); opacity: 1; }
   100% { transform: scale(2.5); opacity: 0; }
 }
-.conn-badge.muted .dot { background: var(--text-4); box-shadow: none; }
-.conn-badge.muted .dot::after { display: none; }
+
+.status-checking {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
 
 .model-label {
-  font-size: 12px; font-weight: 500;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-4);
   background: var(--bg-panel);
   padding: 5px 12px;
@@ -283,7 +464,7 @@ const hints = [
   font-family: var(--font-mono);
 }
 
-/* Messages */
+/* ── Messages ── */
 .messages {
   flex: 1;
   min-height: 0;
@@ -304,7 +485,63 @@ const hints = [
   .chat-header { padding: 0 16px; }
 }
 
-/* Empty state */
+/* ── Summary Card ── */
+.summary-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  max-width: var(--max-content-width);
+  width: 100%;
+}
+.summary-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-4);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.summary-body {
+  font-size: 13px;
+  color: var(--text-1);
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+.summary-sql {
+  background: var(--bg-deep);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+}
+.summary-sql code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-0);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.summary-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.topic-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-deep);
+  color: var(--text-2);
+  border: 1px solid var(--seam-1);
+}
+
+/* ── Empty State ── */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -313,55 +550,45 @@ const hints = [
   min-height: calc(100vh - var(--header-height) - 200px);
   padding: 40px 20px;
   text-align: center;
-  animation: fadeIn 1s var(--ease-out-expo) both;
+  animation: fadeIn 0.5s var(--ease-out-expo) both;
 }
 .empty-brand {
   margin-bottom: 32px;
 }
 .monogram-wrap {
   position: relative;
-  width: 72px; height: 72px;
-  margin: 0 auto 28px;
-  animation: floatIn 0.8s 0.2s var(--ease-out-expo) both;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 24px;
+  animation: fadeInUp 0.4s 0.1s var(--ease-out-expo) both;
 }
 .monogram {
-  width: 72px; height: 72px;
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-2);
-  color: var(--accent);
-  border-radius: 18px;
-  font-size: 28px; font-weight: 700;
+  width: 64px;
+  height: 64px;
+  background: var(--text-0);
+  color: var(--bg-void);
+  border-radius: var(--radius-lg);
+  font-size: 24px;
+  font-weight: 700;
   font-family: var(--font-mono);
-  display: flex; align-items: center; justify-content: center;
-  position: relative; z-index: 2;
-  box-shadow: 0 0 24px var(--accent-glow);
-}
-.monogram::after {
-  content: ''; position: absolute; inset: 0; border-radius: 18px;
-  background: linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.1) 100%);
-}
-.monogram-glow {
-  position: absolute;
-  inset: -12px;
-  background: radial-gradient(ellipse 60% 50% at 50% 50%, var(--accent-bright), transparent 70%);
-  border-radius: 28px;
-  animation: breathe 4s ease-in-out infinite;
-  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .empty-title {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--text-0);
-  letter-spacing: -0.03em;
-  margin-bottom: 10px;
-  animation: fadeInUp 0.6s 0.4s var(--ease-out-expo) both;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+  animation: fadeInUp 0.4s 0.2s var(--ease-out-expo) both;
 }
 .empty-sub {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-3);
   line-height: 1.6;
   max-width: 360px;
-  animation: fadeInUp 0.6s 0.5s var(--ease-out-expo) both;
+  animation: fadeInUp 0.4s 0.25s var(--ease-out-expo) both;
 }
 
 .hint-grid {
@@ -370,75 +597,68 @@ const hints = [
   gap: 10px;
   max-width: 480px;
   width: 100%;
-  animation: fadeInUp 0.6s 0.6s var(--ease-out-expo) both;
+  animation: fadeInUp 0.4s 0.3s var(--ease-out-expo) both;
 }
 @media (max-width: 640px) {
   .hint-grid { grid-template-columns: 1fr; }
 }
 .hint-card {
-  position: relative;
-  padding: 16px 18px;
+  padding: 14px 16px;
   background: var(--bg-panel);
   border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   font-size: 13px;
-  color: var(--text-3);
+  color: var(--text-2);
   text-align: left;
   cursor: pointer;
   font-family: var(--font-sans);
   font-weight: 500;
-  transition: all var(--duration-normal) var(--ease-out-expo);
+  transition: all var(--duration-fast);
   line-height: 1.5;
-  overflow: hidden;
-}
-.hint-card::before {
-  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent-dim), transparent);
-  opacity: 0; transition: opacity var(--duration-fast);
 }
 .hint-card:hover {
-  background: var(--bg-surface);
+  background: var(--bg-raised);
   border-color: var(--seam-2);
-  color: var(--text-1);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  color: var(--text-0);
 }
-.hint-card:hover::before { opacity: 1; }
 
-/* Input */
+/* ── Input ── */
 .input-area {
   flex-shrink: 0;
-  padding: 16px 28px 28px;
+  padding: 24px 28px 28px;
   position: relative;
   z-index: 20;
-}
-.input-area::before {
-  content: ''; position: absolute; top: -60px; left: 0; right: 0; height: 60px;
-  background: linear-gradient(to top, var(--bg-void), transparent);
+  background: linear-gradient(to top, var(--bg-void) 60%, transparent 100%);
   pointer-events: none;
+}
+.input-area > * {
+  pointer-events: auto;
 }
 .input-capsule {
   display: flex;
   align-items: flex-end;
   gap: 12px;
-  max-width: 680px;
+  max-width: 720px;
   width: 100%;
   margin: 0 auto;
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-2);
-  border-radius: var(--radius-lg);
-  padding: 12px 14px 12px 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-  transition: all var(--duration-normal) var(--ease-out-expo);
-  position: relative;
+  background: var(--bg-surface);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-xl);
+  padding: 14px 16px 14px 22px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.02);
+  transition: all var(--duration-fast) var(--ease-smooth);
 }
 .input-capsule:focus-within {
-  border-color: var(--seam-3);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.3), 0 0 0 1px var(--accent-dim);
+  border-color: var(--seam-2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.03);
 }
-.input-capsule.disabled { opacity: 0.7; }
+.input-capsule.disabled {
+  opacity: 0.7;
+}
 
-.chat-input { flex: 1; }
+.chat-input {
+  flex: 1;
+}
 :deep(.n-input) {
   --n-border: none !important;
   --n-border-hover: none !important;
@@ -447,72 +667,55 @@ const hints = [
   background: transparent !important;
 }
 :deep(.n-input__border),
-:deep(.n-input__state-border) { display: none !important; }
-:deep(.n-input-wrapper) { padding: 0 !important; background: transparent !important; }
+:deep(.n-input__state-border) {
+  display: none !important;
+}
+:deep(.n-input-wrapper) {
+  padding: 0 !important;
+  background: transparent !important;
+}
 
 .send-circle {
-  width: 32px; height: 32px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: none;
   background: var(--bg-edge);
   color: var(--text-4);
   display: flex;
-  align-items: center; justify-content: center;
-  cursor: pointer; flex-shrink: 0;
-  transition: all var(--duration-fast) var(--ease-spring);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast);
   margin-bottom: 2px;
 }
 .send-circle.active {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border: 1px solid var(--seam-2);
+  background: var(--text-0);
+  color: var(--bg-void);
 }
 .send-circle.active:hover {
-  background: var(--accent-dim); color: var(--accent);
-  transform: scale(1.08);
-  box-shadow: 0 0 12px var(--accent-glow);
+  background: var(--text-1);
+  transform: scale(1.05);
 }
-.send-circle:disabled { cursor: not-allowed; }
+.send-circle:disabled {
+  cursor: not-allowed;
+}
 .send-circle.stop {
   background: var(--error);
   color: #fff;
-  animation: pulse-ring 1.5s ease-out infinite;
 }
-.send-circle.stop:hover { background: #ff453a; transform: scale(1.05); }
+.send-circle.stop:hover {
+  background: #b91c1c;
+  transform: scale(1.05);
+}
 
 .input-hint {
   text-align: center;
   font-size: 11px;
   color: var(--text-4);
   margin-top: 10px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   font-family: var(--font-mono);
-}
-
-/* Quick chips */
-.quick-chips {
-  max-width: 680px;
-  margin: 10px auto 0;
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.quick-chip {
-  padding: 4px 12px;
-  border-radius: 100px;
-  border: 1px solid var(--seam-1);
-  background: var(--bg-panel);
-  color: var(--text-4);
-  font-size: 12px;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--duration-fast);
-}
-.quick-chip:hover {
-  border-color: var(--seam-2);
-  color: var(--text-2);
-  background: var(--bg-surface);
 }
 </style>

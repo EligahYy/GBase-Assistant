@@ -22,6 +22,7 @@ class DependencyStatus(BaseModel):
     llm_api: str = "unknown"
     default_model: str = "unknown"
     vector_db: str = "unknown"
+    gbase_connections: str = "unknown"
 
 
 class HealthResponse(BaseModel):
@@ -69,6 +70,58 @@ async def _check_vector_db() -> str:
         return "degraded"
 
 
+async def _check_gbase_connections() -> str:
+    """检查 GBase 8a 数据库连接状态（从缓存读取，不触发真实测试）。"""
+    try:
+        from sqlalchemy import select
+
+        from app.database import async_session_factory
+        from app.models.connection import DbConnection
+    except Exception:
+        return "unknown"
+
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(DbConnection).where(DbConnection.is_active.is_(True))
+            )
+            connections = result.scalars().all()
+
+        if not connections:
+            return "no_connections"
+
+        # 读取缓存状态
+        from app.api.connections import _get_cached_status
+
+        tested = 0
+        ok_count = 0
+        for c in connections:
+            if c.driver_type == "manual":
+                ok_count += 1
+                tested += 1
+                continue
+            cached = _get_cached_status(c.id)
+            if cached is not None:
+                tested += 1
+                if cached == "ok":
+                    ok_count += 1
+            elif c.connection_tested:
+                tested += 1
+                ok_count += 1
+
+        total = len(connections)
+        if tested == 0:
+            return "untested"
+        if ok_count == total:
+            return "connected"
+        if ok_count > 0:
+            return "partial"
+        return "disconnected"
+    except Exception as e:
+        logger.warning("GBase connections health check failed: %s", e)
+        return "unknown"
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check(db: AsyncSession = Depends(get_db)):
     settings = get_settings()
@@ -77,6 +130,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         llm_api=await _check_llm_api(),
         default_model=settings.default_model,
         vector_db=await _check_vector_db(),
+        gbase_connections=await _check_gbase_connections(),
     )
     overall = "ok" if deps.database == "connected" and deps.llm_api == "connected" else "degraded"
     return HealthResponse(status=overall, dependencies=deps)

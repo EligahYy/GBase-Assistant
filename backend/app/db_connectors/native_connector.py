@@ -5,10 +5,12 @@
 - connection_timeout 必须为 int
 - datetime 类型 bytes 解码 bug（自动 patch）
 - 执行后必须 fetchall() 耗尽结果
+- 所有同步阻塞 I/O 通过 asyncio.to_thread() 放入线程池，避免阻塞事件循环
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -89,7 +91,8 @@ class NativeConnector:
         _try_import()
         return _DRIVER_AVAILABLE
 
-    async def test(self, config: ConnectionConfig) -> tuple[bool, str]:
+    def _sync_test(self, config: ConnectionConfig) -> tuple[bool, str]:
+        """同步测试连接（在线程池中执行）。"""
         if not _DRIVER_AVAILABLE:
             return False, "gbase-connector-python 未安装"
         conn = None
@@ -107,7 +110,11 @@ class NativeConnector:
             if conn and conn.is_connected():
                 conn.close()
 
-    async def fetch_schema(self, config: ConnectionConfig) -> list[TableSchema]:
+    async def test(self, config: ConnectionConfig) -> tuple[bool, str]:
+        return await asyncio.to_thread(self._sync_test, config)
+
+    def _sync_fetch_schema(self, config: ConnectionConfig) -> list[TableSchema]:
+        """同步获取 schema（在线程池中执行）。"""
         if not _DRIVER_AVAILABLE:
             raise RuntimeError("gbase-connector-python 未安装")
 
@@ -171,13 +178,16 @@ class NativeConnector:
 
         return schemas
 
-    async def execute(
+    async def fetch_schema(self, config: ConnectionConfig) -> list[TableSchema]:
+        return await asyncio.to_thread(self._sync_fetch_schema, config)
+
+    def _sync_execute(
         self,
         config: ConnectionConfig,
         sql: str,
         max_rows: int = 1000,
-        timeout: int = 30,
     ) -> QueryResult:
+        """同步执行 SQL（在线程池中执行）。"""
         if not _DRIVER_AVAILABLE:
             raise RuntimeError("gbase-connector-python 未安装")
 
@@ -229,3 +239,12 @@ class NativeConnector:
         finally:
             if conn.is_connected():
                 conn.close()
+
+    async def execute(
+        self,
+        config: ConnectionConfig,
+        sql: str,
+        max_rows: int = 1000,
+        timeout: int = 30,
+    ) -> QueryResult:
+        return await asyncio.to_thread(self._sync_execute, config, sql, max_rows)
