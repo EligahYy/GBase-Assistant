@@ -76,7 +76,8 @@ gbase8a-assistant/
 ├── knowledge/         # GBase 8a 知识库（方言规则、示例、FAQ）
 ├── deploy/            # Docker / Nginx 部署配置（Phase 3+）
 ├── Makefile           # 常用开发命令
-└── ARCHITECTURE.md    # 详细架构设计文档
+├── AGENTS.md          # 统一项目指南与架构入口
+└── ARCHITECTURE.md    # 兼容旧链接的架构过渡页
 ```
 
 ## 常用命令

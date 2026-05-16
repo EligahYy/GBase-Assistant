@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 
 import sqlglot
 
+from app.observability import metrics
+
 if TYPE_CHECKING:
     from app.protocols import ConnectionConfig, DatabaseConnector, QueryResult
 
@@ -120,16 +122,26 @@ class SQLSandbox:
             TimeoutError: 执行超时
         """
         # 1. 安全验证
-        self._validate_single_statement(sql)
-        self._validate_readonly(sql)
-
-        # 2. 执行（带超时）
         try:
-            result = await asyncio.wait_for(
-                connector.execute(config, sql, max_rows=max_rows, timeout=timeout_seconds),
-                timeout=timeout_seconds + 5,  # 额外 5 秒缓冲
-            )
-        except TimeoutError:
-            raise TimeoutError(f"SQL 执行超时（>{timeout_seconds}秒）") from None
+            self._validate_single_statement(sql)
+            self._validate_readonly(sql)
+        except SQLSandboxError:
+            metrics.record_sql_execution(status="blocked", latency_seconds=0.0)
+            raise
+
+        # 2. 执行（带超时 + 埋点）
+        with metrics.time_sql_execution() as ctx:
+            try:
+                result = await asyncio.wait_for(
+                    connector.execute(config, sql, max_rows=max_rows, timeout=timeout_seconds),
+                    timeout=timeout_seconds + 5,  # 额外 5 秒缓冲
+                )
+            except TimeoutError:
+                ctx["status"] = "timeout"
+                raise TimeoutError(f"SQL 执行超时（>{timeout_seconds}秒）") from None
+            except Exception:
+                ctx["status"] = "error"
+                raise
+            ctx["status"] = "ok"
 
         return result

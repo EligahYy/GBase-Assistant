@@ -10,6 +10,7 @@ from typing import Any
 
 from app.knowledge.loader import DbSchemaRetriever, FileExampleRetriever, FileKnowledgeRetriever
 from app.llm.client import LiteLLMClientImpl
+from app.observability import metrics
 from app.protocols import ExampleRetriever, KnowledgeRetriever, LLMClient, SchemaRetriever
 
 logger = logging.getLogger(__name__)
@@ -51,9 +52,12 @@ class FallbackRetriever:
             try:
                 results = await self._primary.retrieve(*args, **kwargs)
                 if results:
+                    metrics.record_vector_retrieval(self._name, hit=True)
                     return results
+                metrics.record_vector_retrieval(self._name, hit=False)
             except Exception as e:
                 logger.warning("%s primary 失败，回退: %s", self._name, e)
+                metrics.record_vector_retrieval(self._name, hit=False)
         if self._fallback is not None:
             return await self._fallback.retrieve(*args, **kwargs)
         return []

@@ -1,147 +1,123 @@
-# GBase 8a Assistant — Phase 3 ROADMAP
+# GBase 8a Assistant — Roadmap
 
-> 最近更新:2026-05-07
-> 当前里程碑:Phase 3 Sprint 1 ✅ 完成,Sprint 2 ✅ 完成,Sprint 3 P0 ✅ 完成(3.3 P2 延到 Phase 4)
-> 项目阶段:Demo / 评测阶段(CI、可观测、LangGraph 评估降权)
+> 最近更新：2026-05-16
+> 项目状态：Demo 完成态，Phase 3 已完成，Phase 5 SQL 执行能力已提前落地。
+> 当前目标：文档收敛、稳态加固，并进入生产化前的 Phase 4。
+
+基础架构、模块地图和开发规范统一见 [`AGENTS.md`](../AGENTS.md)。本文只记录下一步计划。
 
 ---
 
-## 一、当前状态快照
+## 当前快照
 
-### Phase 3 完成度
-
-| Sprint | 状态 | 说明 |
+| 阶段 | 状态 | 说明 |
 |---|---|---|
-| Sprint 1 — 向量检索核心 | ✅ 完成 | Qdrant client、Embedder 工厂、Schema/Example/Knowledge retriever、自动降级、连接保存自动入库 |
-| Sprint 2 — RAG + 错误码工具 | ✅ 完成 | 全部 10 项任务落地:错误码知识库 56 条、错误码查询 API、前端错误码工具、MessageBubble RAG 引用展示、health qdrant 状态、admin Reindex 接口、Settings 状态卡+Reindex 按钮、运维文档 30 条 |
-| Sprint 3 — Schema 浏览器 + 演示打磨 | ⏸ 待启动 | 节选 C.1/C.2,Vitest 配置降到 P2 |
-| Sprint 4 — 稳定性 / CI / 可观测 | ⏸ Demo 阶段降权 | 仅保留 E2E 10 用例 + 错误码 RAG 评测,其余延到上线前 |
+| Phase 1 MVP | ✅ 完成 | FastAPI + Vue3、Text-to-SQL、SQL 校验、SSE |
+| Phase 2 核心增强 | ✅ 完成 | 多轮对话、Schema 管理、反馈、多模型 fallback |
+| Phase 3 RAG / 向量检索 | ✅ 完成 | Qdrant、Schema/Few-shot/Knowledge 检索、错误码工具 |
+| Phase 5 SQL 执行 | ✅ 提前落地 | 只读执行沙箱、DataBrowser、SqlEditor、Insights |
+| Phase 3.5 文档与稳态 | 🚧 当前 | 文档归一、metrics 暴露、功能文档 |
+| Phase 4 上线前加固 | ⏭ 下一阶段 | CI/E2E、认证限流、审计、安全收口 |
+| Phase 4.5 前端整理 | ⏭ 并行 | 大组件拆分、前端测试 |
+| Phase 6 长期记忆 | ⏸ 后续 | ConversationSummary、UserPattern、feedback enrich 调度 |
 
-### 已完成的 P0 清理(2026-05-06)
-- 删除 `_verify_protocol`、`set_qdrant_manager`、`set_embedder`、`addAssistantMessage` 等死代码
-- 修正 `SettingsView.vue` fallback 模型清单与 `models.yaml` 对齐
-- ORM 模型 `ConversationSummary` / `UserPattern` 保留(Phase 4 长期记忆复用)
-
----
-
-## 二、Phase 3 Sprint 任务清单
-
-### Sprint 1 ✅ 已完成
-
-- [x] `retrievers.py` Qdrant filter 改用 `models.Filter`
-- [x] `ingest.py` 实现 `ingest_schemas()` Schema DDL 入库
-- [x] `dependencies.py` 实现三个 retriever 的 Qdrant 绑定 + 降级回退
-- [x] 连接保存/更新触发后台 schema 向量化
-- [x] `_FakeEmbedder` 测试隔离
-- [x] `test_dependencies.py` 9 个降级场景测试通过
-- [x] Alembic 迁移 `7ab819dfa573_add_conversation_summary_and_user_.py`
-
-### Sprint 2 🚧 RAG 增强 + 错误码工具
-
-**目标**:演示"输错误码 → 准确返回原因/解决方案"+"知识问答从关键词匹配升级为语义检索"
-
-| # | 任务 | 优先级 | 工作量 | 交付物 | 状态 |
-|---|---|---|---|---|---|
-| 2.1 | 准备 `knowledge/docs/error_codes.json`(50+ 条 GBase 8a 错误码) | P0 | 4h | 错误码数据 | ✅ 56 条 |
-| 2.2 | 验证 `ingest_error_codes()` 已接入 `sync_all_to_qdrant`(代码已写) | P0 | 0.5h | 启动日志确认 | ✅ 已验证 |
-| 2.3 | 新建 `app/api/tools.py` — `POST /api/tools/error-code`,支持 code/keyword 查询 | P0 | 3h | 错误码查询接口 | ✅ 测试通过 |
-| 2.4 | 新建 `app/api/admin.py` — `POST /api/admin/reindex` 强制全量重建 | P1 | 2h | 管理接口 | ✅ 测试通过 |
-| 2.5 | 扩展运维文档(性能、参数、集群)分块入库 `knowledge/docs/ops_*.json` | P1 | 6h | 运维知识库 | ✅ 30 条 |
-| 2.6 | `qa_chain.py` 接入 RAG(已通过 `KnowledgeRetriever` 接收 chunks,验证降级路径命中率) | P0 | 3h | RAG 问答闭环 | ✅ 代码就绪 |
-| 2.7 | 前端 `ErrorCodeTool.vue` 组件 + `frontend/src/api/tools.ts` 封装 | P0 | 4h | 错误码 UI | ✅ 已集成 |
-| 2.8 | `SettingsView.vue` 增加"向量检索状态"卡片 + Reindex 按钮 | P1 | 3h | 状态面板 | ✅ 已集成 |
-| 2.9 | `MessageBubble.vue` 增加 sources 折叠区(qa_chain 已 stream sources) | P1 | 2h | 引用展示 | ✅ 已集成 |
-| 2.10 | `health.py` `/health` 增加 `qdrant: connected/disconnected/degraded` | P1 | 1h | 健康端点扩展 | ✅ 测试通过 |
-
-**Sprint 2 验收**:
-- `curl POST /api/tools/error-code -d '{"query":"1146"}'` 返回 GBase 8a 表不存在错误说明
-- 知识问答 20 条标准用例,RAG 模式准确率 >= 关键词模式 + 20%
-- Settings 页能看到 Qdrant 状态、点 Reindex 后状态条更新
-
-### Sprint 3 ✅ Schema 浏览器最小可用
-
-**目标**:Schema 管理从文本框升级为可视化列表(节选 PHASE3_PLAN 的 3.1/3.5/3.7,降低范围)
-
-| # | 任务 | 优先级 | 工作量 | 交付物 | 状态 |
-|---|---|---|---|---|---|
-| 3.1 | 后端 `GET /api/connections/{id}/schema/tables` 复用 `_parse_ddl_to_schemas()` | P0 | 3h | Schema 解析接口 | ✅ 测试通过 |
-| 3.2 | 前端在 `SettingsView` 嵌入 Schema 列表(暂不做单独路由) | P0 | 4h | 浏览器 UI | ✅ 已集成 |
-| 3.3 | `ConversationSummary` 接入:对话 N 轮后异步生成摘要,载入对话时优先使用 | P2 | 4h | 长期记忆 v0 | ⏸ 延到 Phase 4 |
-| 3.4 | 准备 `docs/demo-cases.md` 10–15 条标准用例(覆盖 SQL/错误码/QA) | P0 | 3h | 演示脚本 | ✅ 15 条 |
-
-**Sprint 3 验收**:Schema 列表能正确展示;`docs/demo-cases.md` 用例全部跑通
-
-### Sprint 4 ⏸ 上线前必做(Demo 阶段降权)
-
-下列任务延到上线前再执行,但要在 ROADMAP 显式标注避免遗忘:
-
-- [ ] GitHub Actions CI:`lint → test → build → docker build`
-- [ ] `/metrics` Prometheus 端点(向量检索命中率、Embedding 延迟)
-- [ ] LangGraph 评估文档(预判:不引入,但需正式归档)
-- [ ] 性能基准:Schema 全量注入 vs 向量检索的延迟/准确率对比
-- [ ] SQL 反馈闭环:用户反馈自动 enrich Few-shot 库
-- [ ] Vitest + Vue Test Utils 配置 + 3-5 个核心组件测试
-
-**Sprint 4 中本期保留的 2 项**:
-- E2E 10 用例(并入 Sprint 3 的 demo-cases)
-- 错误码 + RAG 准确率人工评测(并入 Sprint 2 验收)
+当前测试口径：后端 pytest 约 80 个用例，覆盖 validator、chain、API、dependencies、crypto、sandbox、metrics。
 
 ---
 
-## 三、阶段 A:净化(本期同步推进)
+## Phase 3.5 — 文档与稳态加固
 
-PHASE3_PLAN 中没有的额外净化项,与 Sprint 2 并行处理:
+目标：让项目说明和真实代码一致，补齐 Demo → 生产化前的基础可观测与用户文档。
 
-### A.1 状态收口(2026-05-06 进行中)
-- [x] `.gitignore` 整体忽略 `.claude/`(避免 worktrees 被跟踪)
-- [x] 恢复 `PHASE3_PLAN.md` → 本文件 `docs/ROADMAP.md`
-- [x] `design-proposal.md` 移至 `docs/design/redesign-proposal.md`
-- [ ] 更新 `AGENTS.md` 当前阶段段落(进行中)
-- [ ] 同步 `ARCHITECTURE.md` Phase 3 章节状态
-
-### A.2 P1 重构 ✅ 已完成
-- [x] `dependencies.py` 三个 fallback wrapper 类合并为泛型 `FallbackRetriever`
-- [x] Embedding 维度从 `models.yaml` 显式读取(去掉 `litellm.py` 的硬编码维度判断)
-- [x] `main.py` lifespan 中 `sync_all_to_qdrant` 改为 `asyncio.create_task` 后台执行 + `SKIP_VECTOR_SYNC` env 开关
-
-### A.3 配置一致性
-- [ ] `models.yaml` provider 默认值与 ARCHITECTURE.md 描述统一(local vs litellm 二选一)
-- [ ] `.env.example` 检查 `QDRANT_URL`、`DASHSCOPE_API_KEY` 占位是否齐全
+| # | 任务 | 优先级 | 状态 |
+|---|---|---|---|
+| 3.5.1 | 将基础架构、开发规范、关键文件统一收敛到 `AGENTS.md` | P0 | ✅ 已完成 |
+| 3.5.2 | 将 `ROADMAP.md` 改为下一步计划，不再承载架构长文 | P0 | ✅ 已完成 |
+| 3.5.3 | 将 `ARCHITECTURE.md` 改为兼容旧链接的过渡页 | P0 | ✅ 已完成 |
+| 3.5.4 | 清理未使用的 `.claude/` 本地缓存/旧 worktree | P1 | ✅ 已完成 |
+| 3.5.5 | 暴露 `/metrics` Prometheus 文本端点 | P0 | ⏭ 下一步 |
+| 3.5.6 | 修复摘要任务 LLM 导入与 feedback enricher 知识库路径 | P0 | ⏭ 下一步 |
+| 3.5.7 | 为 DataBrowser / Insights / SqlEditor 补 `docs/features/*.md` | P1 | 待启动 |
+| 3.5.8 | `health.py` 增加依赖响应时间字段 | P1 | 待启动 |
 
 ---
 
-## 四、关键决策与风险
+## Phase 4 — 上线前必做
 
-### 决策 1:Embedding 方案
-- 默认配置:**LiteLLM + 阿里云 text-embedding-v4**(dim=1024)
-- 备选:本地 bge-m3(dim=1024,首次下载 2.3GB)— 离线场景使用
-- 切换方式:改 `backend/config/models.yaml` 的 `embedding.provider`
+目标：从 Demo 完成态进入可生产部署状态。
 
-### 决策 2:LangGraph 是否引入
-- **预判:Phase 3 不引入**。当前函数链签名已兼容 LangGraph node 包装,Phase 4 出现复杂状态/checkpoint/审批节点再评估
-- 决策文档延到 Sprint 4(上线前)
+| # | 任务 | 优先级 | 建议顺序 |
+|---|---|---|---|
+| 4.1 | GitHub Actions CI：lint → test → frontend build → docker build | P0 | 1 |
+| 4.2 | Playwright E2E：跑通 `docs/demo-cases.md` 核心用例 | P0 | 2 |
+| 4.3 | SQL 执行审计日志：用户、连接、SQL、耗时、行数、状态、错误 | P0 | 3 |
+| 4.4 | 凭证操作审计：新增、更新、测试连接、删除连接 | P0 | 4 |
+| 4.5 | 最小认证：JWT/Session 二选一，配套登录态与登出 | P0 | 5 |
+| 4.6 | 限流中间件：chat、stream、query、admin 分级限流 | P0 | 6 |
+| 4.7 | CORS / HTTPS / 安全 Header 收口 | P0 | 7 |
+| 4.8 | Docker Compose 端到端验证：backend + frontend + qdrant + nginx | P0 | 8 |
+| 4.9 | 性能基准：向量检索 vs 全量注入，SQL 执行延迟，LLM 延迟 | P1 | 9 |
+| 4.10 | LangGraph 引入评估文档，预判不引入 | P1 | 10 |
+| 4.11 | 凭证轮换接口或 KMS 接入方案 | P2 | 后续 |
 
-### 决策 3:ORM 模型 ConversationSummary / UserPattern
-- 保留模型 + 表(2026-05-06 用户决策)
-- Phase 4 长期记忆功能复用,本期 Sprint 3.3 启用 ConversationSummary
+上线前安全门槛：
 
-### 风险项
+- 真实数据库账号必须为只读权限。
+- SQL 沙箱不能作为唯一安全边界。
+- 所有执行 SQL 必须进入审计日志。
+- 生产环境不得开启 debug docs。
+- CORS 不能使用宽松开发配置。
 
-| 风险 | 影响 | 缓解措施 |
+---
+
+## Phase 4.5 — 前端架构整理
+
+目标：降低后续维护成本，避免大型单文件继续扩张。
+
+| # | 任务 | 优先级 |
 |---|---|---|
-| bge-m3 首次下载阻塞启动(已发生过) | 启动卡死 | A.2 lifespan 异步化 + `SKIP_VECTOR_SYNC` 开关 |
-| Qdrant 检索准确率不达预期 | SQL 生成/QA 质量下降 | 已实现自动降级到全量/关键词;Sprint 2 验收 20 条标准评测 |
-| 错误码知识库覆盖不全 | 演示效果打折 | Sprint 2.1 至少覆盖 50 条主流错误,迭代扩展 |
+| 4.5.1 | 拆分 `SettingsView.vue` 为连接、模型、Schema、系统状态、管理操作 panels | P1 |
+| 4.5.2 | 拆分 `DataBrowserView.vue` 为表导航、筛选、数据网格、分页 composables | P1 |
+| 4.5.3 | 拆分 `SqlEditorView.vue` 为编辑器、结果表格、保存查询、执行状态 | P1 |
+| 4.5.4 | 拆分 `InsightsView.vue` 为概览、倾斜检测、状态变量、进程列表 | P1 |
+| 4.5.5 | 拆分 `Sidebar.vue` 为会话列表、标签管理、操作菜单 | P1 |
+| 4.5.6 | 引入 Vitest + Vue Test Utils，先覆盖 5-8 个核心组件 | P1 |
+| 4.5.7 | 抽离 `useSQLExecution`、`useResultTable`、`useConnectionStatus` | P2 |
+| 4.5.8 | Pinia store 分层：chat / connection / settings / savedQueries | P2 |
 
 ---
 
-## 五、参考文档
+## Phase 6 — 长期记忆与智能化
 
-- [`AGENTS.md`](../AGENTS.md) — Agent 视角的项目说明
-- [`ARCHITECTURE.md`](../ARCHITECTURE.md) — 架构设计与升级路径
-- [`docs/design/redesign-proposal.md`](design/redesign-proposal.md) — 前端 UI redesign 方案
-- [`backend/config/models.yaml`](../backend/config/models.yaml) — LLM 与 Embedding 模型配置
+目标：激活已经预埋但尚未稳定进入主链路的智能能力。
+
+| # | 任务 | 优先级 |
+|---|---|---|
+| 6.1 | 启用 `ConversationSummary`：N 轮后异步摘要，构建上下文时优先注入摘要 | P1 |
+| 6.2 | 启用 `feedback_enricher` 调度：accepted / modified SQL 自动进入 Few-shot | P1 |
+| 6.3 | 启用 `UserPattern`：记录常用表、查询模式、用户偏好 | P2 |
+| 6.4 | 扩充知识库：FAQ 80、错误码 100、运维文档 60 | P2 |
+| 6.5 | RAG 命中率、人工准确率评测脚本化 | P2 |
 
 ---
 
-*本 ROADMAP 替代已删除的 `PHASE3_PLAN.md`,在 Phase 3 周期内持续维护。Sprint 完成后划掉对应任务,新增任务追加到对应 Sprint 节末尾。*
+## 近期推荐执行顺序
+
+1. 完成本文档收敛任务：`AGENTS.md`、`ROADMAP.md`、`ARCHITECTURE.md`。
+2. 清理 `.claude/`，避免旧工作区文档继续误导。
+3. 修复两个后台任务问题：
+   - 摘要任务使用不存在的 `app.llm.litellm_client.LiteLLMClient`。
+   - feedback enricher 的 `EXAMPLES_PATH` 应改用 `get_settings().knowledge_dir`。
+4. 暴露 `/metrics`，复用现有 `backend/app/observability/metrics.py`。
+5. 抽出 `chat.py` 的 service/orchestrator，先保证行为不变。
+6. 开始 Phase 4：CI、E2E、审计、认证限流。
+
+---
+
+## 决策记录
+
+- **LangGraph**：暂不引入。当前函数链足够，除非出现 checkpoint/resume、人工审批、多 Agent 复杂状态流。
+- **SQLite**：当前继续使用，适合单机 <50 人；若并发写锁或生产部署要求提升，再迁移 PostgreSQL。
+- **Qdrant**：作为向量检索层，知识库文件仍是源。
+- **SQL 执行**：当前功能已存在，但上线前必须补数据库账号只读、审计、认证限流。
+- **文档入口**：`AGENTS.md` 是唯一基础架构入口，`ROADMAP.md` 只放计划。

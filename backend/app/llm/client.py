@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 
 import litellm
 
 from app.config import get_settings
+from app.observability import metrics
 from app.protocols import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,7 @@ class LiteLLMClientImpl:
 
         errors: list[tuple[str, str]] = []
         for model in models:
+            start = time.perf_counter()
             try:
                 response = await litellm.acompletion(model=model, messages=messages, **params)
                 content = response.choices[0].message.content or ""
@@ -93,9 +96,23 @@ class LiteLLMClientImpl:
                 }
                 if model != models[0]:
                     logger.info("Fallback succeeded: model=%s (primary=%s failed)", model, models[0])
+                metrics.record_llm_call(
+                    task_type=self.task_type,
+                    model=model,
+                    status="ok",
+                    latency_seconds=time.perf_counter() - start,
+                    prompt_tokens=usage["prompt"],
+                    completion_tokens=usage["completion"],
+                )
                 return content, usage
             except Exception as e:
                 logger.warning("Model %s failed for %s: %s", model, self.task_type, e)
+                metrics.record_llm_call(
+                    task_type=self.task_type,
+                    model=model,
+                    status="error",
+                    latency_seconds=time.perf_counter() - start,
+                )
                 errors.append((model, str(e)))
 
         raise AllModelsFailedError(errors)
@@ -108,6 +125,7 @@ class LiteLLMClientImpl:
 
         errors: list[tuple[str, str]] = []
         for model in models:
+            start = time.perf_counter()
             try:
                 response = await litellm.acompletion(model=model, messages=messages, stream=True, **params)
                 if model != models[0]:
@@ -116,9 +134,21 @@ class LiteLLMClientImpl:
                     delta = chunk.choices[0].delta
                     if delta and delta.content:
                         yield delta.content
+                metrics.record_llm_call(
+                    task_type=self.task_type,
+                    model=model,
+                    status="ok",
+                    latency_seconds=time.perf_counter() - start,
+                )
                 return
             except Exception as e:
                 logger.warning("Model %s stream failed for %s: %s", model, self.task_type, e)
+                metrics.record_llm_call(
+                    task_type=self.task_type,
+                    model=model,
+                    status="error",
+                    latency_seconds=time.perf_counter() - start,
+                )
                 errors.append((model, str(e)))
 
         raise AllModelsFailedError(errors)

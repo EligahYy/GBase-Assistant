@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.llm.client import LiteLLMClientImpl
+from app.observability import metrics
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -132,5 +133,22 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         vector_db=await _check_vector_db(),
         gbase_connections=await _check_gbase_connections(),
     )
+
+    _STATE_TO_GAUGE = {
+        "connected": 1.0,
+        "ok": 1.0,
+        "partial": 0.5,
+        "degraded": 0.5,
+        "untested": 0.5,
+        "no_connections": 0.5,
+        "disconnected": 0.0,
+        "unreachable": 0.0,
+        "unknown": 0.0,
+    }
+    metrics.set_dependency_up("database", _STATE_TO_GAUGE.get(deps.database, 0.0))
+    metrics.set_dependency_up("llm_api", _STATE_TO_GAUGE.get(deps.llm_api, 0.0))
+    metrics.set_dependency_up("vector_db", _STATE_TO_GAUGE.get(deps.vector_db, 0.0))
+    metrics.set_dependency_up("gbase_connections", _STATE_TO_GAUGE.get(deps.gbase_connections, 0.0))
+
     overall = "ok" if deps.database == "connected" and deps.llm_api == "connected" else "degraded"
     return HealthResponse(status=overall, dependencies=deps)
