@@ -1,6 +1,12 @@
 # backend/tests/test_grep_retriever.py
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.protocols import KnowledgeChunk
 from app.vector.grep_retriever import QueryRouter
 
 
@@ -43,3 +49,75 @@ class TestQueryRouter:
 
     def test_empty_query_returns_semantic(self):
         assert QueryRouter.classify("") == "semantic"
+
+
+class TestGrepRetriever:
+    @pytest.fixture
+    def knowledge_dir(self):
+        return Path(__file__).parent.parent.parent / "knowledge"
+
+    @pytest.mark.anyio
+    async def test_retrieve_finds_error_code(self, knowledge_dir):
+        from app.vector.grep_retriever import GrepRetriever
+
+        retriever = GrepRetriever(knowledge_dir)
+        results = await retriever.retrieve("错误码 1040")
+
+        assert len(results) > 0
+        assert any("1040" in r.content for r in results)
+
+    @pytest.mark.anyio
+    async def test_retrieve_finds_sql_keyword(self, knowledge_dir):
+        from app.vector.grep_retriever import GrepRetriever
+
+        retriever = GrepRetriever(knowledge_dir)
+        results = await retriever.retrieve("SELECT")
+
+        assert len(results) > 0
+
+    @pytest.mark.anyio
+    async def test_retrieve_returns_knowledge_chunks(self, knowledge_dir):
+        from app.vector.grep_retriever import GrepRetriever
+
+        retriever = GrepRetriever(knowledge_dir)
+        results = await retriever.retrieve("GBase 8a")
+
+        assert isinstance(results, list)
+        for r in results:
+            assert isinstance(r, KnowledgeChunk)
+            assert r.content
+            assert r.source
+
+    @pytest.mark.anyio
+    async def test_empty_query_returns_empty(self, knowledge_dir):
+        from app.vector.grep_retriever import GrepRetriever
+
+        retriever = GrepRetriever(knowledge_dir)
+        results = await retriever.retrieve("")
+
+        assert results == []
+
+    @pytest.mark.anyio
+    async def test_rg_not_found_graceful_degradation(self, knowledge_dir):
+        """ripgrep 不可用时优雅降级，返回空列表不抛异常。"""
+        from app.vector.grep_retriever import GrepRetriever
+
+        retriever = GrepRetriever(knowledge_dir)
+        with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError):
+            results = await retriever.retrieve("1040")
+
+        assert results == []
+
+    @pytest.mark.anyio
+    async def test_rg_nonzero_exit_graceful(self, knowledge_dir):
+        """ripgrep 返回非零退出码（无匹配）时返回空列表。"""
+        from app.vector.grep_retriever import GrepRetriever
+
+        retriever = GrepRetriever(knowledge_dir)
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            results = await retriever.retrieve("nonexistent_xyz_123")
+
+        assert results == []
