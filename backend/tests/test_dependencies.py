@@ -13,7 +13,7 @@ from app.dependencies import (
     get_llm_client,
     get_schema_retriever,
 )
-from app.knowledge.loader import DbSchemaRetriever, FileExampleRetriever, FileKnowledgeRetriever
+from app.knowledge.loader import DbSchemaRetriever, FileExampleRetriever
 from app.llm.client import LiteLLMClientImpl
 
 
@@ -95,26 +95,25 @@ class TestExampleRetrieverFallback:
 
 
 class TestKnowledgeRetrieverFallback:
-    def test_returns_file_retriever_when_qdrant_unavailable(self):
-        """Qdrant 不可用时直接返回 FileKnowledgeRetriever。"""
+    def test_returns_hybrid_when_qdrant_unavailable(self):
+        """Qdrant 不可用时应返回 FallbackRetriever 包裹 HybridKnowledgeRetriever（grep-only）。"""
         retriever = get_knowledge_retriever()
         assert retriever is not None
-        assert isinstance(retriever, FileKnowledgeRetriever)
+        assert isinstance(retriever, FallbackRetriever)
 
-    def test_returns_wrapper_when_qdrant_available(self):
+    def test_returns_hybrid_wrapper_when_qdrant_available(self):
         with patch("app.vector.client.is_qdrant_available", return_value=True):
             retriever = get_knowledge_retriever()
             assert retriever is not None
-            assert not isinstance(retriever, FileKnowledgeRetriever)
             assert isinstance(retriever, FallbackRetriever)
 
     @pytest.mark.anyio
-    async def test_fallback_returns_file_knowledge(self):
-        """Qdrant 失败后回退到 FileKnowledgeRetriever。"""
-        fallback = FileKnowledgeRetriever()
-        wrapper = FallbackRetriever(primary=None, fallback=fallback, name="KnowledgeRetriever")
-        result = await wrapper.retrieve("GBase 8a 支持触发器吗")
+    async def test_hybrid_fallback_returns_results(self):
+        """混合检索器应能返回知识检索结果。"""
+        retriever = get_knowledge_retriever()
+        result = await retriever.retrieve("1040")
         assert isinstance(result, list)
+        # 无论是向量命中（需 Qdrant）还是 grep 命中，只要返回 list 即正确
 
 
 class TestLLMClient:

@@ -114,22 +114,33 @@ def get_example_retriever() -> ExampleRetriever:
 
 
 def get_knowledge_retriever() -> KnowledgeRetriever:
-    """KnowledgeRetriever：优先 Qdrant RAG 检索，失败时回退到文件关键词匹配。"""
+    """KnowledgeRetriever：混合检索（Qdrant + ripgrep），双路径互补兜底。"""
     from app.vector.client import is_qdrant_available
 
-    if not is_qdrant_available():
-        return _get_file_knowledge_retriever()
+    # 构建 Qdrant 检索器（可选）
+    vector = None
+    if is_qdrant_available():
+        try:
+            from app.vector.retrievers import QdrantKnowledgeRetriever
 
-    primary = None
-    try:
-        from app.vector.retrievers import QdrantKnowledgeRetriever
+            vector = QdrantKnowledgeRetriever()
+        except Exception as e:
+            logger.debug("QdrantKnowledgeRetriever 实例化失败: %s", e)
 
-        primary = QdrantKnowledgeRetriever()
-    except Exception as e:
-        logger.debug("QdrantKnowledgeRetriever 实例化失败: %s", e)
+    # 构建 Grep 检索器
+    from app.config import get_settings
+    from app.vector.grep_retriever import GrepRetriever
 
+    grep = GrepRetriever(get_settings().knowledge_dir)
+
+    # 混合检索器（内部分流 + 互补兜底）
+    from app.vector.hybrid_retriever import HybridKnowledgeRetriever
+
+    hybrid = HybridKnowledgeRetriever(vector=vector, grep=grep)
+
+    # 最外层兜底：Hybrid 整体失败时回退到 FileKnowledgeRetriever
     return FallbackRetriever(
-        primary=primary,
+        primary=hybrid,
         fallback=_get_file_knowledge_retriever(),
         name="KnowledgeRetriever",
     )  # type: ignore[return-value]
