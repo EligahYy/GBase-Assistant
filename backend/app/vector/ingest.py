@@ -292,7 +292,7 @@ async def ingest_ops_docs(embedder: Embedder, force: bool = False) -> int:
     for i, item in enumerate(all_docs):
         points.append(
             {
-                "id": f"ops_{i}",
+                "id": 10000 + i,
                 "vector": embeddings[i],
                 "payload": {
                     "source": f"运维文档 - {item.get('_source_file', 'ops').replace('.json', '')}",
