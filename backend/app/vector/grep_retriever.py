@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from pathlib import Path
@@ -80,7 +81,7 @@ class GrepRetriever:
         for kw in keywords[:5]:
             try:
                 output = await self._rg_search(kw)
-                chunks = self._parse_rg_output(output, kw)
+                chunks = self._parse_json_events(output)
                 all_chunks.extend(chunks)
             except FileNotFoundError:
                 logger.warning("ripgrep (rg) 未安装或不在 PATH 中")
@@ -103,63 +104,85 @@ class GrepRetriever:
             keywords.append(query.strip())
         return list(dict.fromkeys(keywords))
 
-    async def _rg_search(self, pattern: str) -> str:
-        """执行 ripgrep 搜索，返回 stdout 字符串。"""
-        args = ["rg", "-i", "-n", "-C", "2", "-m", "10"]
+    async def _rg_search(self, pattern: str) -> list[dict]:
+        """执行 ripgrep --json 搜索，返回 JSON 事件列表。"""
+        args = ["rg", "--json", "-i", "-C", "2", "-m", "10"]
         for g in SEARCH_GLOBS:
             args.extend(["-g", g])
         args.append("--")
         args.append(pattern)
         args.append(str(self._dir))
 
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                ),
+                timeout=10.0,
+            )
+        except TimeoutError:
+            logger.warning("ripgrep 搜索超时 (pattern=%s)", pattern)
+            return []
+
         stdout, stderr = await proc.communicate()
-        return stdout.decode("utf-8", errors="replace")
 
-    def _parse_rg_output(self, output: str, keyword: str) -> list[KnowledgeChunk]:
-        """解析 ripgrep 输出为 KnowledgeChunk 列表。
+        if proc.returncode not in (0, 1):
+            stderr_text = stderr.decode("utf-8", errors="replace")[:200] if stderr else ""
+            logger.warning("ripgrep 异常退出 (exit=%d, pattern=%s): %s", proc.returncode, pattern, stderr_text)
+            return []
 
-        ripgrep -C 2 输出格式：
-        filepath:linenum:content  (匹配行)
-        filepath-linenum-content  (上下文行)
-        -- (文件分隔符)
+        events = []
+        for line in stdout.decode("utf-8", errors="replace").split("\n"):
+            line = line.strip()
+            if line:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return events
+
+    def _parse_json_events(self, events: list[dict]) -> list[KnowledgeChunk]:
+        """将 rg --json 事件列表解析为 KnowledgeChunk 列表。
+
+        JSON 事件类型：begin（文件开始）、match（匹配行）、context（上下文行）、end（文件结束）。
         """
         chunks: list[KnowledgeChunk] = []
         current_file = ""
         current_lines: list[str] = []
 
-        for line in output.split("\n"):
-            if line == "--":
-                if current_file and current_lines:
-                    chunks.append(self._build_chunk(current_file, current_lines, keyword))
-                current_file = ""
-                current_lines = []
-                continue
-            if not line.strip():
-                continue
+        for ev in events:
+            etype = ev.get("type", "")
+            data = ev.get("data", {})
+            path_info = data.get("path", {})
+            file_path = path_info.get("text", "")
+            lines_info = data.get("lines", {})
 
-            if ":" in line:
-                parts = line.split(":", 2)
-                if len(parts) >= 3 and parts[1].strip().isdigit():
-                    current_file = parts[0]
-                    current_lines.append(parts[2])
-                elif "-" in line:
-                    parts = line.split("-", 2)
-                    if len(parts) >= 3 and parts[1].strip().isdigit():
-                        current_lines.append(parts[2])
-            elif current_lines:
-                current_lines.append(line)
+            if etype in ("begin", "end"):
+                if etype == "begin" and file_path:
+                    current_file = file_path
+                    current_lines = []
+                elif etype == "end" and current_file and current_lines:
+                    chunks.append(self._build_chunk(current_file, current_lines))
+                    current_file = ""
+                    current_lines = []
+            elif etype in ("match", "context"):
+                if file_path and file_path != current_file:
+                    if current_file and current_lines:
+                        chunks.append(self._build_chunk(current_file, current_lines))
+                    current_file = file_path
+                    current_lines = []
+                text = lines_info.get("text", "")
+                if text:
+                    current_lines.append(text.rstrip("\n"))
 
         if current_file and current_lines:
-            chunks.append(self._build_chunk(current_file, current_lines, keyword))
+            chunks.append(self._build_chunk(current_file, current_lines))
 
         return chunks
 
-    def _build_chunk(self, file_path: str, lines: list[str], keyword: str) -> KnowledgeChunk:
+    def _build_chunk(self, file_path: str, lines: list[str]) -> KnowledgeChunk:
         source = self._relative_source(file_path)
         content = "\n".join(lines[:6])
         category = self._infer_category(file_path)
