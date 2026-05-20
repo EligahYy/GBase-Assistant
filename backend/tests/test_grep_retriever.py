@@ -1,7 +1,6 @@
 # backend/tests/test_grep_retriever.py
 from __future__ import annotations
 
-import pytest
 from app.vector.grep_retriever import QueryRouter
 
 
@@ -35,6 +34,12 @@ class TestQueryRouter:
 
     def test_classifies_english_question_as_semantic(self):
         assert QueryRouter.classify("how to optimize query performance") == "semantic"
+
+    def test_bare_four_digit_code_as_precise(self):
+        assert QueryRouter.classify("1040") == "precise"
+
+    def test_whitespace_only_query_returns_semantic(self):
+        assert QueryRouter.classify("   ") == "semantic"
 
     def test_empty_query_returns_semantic(self):
         assert QueryRouter.classify("") == "semantic"
