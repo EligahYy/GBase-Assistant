@@ -15,6 +15,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.orchestrator import classify_intent_v2, route_after_intent
+from app.agents.schema_graph import get_schema_graph, SchemaGraph
 from app.agents.state import AgentStateType
 from app.gateway.ag_ui_encoder import EventEncoder
 
@@ -43,8 +44,63 @@ async def orchestrator_node(state: AgentStateType) -> dict:
 
 
 async def schema_grounding_node(state: AgentStateType) -> dict:
-    """Schema Grounding stub: Phase 3 实现。"""
-    return {"grounding": None}
+    """Schema Grounding: 多策略检索定位用户问题涉及的表和列。"""
+    user_msg = ""
+    msgs = state.get("messages", [])
+    if msgs:
+        last = msgs[-1]
+        if isinstance(last, dict):
+            user_msg = last.get("content", "")
+
+    db_id = state.get("db_connection_id")
+    if not db_id:
+        return {"grounding": None}
+
+    graph = get_schema_graph(db_id)
+    if not graph._built:
+        loaded = SchemaGraph.load(db_id)
+        if loaded:
+            from app.agents.schema_graph import _graph_instances
+            _graph_instances[db_id] = loaded
+            graph = loaded
+        else:
+            return {"grounding": None}
+
+    matches = graph.exact_match(user_msg)
+    if not matches:
+        return {"grounding": {"tables": [], "columns": {}, "join_paths": [], "confidence": 0.0}}
+
+    table_hits: dict[str, set] = {}
+    column_hits: dict[str, list[str]] = {}
+    for m in matches:
+        table = m["table"]
+        if table not in table_hits:
+            table_hits[table] = set()
+            column_hits[table] = []
+        if m["column"] != "*":
+            table_hits[table].add(m["column"])
+            column_hits[table].append(m["column"])
+
+    table_list = list(table_hits.keys())
+    join_paths: list[str] = []
+    if len(table_list) > 1:
+        for i in range(len(table_list)):
+            for j in range(i + 1, len(table_list)):
+                path = graph.find_join_path(table_list[i], table_list[j])
+                if path:
+                    for rel in path:
+                        if rel["via"] not in join_paths:
+                            join_paths.append(rel["via"])
+
+    confidence = min(0.9, 0.5 + len(matches) * 0.1)
+    grounding = {
+        "tables": table_list,
+        "columns": {t: list(c) for t, c in column_hits.items()},
+        "join_paths": join_paths,
+        "confidence": round(confidence, 2),
+        "matches": len(matches),
+    }
+    return {"grounding": grounding}
 
 
 async def sql_specialist_node(state: AgentStateType) -> dict:
