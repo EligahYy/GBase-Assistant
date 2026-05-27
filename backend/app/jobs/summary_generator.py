@@ -42,19 +42,13 @@ async def generate_conversation_summary(
         新生成的 ConversationSummary，或 None（如果不需要生成）
     """
     # 1. 检查是否已有摘要
-    result = await db.execute(
-        select(ConversationSummary).where(
-            ConversationSummary.conversation_id == conversation_id
-        )
-    )
+    result = await db.execute(select(ConversationSummary).where(ConversationSummary.conversation_id == conversation_id))
     if result.scalar_one_or_none():
         return None
 
     # 2. 获取对话消息
     result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.asc())
+        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc())
     )
     messages = list(result.scalars().all())
 
@@ -72,7 +66,7 @@ async def generate_conversation_summary(
     # 4. 调用 LLM 生成摘要
     try:
         prompt = SUMMARY_PROMPT.format(dialogue=dialogue)
-        content, _ = await llm_client.complete(prompt)
+        content, _ = await llm_client.complete([{"role": "user", "content": prompt}])
 
         # 解析 JSON
         content = content.strip()

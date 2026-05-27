@@ -134,7 +134,7 @@ backend/app/
 ├── protocols.py         # 核心接口与数据结构
 ├── dependencies.py      # Protocol 绑定与 Qdrant 自动降级
 ├── api/
-│   ├── chat.py          # 聊天、流式、对话 CRUD、反馈入口
+│   ├── chat.py          # 聊天 HTTP 入参/出参与服务层绑定
 │   ├── connections.py   # 连接 CRUD、状态、Schema 浏览、SQL 查询
 │   ├── tools.py         # 错误码查询
 │   ├── admin.py         # reindex、feedback enrich 等管理接口
@@ -145,6 +145,11 @@ backend/app/
 │   ├── intent.py        # 意图分类：sql / qa / general
 │   ├── sql_chain.py     # NL → SQL → 验证 → 自纠错
 │   └── qa_chain.py      # 知识问答 RAG
+├── services/
+│   ├── chat_service.py          # 聊天请求编排
+│   ├── conversation_service.py  # 对话上下文、消息持久化、反馈
+│   ├── sql_execution_service.py # 聊天链路 SQL 执行
+│   └── summary_service.py       # 对话摘要后台任务
 ├── llm/
 │   ├── client.py        # LiteLLM 封装 + fallback + metrics
 │   └── prompts.py       # Prompt 模板
@@ -170,12 +175,13 @@ backend/app/
 
 ```text
 API 路由 (api/*.py)
-  → 业务编排 / chain (chains/*.py 或 service 层)
+  → 服务层 (services/*.py)
+  → 业务链 (chains/*.py)
   → 工具层 (sql/, llm/, knowledge/, vector/, db_connectors/)
   → 数据层 (models/, database.py)
 ```
 
-当前已知偏差：`backend/app/api/chat.py` 职责偏重，后续应拆出 service/orchestrator 层。
+聊天链路已经完成第一轮边界收敛：`api/chat.py` 保持 HTTP 层职责，聊天编排移入 `services/chat_service.py`。
 
 ---
 
@@ -433,12 +439,11 @@ TESTING=
 优先级从高到低：
 
 1. **文档收敛**：本文作为唯一基础架构入口；`ROADMAP.md` 只放下一步计划。
-2. **修复后台任务问题**：摘要任务导入不存在的 LLM 类；feedback enricher 的 examples 路径应使用 `knowledge_dir`。
-3. **拆分 `chat.py`**：抽 `ChatOrchestrator`、`ConversationService`、`SqlExecutionService`、`FeedbackService`。
-4. **补 `/metrics`**：已有进程内 metrics，缺 Prometheus 文本渲染与路由。
-5. **补审计与认证**：SQL 执行流水、凭证操作日志、JWT/Session、限流。
-6. **前端拆分**：大型 view 拆 panel/table/composable，引入最小组件测试。
-7. **E2E 验证**：基于 `docs/demo-cases.md` 建 Playwright 冒烟测试。
+2. **补 `/metrics`**：已有进程内 metrics，缺 Prometheus 文本渲染与路由。
+3. **继续边界收敛**：优先拆分 `connections.py` 与 `insights.py` 中的业务逻辑。
+4. **补审计与认证**：SQL 执行流水、凭证操作日志、JWT/Session、限流。
+5. **前端拆分**：大型 view 拆 panel/table/composable，引入最小组件测试。
+6. **E2E 验证**：基于 `docs/demo-cases.md` 建 Playwright 冒烟测试。
 
 ---
 

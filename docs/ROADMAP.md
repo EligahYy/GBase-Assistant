@@ -105,11 +105,9 @@
 
 1. 完成本文档收敛任务：`AGENTS.md`、`ROADMAP.md`、`ARCHITECTURE.md`。
 2. 清理 `.claude/`，避免旧工作区文档继续误导。
-3. 修复两个后台任务问题：
-   - 摘要任务使用不存在的 `app.llm.litellm_client.LiteLLMClient`。
-   - feedback enricher 的 `EXAMPLES_PATH` 应改用 `get_settings().knowledge_dir`。
+3. 完成聊天链路边界收敛：`api/chat.py` → `services/chat_service.py` / `conversation_service.py` / `sql_execution_service.py` / `summary_service.py`。
 4. 暴露 `/metrics`，复用现有 `backend/app/observability/metrics.py`。
-5. 抽出 `chat.py` 的 service/orchestrator，先保证行为不变。
+5. 继续拆分 `connections.py` 与 `insights.py` 中的业务逻辑。
 6. 开始 Phase 4：CI、E2E、审计、认证限流。
 
 ---

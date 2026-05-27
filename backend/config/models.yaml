@@ -20,9 +20,18 @@ models:
   intent_classification:
     primary: "deepseek/deepseek-chat"
     fallback:
+      - "qwen/qwen2.5-72b-instruct"
       - "openai/gpt-4o-mini"
     temperature: 0.0
     max_tokens: 50
+
+  general:
+    primary: "deepseek/deepseek-chat"
+    fallback:
+      - "qwen/qwen2.5-72b-instruct"
+      - "openai/gpt-4o"
+    temperature: 0.3
+    max_tokens: 2048
 
 embedding:
   provider: "litellm"  # local | litellm

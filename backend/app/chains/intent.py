@@ -12,11 +12,41 @@ logger = logging.getLogger(__name__)
 
 VALID_INTENTS = frozenset(["sql", "qa", "general"])
 
+SQL_KEYWORDS = (
+    "查询",
+    "统计",
+    "列出",
+    "筛选",
+    "分析",
+    "计算",
+    "订单",
+    "用户",
+    "表",
+    "字段",
+    "sql",
+)
+QA_KEYWORDS = (
+    "介绍",
+    "解释",
+    "说明",
+    "支持",
+    "怎么",
+    "如何",
+    "什么",
+    "区别",
+    "错误",
+    "函数",
+    "语法",
+    "gbase",
+    "row number",
+    "row_number",
+)
+
 
 async def classify_intent(message: str, llm_client: LLMClient) -> str:
     """
     判断用户意图，返回 "sql" | "qa" | "general"。
-    失败时默认返回 "general"（安全降级）。
+    失败时使用本地关键词兜底，避免 LLM 认证问题导致数据库问题被误路由到 general。
     """
     messages = [
         {"role": "system", "content": INTENT_SYSTEM},
@@ -38,5 +68,16 @@ async def classify_intent(message: str, llm_client: LLMClient) -> str:
             return "general"
         return intent
     except Exception as e:
-        logger.warning("意图分类失败: %s，降级为 general", e)
-        return "general"
+        fallback = classify_intent_by_rule(message)
+        logger.warning("意图分类失败: %s，使用本地规则降级为 %s", e, fallback)
+        return fallback
+
+
+def classify_intent_by_rule(message: str) -> str:
+    """轻量本地兜底分类，避免模型不可用时聊天链路完全中断。"""
+    normalized = message.lower()
+    if any(keyword in normalized for keyword in QA_KEYWORDS):
+        return "qa"
+    if any(keyword in normalized for keyword in SQL_KEYWORDS):
+        return "sql"
+    return "general"

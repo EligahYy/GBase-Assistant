@@ -7,11 +7,11 @@ import json
 import logging
 import re
 from datetime import UTC, datetime
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.message import Message
 from app.models.sql_feedback import SQLFeedback
 from app.protocols import SQLExample
@@ -19,7 +19,7 @@ from app.vector.client import is_qdrant_available
 
 logger = logging.getLogger(__name__)
 
-EXAMPLES_PATH = Path(__file__).parent.parent.parent / "knowledge" / "examples" / "sql_examples.jsonl"
+EXAMPLES_PATH = get_settings().knowledge_dir / "examples" / "sql_examples.jsonl"
 
 
 def _compute_hash(question: str, sql: str) -> str:
@@ -91,9 +91,7 @@ def _append_example(example: SQLExample) -> None:
 async def _find_user_question(db: AsyncSession, message_id: str) -> str | None:
     """通过 message_id 找到对应的用户原始问题。"""
     # 获取消息所属的 conversation
-    result = await db.execute(
-        select(Message).where(Message.id == message_id)
-    )
+    result = await db.execute(select(Message).where(Message.id == message_id))
     msg = result.scalar_one_or_none()
     if not msg:
         return None

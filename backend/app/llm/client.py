@@ -24,7 +24,22 @@ class AllModelsFailedError(Exception):
 
     def __init__(self, errors: list[tuple[str, str]]):
         self.errors = errors
-        super().__init__(f"All models failed: {errors}")
+        super().__init__(self.user_message)
+
+    @property
+    def user_message(self) -> str:
+        models = ", ".join(model for model, _ in self.errors)
+        if any("auth" in error.lower() or "api key" in error.lower() for _, error in self.errors):
+            return f"模型认证失败，请检查后端 .env 中的 API Key 或切换可用模型。失败模型：{models}"
+        return f"模型调用失败，所有配置模型均不可用。失败模型：{models}"
+
+
+def _sanitize_error(error: Exception) -> str:
+    """去掉可能包含 key 片段的供应商原始错误，避免透传到前端或日志。"""
+    text = str(error)
+    if "api key" in text.lower() or "authentication" in text.lower() or "auth" in text.lower():
+        return "authentication failed"
+    return text
 
 
 class LiteLLMClientImpl:
@@ -106,14 +121,15 @@ class LiteLLMClientImpl:
                 )
                 return content, usage
             except Exception as e:
-                logger.warning("Model %s failed for %s: %s", model, self.task_type, e)
+                error_message = _sanitize_error(e)
+                logger.warning("Model %s failed for %s: %s", model, self.task_type, error_message)
                 metrics.record_llm_call(
                     task_type=self.task_type,
                     model=model,
                     status="error",
                     latency_seconds=time.perf_counter() - start,
                 )
-                errors.append((model, str(e)))
+                errors.append((model, error_message))
 
         raise AllModelsFailedError(errors)
 
@@ -142,14 +158,15 @@ class LiteLLMClientImpl:
                 )
                 return
             except Exception as e:
-                logger.warning("Model %s stream failed for %s: %s", model, self.task_type, e)
+                error_message = _sanitize_error(e)
+                logger.warning("Model %s stream failed for %s: %s", model, self.task_type, error_message)
                 metrics.record_llm_call(
                     task_type=self.task_type,
                     model=model,
                     status="error",
                     latency_seconds=time.perf_counter() - start,
                 )
-                errors.append((model, str(e)))
+                errors.append((model, error_message))
 
         raise AllModelsFailedError(errors)
 
