@@ -1,7 +1,7 @@
 """LangGraph 图构建和运行。
 
-Phase 1 搭建完整图结构，Specialist 节点为 stub 实现。
-Phase 3 中每个 stub 将被替换为真实 Agent。
+Phase 1: 搭建完整图结构，Specialist 节点为 stub 实现。
+Phase 3: 替换所有 stub 为真实 Agent 实现（SQL 生成、知识问答、通用对话）。
 """
 
 from __future__ import annotations
@@ -25,9 +25,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ── Phase 1 Stub 节点 ──
-# 这些节点在 Phase 1 只输出 AG-UI 事件和基础响应。
-# Phase 3 将替换为真实的 LLM Agent 调用。
+# ── Agent 节点 ──
+# Orchestrator: 意图分类
+# Schema Grounding: Schema 检索
+# SQL Specialist: 基于 LLM 的 GBase SQL 生成
+# SQL Verifier: 语法/方言/Schema 交叉验证
+# SQL Executor: 沙箱安全执行
+# Knowledge Specialist: RAG 知识问答
+# General Specialist: 通用对话
+# Response Formatter: 汇聚所有结果构建最终响应
 
 async def orchestrator_node(state: AgentStateType) -> dict:
     """Orchestrator: 分类意图，记录到 state。"""
@@ -104,45 +110,223 @@ async def schema_grounding_node(state: AgentStateType) -> dict:
 
 
 async def sql_specialist_node(state: AgentStateType) -> dict:
-    """SQL Specialist stub: Phase 3 实现。"""
-    return {
-        "generated_sql": None,
-        "final_response": "SQL 生成功能将在 Phase 3 实现。您的问题已识别为数据查询意图。"
-    }
+    """SQL Specialist: 基于 Grounding 结果生成 GBase SQL。"""
+    from app.dependencies import get_llm_client, get_schema_retriever
+    from app.llm.prompts import build_sql_prompt
+    from app.knowledge.loader import load_dialect_rules
+    from app.sql.validator import extract_sql_from_markdown
+    from app.database import async_session_factory
+
+    grounding = state.get("grounding") or {}
+    user_msg = ""
+    msgs = state.get("messages", [])
+    if msgs:
+        last = msgs[-1]
+        if isinstance(last, dict):
+            user_msg = last.get("content", "")
+
+    try:
+        llm_client = get_llm_client()
+        dialect_rules = load_dialect_rules()
+
+        schemas: list = []
+        if state.get("db_connection_id"):
+            async with async_session_factory() as session:
+                schema_retriever = get_schema_retriever(session)
+                schemas = await schema_retriever.retrieve(
+                    user_msg, state["db_connection_id"]
+                )
+
+        # Filter to only grounded tables
+        grounded_tables = set(grounding.get("tables", []))
+        if grounded_tables and schemas:
+            filtered = [s for s in schemas if s.table_name in grounded_tables]
+            if filtered:
+                schemas = filtered
+
+        messages = build_sql_prompt(
+            message=user_msg,
+            dialect_rules=dialect_rules,
+            schemas=schemas,
+            examples=[],
+            history=[],
+        )
+
+        response_text, usage = await llm_client.complete(messages, temperature=0.1)
+        sql = extract_sql_from_markdown(response_text)
+
+        logger.info("SQL Specialist: generated SQL=%s", sql[:100] if sql else "None")
+        return {
+            "generated_sql": sql,
+            "stream_buffer": [response_text],
+        }
+    except Exception as e:
+        logger.error("SQL Specialist failed: %s", e)
+        return {
+            "generated_sql": None,
+            "final_response": f"SQL 生成失败: {e}",
+        }
 
 
 async def sql_verifier_node(state: AgentStateType) -> dict:
-    """SQL Verifier stub: Phase 3 实现。"""
-    return {"validation_passed": True, "validation_errors": []}
+    """SQL Verifier: 三层验证（语法/方言/Schema交叉）。"""
+    from app.sql.validator import validate_sql
 
+    sql = state.get("generated_sql")
 
-async def sql_executor_node(state: AgentStateType) -> dict:
-    """SQL Executor stub: Phase 3 实现。"""
-    return {"query_result": None, "execution_error": None}
+    if not sql:
+        return {"validation_passed": False, "validation_errors": ["未生成 SQL"]}
 
+    result = validate_sql(sql, schemas=None)
 
-async def knowledge_specialist_node(state: AgentStateType) -> dict:
-    """Knowledge Specialist stub: Phase 3 实现。"""
-    return {"final_response": "知识问答功能将在 Phase 3 实现。您的问题已识别为知识查询意图。"}
+    passed = result.is_valid
+    errors = result.errors + result.warnings
 
-
-async def general_specialist_node(state: AgentStateType) -> dict:
-    """General Specialist stub: Phase 3 实现。"""
+    logger.info("SQL Verifier: passed=%s, errors=%s", passed, errors)
     return {
-        "final_response": (
-            "您好！我是 GBase 8a 助手。\n\n"
-            "目前支持的功能将在后续版本中上线，包括：\n"
-            "- SQL 生成：自然语言转 GBase 8a SQL\n"
-            "- 知识问答：GBase 8a 语法、配置、错误码查询\n"
-            "- 数据库查询：连接您的 GBase 数据库直接执行查询\n\n"
-            "敬请期待！"
-        )
+        "validation_passed": passed,
+        "validation_errors": errors,
     }
 
 
+async def sql_executor_node(state: AgentStateType) -> dict:
+    """SQL Executor: 沙箱执行 SQL。"""
+    from app.database import async_session_factory
+    from sqlalchemy import select
+    from app.models.connection import DbConnection
+    from app.db_connectors.connector_factory import get_connector
+    from app.api.connections import _to_connection_config
+    from app.sql.sandbox import SQLSandbox, SQLSandboxError
+
+    sql = state.get("generated_sql")
+    db_id = state.get("db_connection_id")
+
+    if not sql or not db_id:
+        return {"query_result": None, "execution_error": "没有 SQL 或数据库连接"}
+
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(DbConnection).where(DbConnection.id == db_id)
+            )
+            conn = result.scalar_one_or_none()
+
+        if not conn or conn.driver_type == "manual":
+            return {"query_result": None, "execution_error": "数据库连接不可用"}
+
+        connector = get_connector(conn.driver_type)
+        if not connector:
+            return {"query_result": None, "execution_error": f"驱动 {conn.driver_type} 不可用"}
+
+        config = _to_connection_config(conn)
+        sandbox = SQLSandbox()
+        query_result = await sandbox.execute_readonly(
+            connector, config, sql, max_rows=1000, timeout_seconds=30,
+        )
+
+        result_dict = {
+            "columns": query_result.columns,
+            "rows": query_result.rows[:50],
+            "row_count": query_result.row_count,
+            "execution_time_ms": round(query_result.execution_time_ms, 2),
+            "truncated": query_result.truncated or query_result.row_count > 50,
+        }
+        return {"query_result": result_dict, "execution_error": None}
+
+    except SQLSandboxError as e:
+        return {"query_result": None, "execution_error": str(e)}
+    except Exception as e:
+        logger.error("SQL Executor failed: %s", e)
+        return {"query_result": None, "execution_error": str(e)}
+
+
+async def knowledge_specialist_node(state: AgentStateType) -> dict:
+    """Knowledge Specialist: RAG 知识问答。"""
+    from app.dependencies import get_llm_client, get_knowledge_retriever
+    from app.chains.qa_chain import run_qa_chain
+    from app.protocols import ChatContext
+
+    user_msg = ""
+    msgs = state.get("messages", [])
+    if msgs:
+        last = msgs[-1]
+        if isinstance(last, dict):
+            user_msg = last.get("content", "")
+
+    if not user_msg:
+        return {"final_response": "请输入问题。"}
+
+    try:
+        llm_client = get_llm_client()
+        retriever = get_knowledge_retriever()
+        context = ChatContext(history=[])
+        result = await run_qa_chain(user_msg, context, retriever, llm_client)
+
+        return {
+            "final_response": result.content,
+            "knowledge_sources": result.sources,
+        }
+    except Exception as e:
+        logger.error("Knowledge Specialist failed: %s", e)
+        return {"final_response": f"知识检索失败: {e}"}
+
+
+async def general_specialist_node(state: AgentStateType) -> dict:
+    """General Specialist: 通用对话。"""
+    from app.dependencies import get_llm_client
+    from app.llm.prompts import build_general_prompt
+
+    user_msg = ""
+    msgs = state.get("messages", [])
+    if msgs:
+        last = msgs[-1]
+        if isinstance(last, dict):
+            user_msg = last.get("content", "")
+
+    if not user_msg:
+        return {"final_response": "您好！请问有什么可以帮您？"}
+
+    try:
+        llm_client = get_llm_client()
+        messages = build_general_prompt(message=user_msg, history=[])
+        response_text, _ = await llm_client.complete(messages)
+        return {"final_response": response_text}
+    except Exception as e:
+        logger.error("General Specialist failed: %s", e)
+        return {"final_response": f"抱歉，出错了: {e}"}
+
+
 async def response_formatter_node(state: AgentStateType) -> dict:
-    """Response Formatting: 汇聚最终响应。"""
-    return {}
+    """Response Formatting: 汇聚所有结果构建最终响应。"""
+    intent = state.get("intent", "general")
+    final_response = state.get("final_response", "")
+
+    if intent == "sql" and not final_response:
+        sql = state.get("generated_sql")
+        query_result = state.get("query_result")
+        validation_errors = state.get("validation_errors", [])
+        exec_error = state.get("execution_error")
+
+        parts = []
+        if sql:
+            parts.append(f"```sql\n{sql}\n```")
+        if validation_errors:
+            parts.append(f"\n⚠️ 验证警告: {', '.join(validation_errors)}")
+        if query_result:
+            parts.append(f"\n查询结果: {query_result['row_count']} 行, "
+                        f"耗时 {query_result['execution_time_ms']}ms")
+        if exec_error:
+            parts.append(f"\n执行错误: {exec_error}")
+        if not parts:
+            parts.append("SQL 生成完成，但未获得有效结果。")
+
+        final_response = "\n".join(parts)
+        return {"final_response": final_response}
+
+    if not final_response:
+        final_response = "处理完成。"
+
+    return {"final_response": final_response}
 
 
 # ── 图构建 ──
@@ -150,8 +334,7 @@ async def response_formatter_node(state: AgentStateType) -> dict:
 def build_graph() -> StateGraph:
     """构建 LangGraph StateGraph。
 
-    Phase 1: 完整图结构，stub 节点。
-    Phase 3: 替换 stub 为真实 Agent 调用。
+    Phase 3: 所有 Specialist 节点已替换为真实 Agent 调用。
     """
     builder = StateGraph(AgentStateType)
 
