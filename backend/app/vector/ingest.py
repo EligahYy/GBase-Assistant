@@ -311,12 +311,34 @@ async def ingest_ops_docs(embedder: Embedder, force: bool = False) -> int:
 
 
 async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
-    """一键同步所有知识库到 Qdrant。返回各 collection 入库条数。"""
+    """一键同步所有知识库到 Qdrant。优先使用官方 PDF，回退到旧 JSON。"""
     await get_qdrant_manager().ensure_collections(dimension=embedder.dimension)
     results = {}
-    results["faq"] = await ingest_faq(embedder, force=force)
-    results["sql_examples"] = await ingest_sql_examples(embedder, force=force)
-    results["error_codes"] = await ingest_error_codes(embedder, force=force)
-    results["ops_docs"] = await ingest_ops_docs(embedder, force=force)
+
+    # 优先尝试从官方 PDF 构建知识库
+    pdf_path = _knowledge_dir / "GBase 8a MPP Cluster产品手册_V953.pdf"
+    toc_path = _knowledge_dir / "official_toc.json"
+
+    if pdf_path.exists() and toc_path.exists():
+        try:
+            from app.knowledge.document_chunker import build_knowledge_from_pdf
+            count = await build_knowledge_from_pdf(
+                str(pdf_path), str(toc_path), clear_existing=True
+            )
+            results["official_knowledge"] = count
+            logger.info("Official knowledge base indexed: %d chunks", count)
+        except Exception as e:
+            logger.warning("Official PDF indexing failed, falling back to JSON: %s", e)
+            results["official_knowledge"] = 0
+    else:
+        logger.info("Official PDF not found, using JSON-based knowledge")
+
+    # 旧 JSON 数据（已归档到 v1_archive/，如 PDF 索引成功则跳过）
+    if results.get("official_knowledge", 0) == 0:
+        results["faq"] = await ingest_faq(embedder, force=force)
+        results["sql_examples"] = await ingest_sql_examples(embedder, force=force)
+        results["error_codes"] = await ingest_error_codes(embedder, force=force)
+        results["ops_docs"] = await ingest_ops_docs(embedder, force=force)
+
     logger.info("全量索引完成: %s", results)
     return results

@@ -1,0 +1,1322 @@
+[
+  {
+    "num": "1",
+    "title": "文档简介",
+    "page": 7,
+    "depth": 0
+  },
+  {
+    "num": "1.1",
+    "title": "文档结构",
+    "page": 8,
+    "depth": 1
+  },
+  {
+    "num": "1.2",
+    "title": "文档阅读约定",
+    "page": 9,
+    "depth": 1
+  },
+  {
+    "num": "1.3",
+    "title": "获取和更新文档",
+    "page": 11,
+    "depth": 1
+  },
+  {
+    "num": "1.4",
+    "title": "意见反馈",
+    "page": 12,
+    "depth": 1
+  },
+  {
+    "num": "2",
+    "title": "产品概述",
+    "page": 13,
+    "depth": 0
+  },
+  {
+    "num": "2.1",
+    "title": "产品简介",
+    "page": 14,
+    "depth": 1
+  },
+  {
+    "num": "2.1.1",
+    "title": "产品定位",
+    "page": 14,
+    "depth": 2
+  },
+  {
+    "num": "2.1.2",
+    "title": "应用场景",
+    "page": 14,
+    "depth": 2
+  },
+  {
+    "num": "2.1.3",
+    "title": "技术特点",
+    "page": 14,
+    "depth": 2
+  },
+  {
+    "num": "2.2",
+    "title": "产品架构",
+    "page": 20,
+    "depth": 1
+  },
+  {
+    "num": "2.3",
+    "title": "部署方案",
+    "page": 23,
+    "depth": 1
+  },
+  {
+    "num": "2.3.1",
+    "title": "组网方案",
+    "page": 23,
+    "depth": 2
+  },
+  {
+    "num": "2.3.2",
+    "title": "规划方案",
+    "page": 24,
+    "depth": 2
+  },
+  {
+    "num": "2.3.3",
+    "title": "硬件要求",
+    "page": 25,
+    "depth": 2
+  },
+  {
+    "num": "2.3.4",
+    "title": "软件要求",
+    "page": 28,
+    "depth": 2
+  },
+  {
+    "num": "2.4",
+    "title": "企业级增强特性",
+    "page": 28,
+    "depth": 1
+  },
+  {
+    "num": "2.4.1",
+    "title": "数据分布式存储",
+    "page": 28,
+    "depth": 2
+  },
+  {
+    "num": "2.4.2",
+    "title": "工作负载管理",
+    "page": 31,
+    "depth": 2
+  },
+  {
+    "num": "2.4.3",
+    "title": "数据安全性",
+    "page": 32,
+    "depth": 2
+  },
+  {
+    "num": "2.4.4",
+    "title": "数据可靠性",
+    "page": 32,
+    "depth": 2
+  },
+  {
+    "num": "2.4.5",
+    "title": "数据加载及集成",
+    "page": 33,
+    "depth": 2
+  },
+  {
+    "num": "2.4.6",
+    "title": "虚拟集群及镜像集群",
+    "page": 34,
+    "depth": 2
+  },
+  {
+    "num": "2.4.7",
+    "title": "数据安全",
+    "page": 36,
+    "depth": 2
+  },
+  {
+    "num": "2.4.8",
+    "title": "全文检索",
+    "page": 37,
+    "depth": 2
+  },
+  {
+    "num": "2.4.9",
+    "title": "库内数据挖掘",
+    "page": 38,
+    "depth": 2
+  },
+  {
+    "num": "2.5",
+    "title": "技术指标",
+    "page": 39,
+    "depth": 1
+  },
+  {
+    "num": "3",
+    "title": "集群安装、升级与卸载",
+    "page": 40,
+    "depth": 0
+  },
+  {
+    "num": "3.1",
+    "title": "安装环境准备",
+    "page": 41,
+    "depth": 1
+  },
+  {
+    "num": "3.1.1",
+    "title": "准备操作系统",
+    "page": 41,
+    "depth": 2
+  },
+  {
+    "num": "3.1.2",
+    "title": "准备GBase 8a MPP Cluster 软件安装包",
+    "page": 57,
+    "depth": 2
+  },
+  {
+    "num": "3.2",
+    "title": "安装",
+    "page": 58,
+    "depth": 1
+  },
+  {
+    "num": "3.2.1",
+    "title": "安装初始配置",
+    "page": 59,
+    "depth": 2
+  },
+  {
+    "num": "3.2.2",
+    "title": "获取LICENSE",
+    "page": 62,
+    "depth": 2
+  },
+  {
+    "num": "3.2.3",
+    "title": "初始安装",
+    "page": 66,
+    "depth": 2
+  },
+  {
+    "num": "3.2.4",
+    "title": "VC初始配置",
+    "page": 69,
+    "depth": 2
+  },
+  {
+    "num": "3.2.5",
+    "title": "全文检索功能安装",
+    "page": 85,
+    "depth": 2
+  },
+  {
+    "num": "3.2.6",
+    "title": "安装客户端（可选）",
+    "page": 87,
+    "depth": 2
+  },
+  {
+    "num": "3.2.7",
+    "title": "端口修改",
+    "page": 90,
+    "depth": 2
+  },
+  {
+    "num": "3.3",
+    "title": "集群多实例安装部署",
+    "page": 96,
+    "depth": 1
+  },
+  {
+    "num": "3.3.1",
+    "title": "多实例部署建议",
+    "page": 96,
+    "depth": 2
+  },
+  {
+    "num": "3.3.2",
+    "title": "多实例license获取",
+    "page": 97,
+    "depth": 2
+  },
+  {
+    "num": "3.3.3",
+    "title": "多实例安装部署",
+    "page": 98,
+    "depth": 2
+  },
+  {
+    "num": "3.3.4",
+    "title": "多实例NUMA绑定",
+    "page": 101,
+    "depth": 2
+  },
+  {
+    "num": "3.3.5",
+    "title": "多实例服务管理",
+    "page": 105,
+    "depth": 2
+  },
+  {
+    "num": "3.4",
+    "title": "软件卸载",
+    "page": 106,
+    "depth": 1
+  },
+  {
+    "num": "3.5",
+    "title": "升级集群",
+    "page": 108,
+    "depth": 1
+  },
+  {
+    "num": "3.5.1",
+    "title": "V8.5.1.2版本集群升级到V9.5.2.X版本集群",
+    "page": 108,
+    "depth": 2
+  },
+  {
+    "num": "3.5.2",
+    "title": "V8.6.X.X集群升级到V9.5.2.X集群",
+    "page": 108,
+    "depth": 2
+  },
+  {
+    "num": "3.5.3",
+    "title": "V9.5.X.X集群间版本升级",
+    "page": 113,
+    "depth": 2
+  },
+  {
+    "num": "3.5.4",
+    "title": "升级集群操作系统",
+    "page": 116,
+    "depth": 2
+  },
+  {
+    "num": "3.6",
+    "title": "回退集群",
+    "page": 118,
+    "depth": 1
+  },
+  {
+    "num": "3.6.1",
+    "title": "从V9.5.X.X版本集群手动回退到升级前版本集群",
+    "page": 118,
+    "depth": 2
+  },
+  {
+    "num": "3.7",
+    "title": "License的基本操作和影响",
+    "page": 119,
+    "depth": 1
+  },
+  {
+    "num": "3.7.2",
+    "title": "旧license系统",
+    "page": 119,
+    "depth": 2
+  },
+  {
+    "num": "3.7.3",
+    "title": "新license系统",
+    "page": 122,
+    "depth": 2
+  },
+  {
+    "num": "4",
+    "title": "管理员指南",
+    "page": 124,
+    "depth": 0
+  },
+  {
+    "num": "4.1",
+    "title": "组件工具简介",
+    "page": 125,
+    "depth": 1
+  },
+  {
+    "num": "4.1.1",
+    "title": "统一数据平台监控与运维系统简介",
+    "page": 125,
+    "depth": 2
+  },
+  {
+    "num": "4.1.2",
+    "title": "GBaseDataStudio管理工具简介",
+    "page": 128,
+    "depth": 2
+  },
+  {
+    "num": "4.1.3",
+    "title": "gccli命令行工具简介",
+    "page": 129,
+    "depth": 2
+  },
+  {
+    "num": "4.1.4",
+    "title": "gcrcman备份恢复工具",
+    "page": 129,
+    "depth": 2
+  },
+  {
+    "num": "4.1.5",
+    "title": "数据迁移工具简介",
+    "page": 130,
+    "depth": 2
+  },
+  {
+    "num": "4.1.6",
+    "title": "集群间同步工具",
+    "page": 136,
+    "depth": 2
+  },
+  {
+    "num": "4.1.7",
+    "title": "UDF",
+    "page": 137,
+    "depth": 2
+  },
+  {
+    "num": "4.1.8",
+    "title": "集群间数据透明访问工具",
+    "page": 137,
+    "depth": 2
+  },
+  {
+    "num": "4.2",
+    "title": "服务管理",
+    "page": 138,
+    "depth": 1
+  },
+  {
+    "num": "4.2.1",
+    "title": "集群初始用户与登录",
+    "page": 138,
+    "depth": 2
+  },
+  {
+    "num": "4.2.2",
+    "title": "集群服务管理",
+    "page": 139,
+    "depth": 2
+  },
+  {
+    "num": "4.2.3",
+    "title": "集群服务配置",
+    "page": 145,
+    "depth": 2
+  },
+  {
+    "num": "4.3",
+    "title": "集群管理",
+    "page": 167,
+    "depth": 1
+  },
+  {
+    "num": "4.3.1",
+    "title": "gcadmin",
+    "page": 167,
+    "depth": 2
+  },
+  {
+    "num": "4.3.2",
+    "title": "VC管理",
+    "page": 214,
+    "depth": 2
+  },
+  {
+    "num": "4.3.3",
+    "title": "虚拟集群镜像",
+    "page": 217,
+    "depth": 2
+  },
+  {
+    "num": "4.4",
+    "title": "命令行工具",
+    "page": 230,
+    "depth": 1
+  },
+  {
+    "num": "4.4.1",
+    "title": "gccli",
+    "page": 230,
+    "depth": 2
+  },
+  {
+    "num": "4.5",
+    "title": "集群节点管理",
+    "page": 234,
+    "depth": 1
+  },
+  {
+    "num": "4.5.1",
+    "title": "集群扩容",
+    "page": 234,
+    "depth": 2
+  },
+  {
+    "num": "4.5.2",
+    "title": "集群缩容",
+    "page": 273,
+    "depth": 2
+  },
+  {
+    "num": "4.5.3",
+    "title": "集群节点替换",
+    "page": 293,
+    "depth": 2
+  },
+  {
+    "num": "4.5.4",
+    "title": "集群数据重分布",
+    "page": 353,
+    "depth": 2
+  },
+  {
+    "num": "4.6",
+    "title": "告警管理",
+    "page": 367,
+    "depth": 1
+  },
+  {
+    "num": "4.6.1",
+    "title": "页面告警",
+    "page": 367,
+    "depth": 2
+  },
+  {
+    "num": "4.6.2",
+    "title": "邮件告警",
+    "page": 368,
+    "depth": 2
+  },
+  {
+    "num": "4.7",
+    "title": "审计管理",
+    "page": 371,
+    "depth": 1
+  },
+  {
+    "num": "4.7.1",
+    "title": "审计日志概述",
+    "page": 371,
+    "depth": 2
+  },
+  {
+    "num": "4.7.2",
+    "title": "审计日志参数配置",
+    "page": 371,
+    "depth": 2
+  },
+  {
+    "num": "4.7.3",
+    "title": "设置审计策略",
+    "page": 371,
+    "depth": 2
+  },
+  {
+    "num": "4.7.4",
+    "title": "存储审计日志",
+    "page": 373,
+    "depth": 2
+  },
+  {
+    "num": "4.7.5",
+    "title": "审计日志高可用",
+    "page": 373,
+    "depth": 2
+  },
+  {
+    "num": "4.7.6",
+    "title": "使用示例",
+    "page": 375,
+    "depth": 2
+  },
+  {
+    "num": "4.8",
+    "title": "备份恢复管理",
+    "page": 379,
+    "depth": 1
+  },
+  {
+    "num": "4.8.1",
+    "title": "备份恢复管理",
+    "page": 379,
+    "depth": 2
+  },
+  {
+    "num": "4.8.2",
+    "title": "语法格式",
+    "page": 380,
+    "depth": 2
+  },
+  {
+    "num": "4.8.3",
+    "title": "执行模式",
+    "page": 383,
+    "depth": 2
+  },
+  {
+    "num": "4.8.4",
+    "title": "集群的备份",
+    "page": 385,
+    "depth": 2
+  },
+  {
+    "num": "4.8.5",
+    "title": "集群的恢复",
+    "page": 403,
+    "depth": 2
+  },
+  {
+    "num": "4.8.6",
+    "title": "查看备份记录",
+    "page": 416,
+    "depth": 2
+  },
+  {
+    "num": "4.8.7",
+    "title": "删除集群备份记录",
+    "page": 418,
+    "depth": 2
+  },
+  {
+    "num": "4.8.8",
+    "title": "清除集群的无效备份数据",
+    "page": 421,
+    "depth": 2
+  },
+  {
+    "num": "4.9",
+    "title": "安全管理",
+    "page": 422,
+    "depth": 1
+  },
+  {
+    "num": "4.9.1",
+    "title": "用户和权限管理",
+    "page": 422,
+    "depth": 2
+  },
+  {
+    "num": "4.9.2",
+    "title": "密码安全管理",
+    "page": 438,
+    "depth": 2
+  },
+  {
+    "num": "4.9.3",
+    "title": "用户安全管理",
+    "page": 441,
+    "depth": 2
+  },
+  {
+    "num": "4.9.4",
+    "title": "查看安全信息",
+    "page": 443,
+    "depth": 2
+  },
+  {
+    "num": "4.9.5",
+    "title": "登录信息显示",
+    "page": 443,
+    "depth": 2
+  },
+  {
+    "num": "4.9.6",
+    "title": "安全管理的权限",
+    "page": 444,
+    "depth": 2
+  },
+  {
+    "num": "4.9.7",
+    "title": "登录管理一致性",
+    "page": 444,
+    "depth": 2
+  },
+  {
+    "num": "4.9.8",
+    "title": "客户端接入认证",
+    "page": 445,
+    "depth": 2
+  },
+  {
+    "num": "4.9.9",
+    "title": "用户级磁盘限额",
+    "page": 451,
+    "depth": 2
+  },
+  {
+    "num": "4.9.10",
+    "title": "数据加密",
+    "page": 455,
+    "depth": 2
+  },
+  {
+    "num": "4.9.11",
+    "title": "数据脱敏",
+    "page": 462,
+    "depth": 2
+  },
+  {
+    "num": "4.10",
+    "title": "资源管理",
+    "page": 482,
+    "depth": 1
+  },
+  {
+    "num": "4.10.1",
+    "title": "资源管理功能概述",
+    "page": 482,
+    "depth": 2
+  },
+  {
+    "num": "4.10.2",
+    "title": "资源管理关系图",
+    "page": 482,
+    "depth": 2
+  },
+  {
+    "num": "4.10.3",
+    "title": "资源管理流程图",
+    "page": 483,
+    "depth": 2
+  },
+  {
+    "num": "4.10.4",
+    "title": "资源管理环境配置",
+    "page": 484,
+    "depth": 2
+  },
+  {
+    "num": "4.10.5",
+    "title": "创建和管理Consumer Group",
+    "page": 485,
+    "depth": 2
+  },
+  {
+    "num": "4.10.6",
+    "title": "创建和管理Resource Pool",
+    "page": 487,
+    "depth": 2
+  },
+  {
+    "num": "4.10.7",
+    "title": "创建和管理Resource Plan",
+    "page": 497,
+    "depth": 2
+  },
+  {
+    "num": "4.10.8",
+    "title": "创建Resource Directive",
+    "page": 499,
+    "depth": 2
+  },
+  {
+    "num": "4.10.9",
+    "title": "激活/关闭资源管理",
+    "page": 501,
+    "depth": 2
+  },
+  {
+    "num": "4.10.10",
+    "title": "资源管理配置项管理",
+    "page": 502,
+    "depth": 2
+  },
+  {
+    "num": "4.10.11",
+    "title": "资源管理信息查询",
+    "page": 502,
+    "depth": 2
+  },
+  {
+    "num": "4.10.12",
+    "title": "资源管理示例",
+    "page": 512,
+    "depth": 2
+  },
+  {
+    "num": "4.10.13",
+    "title": "注意事项",
+    "page": 524,
+    "depth": 2
+  },
+  {
+    "num": "4.11",
+    "title": "数据迁移工具",
+    "page": 526,
+    "depth": 1
+  },
+  {
+    "num": "4.11.1",
+    "title": "文件格式说明",
+    "page": 526,
+    "depth": 2
+  },
+  {
+    "num": "4.11.2",
+    "title": "orato8a工具使用",
+    "page": 527,
+    "depth": 2
+  },
+  {
+    "num": "4.11.3",
+    "title": "db2to8a工具使用",
+    "page": 565,
+    "depth": 2
+  },
+  {
+    "num": "4.11.4",
+    "title": "GBaseMigrationToolkit工具使用",
+    "page": 587,
+    "depth": 2
+  },
+  {
+    "num": "4.12",
+    "title": "集群间同步工具",
+    "page": 594,
+    "depth": 1
+  },
+  {
+    "num": "4.12.1",
+    "title": "概述",
+    "page": 594,
+    "depth": 2
+  },
+  {
+    "num": "4.12.2",
+    "title": "术语",
+    "page": 594,
+    "depth": 2
+  },
+  {
+    "num": "4.12.3",
+    "title": "工具安装",
+    "page": 594,
+    "depth": 2
+  },
+  {
+    "num": "4.12.4",
+    "title": "接口以及参数使用场景说明",
+    "page": 595,
+    "depth": 2
+  },
+  {
+    "num": "4.12.5",
+    "title": "示例",
+    "page": 606,
+    "depth": 2
+  },
+  {
+    "num": "4.13",
+    "title": "集群间透明网关工具",
+    "page": 609,
+    "depth": 1
+  },
+  {
+    "num": "4.13.1",
+    "title": "使用前提条件",
+    "page": 609,
+    "depth": 2
+  },
+  {
+    "num": "4.13.2",
+    "title": "安装透明网关",
+    "page": 609,
+    "depth": 2
+  },
+  {
+    "num": "4.13.3",
+    "title": "配置透明网关",
+    "page": 610,
+    "depth": 2
+  },
+  {
+    "num": "4.13.4",
+    "title": "启动透明网关",
+    "page": 613,
+    "depth": 2
+  },
+  {
+    "num": "4.13.5",
+    "title": "卸载透明网关",
+    "page": 613,
+    "depth": 2
+  },
+  {
+    "num": "4.13.6",
+    "title": "部署示例",
+    "page": 613,
+    "depth": 2
+  },
+  {
+    "num": "4.14.1",
+    "title": "管理DBLink",
+    "page": 616,
+    "depth": 2
+  },
+  {
+    "num": "4.14.2",
+    "title": "使用DBLink",
+    "page": 618,
+    "depth": 2
+  },
+  {
+    "num": "4.14.3",
+    "title": "终止DBLink查询",
+    "page": 618,
+    "depth": 2
+  },
+  {
+    "num": "4.14.4",
+    "title": "db-link查询的语法约束",
+    "page": 619,
+    "depth": 2
+  },
+  {
+    "num": "4.14.5",
+    "title": "私有dblink使用说明",
+    "page": 620,
+    "depth": 2
+  },
+  {
+    "num": "4.14.6",
+    "title": "异构数据源",
+    "page": 622,
+    "depth": 2
+  },
+  {
+    "num": "4.14.7",
+    "title": "DBLINK数据推送",
+    "page": 626,
+    "depth": 2
+  },
+  {
+    "num": "4.14.8",
+    "title": "DBLINK参数配置",
+    "page": 629,
+    "depth": 2
+  },
+  {
+    "num": "4.15",
+    "title": "节点故障检测和恢复工具",
+    "page": 630,
+    "depth": 1
+  },
+  {
+    "num": "4.16",
+    "title": "高危操作一览表",
+    "page": 633,
+    "depth": 1
+  },
+  {
+    "num": "5",
+    "title": "数据库管理指南",
+    "page": 634,
+    "depth": 0
+  },
+  {
+    "num": "5.1.1",
+    "title": "规范介绍",
+    "page": 635,
+    "depth": 2
+  },
+  {
+    "num": "5.1.2",
+    "title": "遵循的SQL标准",
+    "page": 639,
+    "depth": 2
+  },
+  {
+    "num": "5.1.3",
+    "title": "数据类型",
+    "page": 639,
+    "depth": 2
+  },
+  {
+    "num": "5.1.4",
+    "title": "常量",
+    "page": 656,
+    "depth": 2
+  },
+  {
+    "num": "5.1.5",
+    "title": "函数和操作符",
+    "page": 661,
+    "depth": 2
+  },
+  {
+    "num": "5.1.6",
+    "title": "全文检索",
+    "page": 954,
+    "depth": 2
+  },
+  {
+    "num": "5.1.7",
+    "title": "事务控制",
+    "page": 990,
+    "depth": 2
+  },
+  {
+    "num": "5.1.8",
+    "title": "DDL语法",
+    "page": 992,
+    "depth": 2
+  },
+  {
+    "num": "5.1.9",
+    "title": "DML语法",
+    "page": 1099,
+    "depth": 2
+  },
+  {
+    "num": "5.1.10",
+    "title": "DQL语法",
+    "page": 1125,
+    "depth": 2
+  },
+  {
+    "num": "5.2",
+    "title": "数据集成和数据管理",
+    "page": 1219,
+    "depth": 1
+  },
+  {
+    "num": "5.2.2",
+    "title": "集群批量加载语句",
+    "page": 1243,
+    "depth": 2
+  },
+  {
+    "num": "5.2.3",
+    "title": "查询结果导出语句",
+    "page": 1277,
+    "depth": 2
+  },
+  {
+    "num": "5.2.4",
+    "title": "数据库对象结构导出工具gcdump",
+    "page": 1320,
+    "depth": 2
+  },
+  {
+    "num": "5.2.5",
+    "title": "kafka consumer数据同步功能的使用",
+    "page": 1321,
+    "depth": 2
+  },
+  {
+    "num": "5.3",
+    "title": "数据库性能优化",
+    "page": 1342,
+    "depth": 1
+  },
+  {
+    "num": "5.3.1",
+    "title": "参数配置",
+    "page": 1342,
+    "depth": 2
+  },
+  {
+    "num": "5.3.2",
+    "title": "性能优化",
+    "page": 1353,
+    "depth": 2
+  },
+  {
+    "num": "5.3.3",
+    "title": "优化实例",
+    "page": 1367,
+    "depth": 2
+  },
+  {
+    "num": "5.3.4",
+    "title": "优化SQL语句",
+    "page": 1388,
+    "depth": 2
+  },
+  {
+    "num": "5.3.5",
+    "title": "其它优化建议",
+    "page": 1400,
+    "depth": 2
+  },
+  {
+    "num": "5.3.6",
+    "title": "数据库性能监测",
+    "page": 1402,
+    "depth": 2
+  },
+  {
+    "num": "5.4",
+    "title": "存储过程和函数",
+    "page": 1407,
+    "depth": 1
+  },
+  {
+    "num": "5.4.1",
+    "title": "概述",
+    "page": 1407,
+    "depth": 2
+  },
+  {
+    "num": "5.4.2",
+    "title": "创建存储过程/函数",
+    "page": 1407,
+    "depth": 2
+  },
+  {
+    "num": "5.4.3",
+    "title": "修改存储过程/函数",
+    "page": 1413,
+    "depth": 2
+  },
+  {
+    "num": "5.4.4",
+    "title": "删除存储过程/函数",
+    "page": 1414,
+    "depth": 2
+  },
+  {
+    "num": "5.4.5",
+    "title": "调用存储过程/函数",
+    "page": 1415,
+    "depth": 2
+  },
+  {
+    "num": "5.4.6",
+    "title": "查看存储过程/函数的状态",
+    "page": 1417,
+    "depth": 2
+  },
+  {
+    "num": "5.4.7",
+    "title": "存储过程支持的语句",
+    "page": 1419,
+    "depth": 2
+  },
+  {
+    "num": "5.4.8",
+    "title": "存储过程的变量",
+    "page": 1421,
+    "depth": 2
+  },
+  {
+    "num": "5.4.9",
+    "title": "存储过程支持的流程结构",
+    "page": 1426,
+    "depth": 2
+  },
+  {
+    "num": "5.4.10",
+    "title": "游标",
+    "page": 1436,
+    "depth": 2
+  },
+  {
+    "num": "5.4.11",
+    "title": "存储过程异常处理",
+    "page": 1448,
+    "depth": 2
+  },
+  {
+    "num": "5.4.12",
+    "title": "使用限制",
+    "page": 1454,
+    "depth": 2
+  },
+  {
+    "num": "5.5",
+    "title": "集群扩展",
+    "page": 1455,
+    "depth": 1
+  },
+  {
+    "num": "5.5.1",
+    "title": "UDF&UDAF",
+    "page": 1455,
+    "depth": 2
+  },
+  {
+    "num": "5.5.2",
+    "title": "GBMLLib（数据挖掘模块）",
+    "page": 1486,
+    "depth": 2
+  },
+  {
+    "num": "5.6.1",
+    "title": "事件调度器",
+    "page": 1519,
+    "depth": 2
+  },
+  {
+    "num": "5.6.2",
+    "title": "创建事件",
+    "page": 1521,
+    "depth": 2
+  },
+  {
+    "num": "5.6.3",
+    "title": "查看事件",
+    "page": 1523,
+    "depth": 2
+  },
+  {
+    "num": "5.6.4",
+    "title": "修改事件",
+    "page": 1523,
+    "depth": 2
+  },
+  {
+    "num": "5.6.5",
+    "title": "删除事件",
+    "page": 1524,
+    "depth": 2
+  },
+  {
+    "num": "6",
+    "title": "附录",
+    "page": 1596,
+    "depth": 0
+  },
+  {
+    "num": "6.2",
+    "title": "操作系统参数设置检查基线列表",
+    "page": 1607,
+    "depth": 1
+  },
+  {
+    "num": "6.3",
+    "title": "术语",
+    "page": 1612,
+    "depth": 1
+  },
+  {
+    "num": "6.4",
+    "title": "保留字",
+    "page": 1613,
+    "depth": 1
+  },
+  {
+    "num": "6.5",
+    "title": "集群目录一览表",
+    "page": 1615,
+    "depth": 1
+  },
+  {
+    "num": "6.6",
+    "title": "集群配置",
+    "page": 1616,
+    "depth": 1
+  },
+  {
+    "num": "6.6.1",
+    "title": "GCluster配置参数",
+    "page": 1616,
+    "depth": 2
+  },
+  {
+    "num": "6.6.2",
+    "title": "GNode的配置参数",
+    "page": 1645,
+    "depth": 2
+  },
+  {
+    "num": "6.6.3",
+    "title": "其他配置参数",
+    "page": 1683,
+    "depth": 2
+  },
+  {
+    "num": "6.6.4",
+    "title": "集群字符集配置管理",
+    "page": 1683,
+    "depth": 2
+  },
+  {
+    "num": "6.7",
+    "title": "集群日志",
+    "page": 1688,
+    "depth": 1
+  },
+  {
+    "num": "6.7.1",
+    "title": "查看trace 日志",
+    "page": 1688,
+    "depth": 2
+  },
+  {
+    "num": "6.7.2",
+    "title": "查看system 日志",
+    "page": 1690,
+    "depth": 2
+  },
+  {
+    "num": "6.7.3",
+    "title": "查看express日志",
+    "page": 1692,
+    "depth": 2
+  },
+  {
+    "num": "6.7.4",
+    "title": "查看SQL日志",
+    "page": 1701,
+    "depth": 2
+  },
+  {
+    "num": "6.7.5",
+    "title": "GCWare日志文件",
+    "page": 1701,
+    "depth": 2
+  },
+  {
+    "num": "6.7.6",
+    "title": "日志按期归档",
+    "page": 1702,
+    "depth": 2
+  },
+  {
+    "num": "6.7.7",
+    "title": "同步日志归档老化",
+    "page": 1704,
+    "depth": 2
+  },
+  {
+    "num": "6.8",
+    "title": "错误码",
+    "page": 1706,
+    "depth": 1
+  },
+  {
+    "num": "6.8.1",
+    "title": "gcware错误列表",
+    "page": 1706,
+    "depth": 2
+  },
+  {
+    "num": "6.8.2",
+    "title": "gcluster错误列表",
+    "page": 1714,
+    "depth": 2
+  },
+  {
+    "num": "6.8.3",
+    "title": "gnode错误列表",
+    "page": 1754,
+    "depth": 2
+  }
+]
