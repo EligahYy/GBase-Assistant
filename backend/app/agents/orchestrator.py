@@ -6,10 +6,8 @@ Phase 1 使用基于关键词的简易意图分类。Phase 3 将升级为 LLM-ba
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from app.agents.state import AgentStateType
+from app.agents.state import AgentStateType
 
 logger = logging.getLogger(__name__)
 
