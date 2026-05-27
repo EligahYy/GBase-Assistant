@@ -16,8 +16,13 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                     L1: 接入层 (Gateway)                           │
 │                                                                  │
-│   Vue 3 Chat UI ←── SSE ──→ FastAPI Gateway                      │
-│   职责: 认证、流式传输、会话管理、连接状态推送                          │
+│   Vue 3 Chat UI ←── AG-UI SSE ──→ FastAPI Gateway                │
+│                                                                  │
+│   协议: AG-UI (Agent-User Interaction Protocol)                   │
+│   传输: POST /api/chat/run (发起) + SSE /api/chat/stream (事件流)  │
+│   事件: RUN_STARTED, TOOL_CALL_START/END, TEXT_MESSAGE_CONTENT,   │
+│         STATE_DELTA, TOOL_CALL_RESULT, RUN_FINISHED               │
+│   职责: 认证、流式传输、会话管理、连接状态推送、Agent 过程可见性       │
 └──────────────────────────────┬───────────────────────────────────┘
                                │
                                ▼
@@ -70,6 +75,7 @@
 | 生成假设说明 | Hermes V3 | 展示系统做了哪些假设（如"'销售额'映射为 order_amount"） |
 | 反馈驱动持续学习 | Hermes V3 + Hermes Agent (Nous) | 用户行为 → 正/反例 → 更新 Schema Graph → 下次更准 |
 | RRF 多策略融合 | 已有 v1 架构 | 精确+语义+关键词三层检索，RRF 融合排序 |
+| AG-UI 标准事件协议 | CopilotKit / Google A2A | 标准化 SSE 事件类型，Agent 过程对前端可见，工具调用可追踪 |
 | 级联问题防护 | Anthropic | 重试上限、循环检测、成本控制 |
 
 ## 4. Agent 定义
@@ -415,32 +421,324 @@ v1 已实现的 `ConnectionHealthChecker` + SSE 实时推送保持不变，整�
 - 前端 Pinia Store 集中管理状态（`connStatusMap`）
 - 新增：Schema Grounding Agent 在执行前检查目标连接状态，若断连则提示用户
 
-## 10. 技术栈
+## 10. AG-UI Gateway（标准化事件协议）
+
+### 10.1 设计决策
+
+AG-UI 是 2025-2026 年主流的 Agent-用户交互协议标准，规范化了 SSE 事件类型。当前 GBase 助手使用自定义 SSE 事件（`{type: "text"}`, `{type: "sql"}`），v2 升级为标准 AG-UI 事件类型。
+
+**不引入 Node.js 中间层。** 标准 CopilotKit 架构需要 TypeScript Runtime 作为中间层，但 GBase 前端是 Vue 3（非 React），引入 Node.js 会增加不必要的部署复杂度。采用 **FastAPI 直出 AG-UI + Vue 轻量适配器** 方案：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     GBase Gateway (单 FastAPI 进程)               │
+│                                                                 │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │            EventEncoder (Python, ~150行)                   │  │
+│  │                                                           │  │
+│  │  将 LangGraph Agent 输出编码为标准 AG-UI SSE 事件:           │  │
+│  │                                                           │  │
+│  │  Orchestrator 决策    → STATE_DELTA                        │  │
+│  │  Schema Grounding 调用 → TOOL_CALL_START                   │  │
+│  │  SQL 生成 (流式)      → TEXT_MESSAGE_CONTENT                │  │
+│  │  SQL 验证通过         → TOOL_CALL_END                      │  │
+│  │  SQL 执行结果         → TOOL_CALL_RESULT                   │  │
+│  │  Grounding 结果       → STATE_DELTA                        │  │
+│  │  任务完成             → RUN_FINISHED                       │  │
+│  │  任务失败             → RUN_ERROR                          │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  POST /api/chat/run          ← 发起对话 (RunAgentInput)          │
+│  GET  /api/chat/stream       ← AG-UI SSE 事件流                  │
+│  POST /api/chat/cancel       ← 用户中断                          │
+│  /api/connections/*          ← REST (不变)                       │
+│  /api/connections/status/stream ← SSE (不变)                     │
+│  /api/health                 ← REST (不变)                       │
+│  /api/mcp/*                  ← MCP 工具端点 (Phase 4+)           │
+└─────────────────────────────────────────────────────────────────┘
+         │ AG-UI SSE (标准格式)
+         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Vue 3 前端                                   │
+│                                                                 │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │         AG-UI 客户端适配器 (~150行)                          │  │
+│  │                                                           │  │
+│  │  - 解析标准 AG-UI 事件类型 (替代自定义 SSE 解析器)            │  │
+│  │  - 维护 Agent 状态机: idle → running → done → error        │  │
+│  │  - 工具调用进度渲染 (显示 Schema Grounding 进行中)           │  │
+│  │  - STATE_DELTA → Pinia Store 更新                          │  │
+│  │  - 用户中断支持 (取消按钮)                                   │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 AG-UI 事件类型定义
+
+| 事件 | 方向 | 说明 | 触发时机 |
+|------|------|------|---------|
+| `RUN_STARTED` | S→C | 任务开始 | Orchestrator 接收用户输入 |
+| `TEXT_MESSAGE_CONTENT` | S→C | 流式文本 | SQL 生成过程、LLM 回复 |
+| `TOOL_CALL_START` | S→C | 工具调用开始 | Schema Grounding / SQL Executor 被调用 |
+| `TOOL_CALL_END` | S→C | 工具调用完成 | Specialist Agent 完成工作 |
+| `TOOL_CALL_RESULT` | S→C | 工具执行结果 | SQL 执行结果返回 |
+| `STATE_DELTA` | S→C | 状态变更 | Grounding 结果、验证结果、置信度更新 |
+| `RUN_FINISHED` | S→C | 任务完成 | 最终响应生成完毕 |
+| `RUN_ERROR` | S→C | 任务失败 | 重试耗尽或不可恢复错误 |
+
+### 10.3 EventEncoder（Python 实现）
+
+```python
+# backend/app/gateway/ag_ui_encoder.py
+
+import json
+from enum import StrEnum
+from dataclasses import dataclass, field
+
+
+class EventType(StrEnum):
+    TEXT_MESSAGE_CONTENT = "TEXT_MESSAGE_CONTENT"
+    TOOL_CALL_START = "TOOL_CALL_START"
+    TOOL_CALL_RESULT = "TOOL_CALL_RESULT"
+    TOOL_CALL_END = "TOOL_CALL_END"
+    STATE_DELTA = "STATE_DELTA"
+    RUN_STARTED = "RUN_STARTED"
+    RUN_FINISHED = "RUN_FINISHED"
+    RUN_ERROR = "RUN_ERROR"
+
+
+class EventEncoder:
+    """将 LangGraph Agent 输出编码为 AG-UI 标准 SSE 事件"""
+
+    @staticmethod
+    def _encode(event_type: EventType, **kwargs) -> str:
+        payload = {"type": event_type.value, **kwargs}
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def run_started(conversation_id: str) -> str:
+        return EventEncoder._encode(EventType.RUN_STARTED,
+                                    conversation_id=conversation_id)
+
+    @staticmethod
+    def text_delta(content: str) -> str:
+        return EventEncoder._encode(EventType.TEXT_MESSAGE_CONTENT,
+                                    delta=content)
+
+    @staticmethod
+    def tool_call_start(tool_name: str, args: dict | None = None) -> str:
+        return EventEncoder._encode(EventType.TOOL_CALL_START,
+                                    tool_name=tool_name, args=args or {})
+
+    @staticmethod
+    def tool_call_end(tool_name: str) -> str:
+        return EventEncoder._encode(EventType.TOOL_CALL_END,
+                                    tool_name=tool_name)
+
+    @staticmethod
+    def tool_call_result(tool_name: str, result: dict) -> str:
+        return EventEncoder._encode(EventType.TOOL_CALL_RESULT,
+                                    tool_name=tool_name, result=result)
+
+    @staticmethod
+    def state_delta(path: str, value: dict) -> str:
+        return EventEncoder._encode(EventType.STATE_DELTA,
+                                    path=path, value=value)
+
+    @staticmethod
+    def run_finished() -> str:
+        return EventEncoder._encode(EventType.RUN_FINISHED)
+
+    @staticmethod
+    def run_error(message: str) -> str:
+        return EventEncoder._encode(EventType.RUN_ERROR, message=message)
+```
+
+### 10.4 Agent 节点 → AG-UI 事件映射
+
+| LangGraph 节点 | 输出事件顺序 |
+|---------------|-------------|
+| `orchestrator` | `RUN_STARTED` → 意图分类 → 路由决策 |
+| `schema_grounding` | `TOOL_CALL_START(schema_grounding)` → (检索) → `TOOL_CALL_END(schema_grounding)` → `STATE_DELTA(/grounding, GroundingResult)` |
+| `sql_specialist` | `TOOL_CALL_START(sql_generator)` → `TEXT_MESSAGE_CONTENT` (流式) → `TOOL_CALL_END(sql_generator)` |
+| `sql_verifier` | `TOOL_CALL_START(sql_validator)` → `TOOL_CALL_END(sql_validator)` → `STATE_DELTA(/validation, {passed, errors})` |
+| `sql_executor` | `TOOL_CALL_START(sql_executor)` → `TOOL_CALL_RESULT(sql_executor, {rows, time})` → `TOOL_CALL_END(sql_executor)` |
+| `knowledge_specialist` | `TOOL_CALL_START(knowledge_retrieval)` → `TEXT_MESSAGE_CONTENT` → `TOOL_CALL_END(knowledge_retrieval)` |
+| `response_formatter` | `STATE_DELTA(/output, {confidence, assumptions})` → `RUN_FINISHED` |
+
+### 10.5 Vue 3 AG-UI 客户端适配器
+
+```typescript
+// frontend/src/composables/useAGUIClient.ts
+
+import { reactive } from 'vue'
+
+type AgentStatus = 'idle' | 'running' | 'done' | 'error'
+
+interface ToolState {
+  name: string
+  status: 'pending' | 'running' | 'done' | 'error'
+  result?: unknown
+}
+
+interface AGUIClientState {
+  status: AgentStatus
+  currentTool: ToolState | null
+  toolHistory: ToolState[]
+  stateDeltas: Record<string, unknown>
+  error: string | null
+  confidence: number | null
+  assumptions: string[]
+}
+
+export function useAGUIClient() {
+  const state = reactive<AGUIClientState>({
+    status: 'idle',
+    currentTool: null,
+    toolHistory: [],
+    stateDeltas: {},
+    error: null,
+    confidence: null,
+    assumptions: [],
+  })
+
+  let abortController: AbortController | null = null
+
+  async function runAgent(input: string, dbConnectionId?: string) {
+    state.status = 'running'
+    state.toolHistory = []
+    state.error = null
+
+    abortController = new AbortController()
+
+    const response = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ message: input, db_connection_id: dbConnectionId }),
+      signal: abortController.signal,
+    })
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const json = line.slice(6).trim()
+        if (!json) continue
+        try {
+          const event = JSON.parse(json)
+          handleEvent(event)
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  function handleEvent(event: any) {
+    switch (event.type) {
+      case 'RUN_STARTED':
+        state.status = 'running'
+        break
+      case 'TOOL_CALL_START':
+        state.currentTool = { name: event.tool_name, status: 'running' }
+        break
+      case 'TOOL_CALL_END':
+        if (state.currentTool) {
+          state.currentTool.status = 'done'
+          state.toolHistory.push({ ...state.currentTool })
+          state.currentTool = null
+        }
+        break
+      case 'TOOL_CALL_RESULT':
+        if (state.currentTool) {
+          state.currentTool.result = event.result
+        }
+        break
+      case 'STATE_DELTA':
+        state.stateDeltas[event.path] = event.value
+        if (event.path === '/output') {
+          state.confidence = event.value?.confidence ?? null
+          state.assumptions = event.value?.assumptions ?? []
+        }
+        break
+      case 'RUN_FINISHED':
+        state.status = 'done'
+        break
+      case 'RUN_ERROR':
+        state.status = 'error'
+        state.error = event.message
+        break
+    }
+  }
+
+  function cancel() {
+    abortController?.abort()
+    fetch('/api/chat/cancel', { method: 'POST' }).catch(() => {})
+  }
+
+  return { state, runAgent, cancel }
+}
+```
+
+### 10.6 用户可见的改进
+
+**v1 (当前):**
+```
+用户看到: 文本一点点出来... → SQL出现 → 结果出现
+          (不知道系统做了什么)
+```
+
+**v2 (AG-UI):**
+```
+用户看到:
+  🔍 正在理解您的查询...
+  📊 已定位表: order_main (订单主表), product (产品表)  [TOOL_CALL_END]
+  📝 正在生成 SQL...                                     [TOOL_CALL_START]
+  SELECT ... FROM order_main JOIN product ...            [TEXT_MESSAGE_CONTENT]
+  ✅ SQL 验证通过                                        [TOOL_CALL_END]
+  ⚡ 执行中...                                           [TOOL_CALL_START]
+  📋 返回 5 行结果 (0.12s)                               [TOOL_CALL_RESULT]
+  置信度: ★★★ (高)                                       [STATE_DELTA]
+  假设: "销售额" 映射为 order_main.order_amount            [assumptions]
+```
+
+---
+
+## 11. 技术栈
 
 | 层级 | 技术 |
 |------|------|
 | 编排框架 | LangGraph (StateGraph + ConditionalEdge + MemorySaver) |
 | LLM 后端 | LiteLLM (DeepSeek Chat + 回退 Qwen/GPT-4o) |
+| Gateway 协议 | **AG-UI** (标准化 SSE 事件) |
 | 向量数据库 | Qdrant (schemas, sql_examples, knowledge, error_codes, learned_examples) |
 | API 框架 | FastAPI (SSE for streaming) |
-| 前端 | Vue 3 + Pinia + NaiveUI |
+| 前端 | Vue 3 + Pinia + NaiveUI + **AG-UI Client Adapter** |
 | 持久化 | SQLite (conversations, feedback, semantic_aliases) + Qdrant |
 | GBase 连接 | gbase-connector-python (native driver, asyncio.to_thread) |
 | SQL 解析 | sqlglot (dialect=mysql, closest to GBase 8a) |
 | 全文搜索 | ripgrep (precise path in hybrid RAG) |
 
-## 11. 实施策略
+## 12. 实施策略
 
 分四个 Phase 渐进实施，每个 Phase 独立可交付：
 
 | Phase | 内容 | 依赖 |
 |-------|------|------|
-| **Phase 1: 基础设施** | LangGraph 集成、AgentState、Orchestrator 路由、项目目录重构 | 无 |
+| **Phase 1: 基础设施+AG-UI** | LangGraph 集成、AgentState、Orchestrator 路由、**EventEncoder**、**Vue AG-UI 客户端适配器**、项目目录重构 | 无 |
 | **Phase 2: Schema Knowledge Graph** | DDL 解析器增强、语义标注、Schema Graph 构建和存储、多策略检索 | Phase 1 |
-| **Phase 3: Specialist Agent 重构** | Schema Grounding、SQL/Knowledge/General Specialist 接入 LangGraph | Phase 2 |
-| **Phase 4: 持续学习与优化** | Feedback Learner 闭环、别名自动学习、Few-shot 自动积累 | Phase 3 |
+| **Phase 3: Specialist Agent 重构** | Schema Grounding、SQL/Knowledge/General Specialist 接入 LangGraph、AG-UI 事件映射 | Phase 2 |
+| **Phase 4: 持续学习与优化** | Feedback Learner 闭环、别名自动学习、Few-shot 自动积累、MCP 工具端点 | Phase 3 |
 
-## 12. 风险与缓解
+## 13. 风险与缓解
 
 | 风险 | 缓解 |
 |------|------|
