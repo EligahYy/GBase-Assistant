@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 import uuid
 from datetime import UTC, datetime
 
@@ -31,27 +30,17 @@ from app.schemas.connection import (
 from app.security.crypto import decrypt_password, encrypt_password
 from app.sql.sandbox import SQLSandbox, SQLSandboxError
 
+from app.services.connection_cache import (
+    CACHE_TTL,
+    clear_testing,
+    get_cached_status,
+    is_testing,
+    set_cached_status,
+    set_testing,
+)
+
 router = APIRouter(prefix="/connections", tags=["connections"])
 logger = logging.getLogger(__name__)
-
-# ── 内存连接状态缓存（避免频繁 SELECT 1 轮询） ──
-# key: connection_id, value: (timestamp, 'ok' | 'error')
-_status_cache: dict[str, tuple[float, str]] = {}
-_CACHE_TTL = 30  # 缓存有效期 30 秒
-# 防止同一连接并发测试
-_testing_locks: set[str] = set()
-
-
-def _get_cached_status(connection_id: str) -> str | None:
-    """读取缓存的状态，超过 TTL 返回 None。"""
-    entry = _status_cache.get(connection_id)
-    if entry and (time.monotonic() - entry[0]) < _CACHE_TTL:
-        return entry[1]
-    return None
-
-
-def _set_cached_status(connection_id: str, status: str) -> None:
-    _status_cache[connection_id] = (time.monotonic(), status)
 
 
 class ConnectionStatusItem(BaseModel):
@@ -65,9 +54,9 @@ class ConnectionStatusResponse(BaseModel):
 
 async def _background_test_connection(connection_id: str) -> None:
     """后台异步测试连接并更新缓存（不阻塞请求）。"""
-    if connection_id in _testing_locks:
+    if is_testing(connection_id):
         return
-    _testing_locks.add(connection_id)
+    set_testing(connection_id)
     try:
         from app.database import async_session_factory
 
@@ -77,23 +66,23 @@ async def _background_test_connection(connection_id: str) -> None:
             )
             conn = result.scalar_one_or_none()
             if not conn or conn.driver_type == "manual":
-                _set_cached_status(connection_id, "ok")
+                set_cached_status(connection_id, "ok")
                 return
 
             connector = get_connector(conn.driver_type)
             if not connector:
-                _set_cached_status(connection_id, "error")
+                set_cached_status(connection_id, "error")
                 return
 
             config = _to_connection_config(conn)
             # 测试用短超时（5s），避免卡住
             config.connection_timeout = 5
             ok, _ = await connector.test(config)
-            _set_cached_status(connection_id, "ok" if ok else "error")
+            set_cached_status(connection_id, "ok" if ok else "error")
     except Exception:
-        _set_cached_status(connection_id, "error")
+        set_cached_status(connection_id, "error")
     finally:
-        _testing_locks.discard(connection_id)
+        clear_testing(connection_id)
 
 
 async def _trigger_schema_indexing(db_id: str, schema_ddl: str | None) -> None:
@@ -199,13 +188,13 @@ async def get_connections_status(db: AsyncSession = Depends(get_db)):
         if c.driver_type == "manual":
             items.append(ConnectionStatusItem(id=c.id, status="ok"))
         else:
-            cached = _get_cached_status(c.id)
+            cached = get_cached_status(c.id)
             if cached is not None:
                 items.append(ConnectionStatusItem(id=c.id, status=cached))
             elif c.connection_tested:
                 items.append(ConnectionStatusItem(id=c.id, status="ok"))
             else:
-                if c.id in _testing_locks:
+                if is_testing(c.id):
                     items.append(ConnectionStatusItem(id=c.id, status="testing"))
                 else:
                     items.append(ConnectionStatusItem(id=c.id, status="testing"))
@@ -290,12 +279,12 @@ async def test_connection(connection_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="连接不存在")
 
     if conn.driver_type == "manual":
-        _set_cached_status(connection_id, "ok")
+        set_cached_status(connection_id, "ok")
         return TestConnectionResponse(status="ok", message="手动模式（无需连接测试）", driver="manual")
 
     connector = get_connector(conn.driver_type)
     if not connector:
-        _set_cached_status(connection_id, "error")
+        set_cached_status(connection_id, "error")
         return TestConnectionResponse(
             status="error", message=f"驱动 {conn.driver_type} 未安装或不可用", driver=conn.driver_type
         )
@@ -308,7 +297,7 @@ async def test_connection(connection_id: str, db: AsyncSession = Depends(get_db)
     await db.commit()
 
     status = "ok" if ok else "error"
-    _set_cached_status(connection_id, status)
+    set_cached_status(connection_id, status)
     return TestConnectionResponse(status=status, message=message, driver=conn.driver_type)
 
 

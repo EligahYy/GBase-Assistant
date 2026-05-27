@@ -62,3 +62,155 @@ class TestConnectionHealthChecker:
         h1 = get_health_checker()
         h2 = get_health_checker()
         assert h1 is h2
+
+    # ── 新增测试：stop() 生命周期 ──
+
+    async def test_stop_sends_closed_event(self):
+        """stop() 应向所有订阅者发送 closed 事件。"""
+        checker = ConnectionHealthChecker(probe_interval=60)
+        q = checker.subscribe()
+        await checker.start()
+        await asyncio.sleep(0.05)
+        await checker.stop()
+        # 队列中应有 closed 事件
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        assert any(e.get("type") == "closed" for e in events)
+
+    # ── 新增测试：probe_one 广播 ──
+
+    async def test_probe_one_broadcasts_on_status_change(self):
+        """_probe_one 在状态变更时应广播事件。"""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.services.connection_health_checker import ConnectionHealthChecker
+
+        checker = ConnectionHealthChecker()
+        q = checker.subscribe()
+
+        mock_conn = MagicMock()
+        mock_conn.id = "test-conn-1"
+        mock_conn.name = "test-db"
+        mock_conn.driver_type = "native"
+        mock_conn.connection_tested = True
+
+        with patch(
+            "app.services.connection_health_checker.get_cached_status",
+            return_value="ok",
+        ):
+            with patch("app.services.connection_health_checker.set_cached_status"):
+                with (
+                    patch(
+                        "app.services.connection_health_checker.get_connector",
+                    ) as mock_get_conn,
+                ):
+                    mock_connector = MagicMock()
+                    mock_connector.test = AsyncMock(
+                        return_value=(False, "connection refused"),
+                    )
+                    mock_get_conn.return_value = mock_connector
+
+                    with patch(
+                        (
+                            "app.services.connection_health_checker."
+                            "_to_connection_config"
+                        ),
+                    ) as mock_to_config:
+                        mock_config = MagicMock()
+                        mock_config.connection_timeout = 5
+                        mock_to_config.return_value = mock_config
+
+                        await checker._probe_one(mock_conn)
+
+        # 应广播 error 事件
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        status_events = [e for e in events if e.get("type") == "status"]
+        assert len(status_events) == 1
+        assert status_events[0]["connection_id"] == "test-conn-1"
+        assert status_events[0]["status"] == "error"
+
+    async def test_probe_one_no_broadcast_when_status_unchanged(self):
+        """状态未变更时不应广播。"""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.services.connection_health_checker import ConnectionHealthChecker
+
+        checker = ConnectionHealthChecker()
+        q = checker.subscribe()
+
+        mock_conn = MagicMock()
+        mock_conn.id = "test-conn-1"
+        mock_conn.name = "test-db"
+        mock_conn.driver_type = "native"
+        mock_conn.connection_tested = True
+
+        # old_status = "ok", new_status = "ok" -> no change
+        with patch(
+            "app.services.connection_health_checker.get_cached_status",
+            return_value="ok",
+        ):
+            with patch("app.services.connection_health_checker.set_cached_status"):
+                with (
+                    patch(
+                        "app.services.connection_health_checker.get_connector",
+                    ) as mock_get_conn,
+                ):
+                    mock_connector = MagicMock()
+                    mock_connector.test = AsyncMock(
+                        return_value=(True, "connected"),
+                    )
+                    mock_get_conn.return_value = mock_connector
+
+                    with patch(
+                        (
+                            "app.services.connection_health_checker."
+                            "_to_connection_config"
+                        ),
+                    ) as mock_to_config:
+                        mock_config = MagicMock()
+                        mock_to_config.return_value = mock_config
+
+                        await checker._probe_one(mock_conn)
+
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        status_events = [e for e in events if e.get("type") == "status"]
+        assert len(status_events) == 0
+
+    # ── 新增测试：缓存重置 ──
+
+    async def test_reset_cache_for_tests(self):
+        """reset_cache_for_tests 应清空缓存。"""
+        from app.services.connection_cache import (
+            get_cached_status,
+            is_testing,
+            reset_cache_for_tests,
+            set_cached_status,
+            set_testing,
+        )
+
+        set_cached_status("conn-1", "ok")
+        set_testing("conn-2")
+        assert get_cached_status("conn-1") == "ok"
+        assert is_testing("conn-2") is True
+
+        reset_cache_for_tests()
+
+        assert get_cached_status("conn-1") is None
+        assert is_testing("conn-2") is False
+
+    async def test_reset_for_tests_resets_singleton(self):
+        """_reset_for_tests 应重置全局单例。"""
+        from app.services.connection_health_checker import (
+            ConnectionHealthChecker,
+            get_health_checker,
+        )
+
+        h1 = get_health_checker()
+        ConnectionHealthChecker._reset_for_tests()
+        h2 = get_health_checker()
+        assert h1 is not h2

@@ -5,11 +5,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.protocols import DatabaseConnector
+
+from app.api.connections import _to_connection_config
+from app.database import async_session_factory
+from app.db_connectors.connector_factory import get_connector
+from app.models.connection import DbConnection
+from app.services.connection_cache import get_cached_status, reset_cache_for_tests, set_cached_status
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +61,51 @@ class ConnectionHealthChecker:
                 except (asyncio.QueueEmpty, asyncio.QueueFull):
                     pass
 
-    async def _probe_all(self) -> None:
-        """探测所有活跃连接并广播变更。"""
-        from app.database import async_session_factory
-        from app.models.connection import DbConnection
-        from app.db_connectors.connector_factory import get_connector
-        from app.api.connections import _get_cached_status, _set_cached_status
+    async def _probe_one(self, conn) -> None:
+        """探测单个连接。"""
+        connector = get_connector(conn.driver_type)
+        if not connector:
+            logger.warning(
+                "HealthChecker: 连接 %s 的驱动 %s 不可用",
+                conn.name, conn.driver_type,
+            )
+            return
+
+        old_status = get_cached_status(conn.id)
+        if old_status is None:
+            old_status = "ok" if conn.connection_tested else "unknown"
+
+        config = _to_connection_config(conn)
+        config.connection_timeout = self._test_timeout
 
         try:
+            ok, _ = await asyncio.wait_for(
+                connector.test(config),
+                timeout=self._test_timeout + 1,
+            )
+        except asyncio.TimeoutError:
+            ok = False
+        except Exception:
+            ok = False
+
+        new_status = "ok" if ok else "error"
+        set_cached_status(conn.id, new_status)
+
+        if old_status != new_status:
+            logger.info(
+                "HealthChecker: 连接 %s 状态变更 %s -> %s",
+                conn.name, old_status, new_status,
+            )
+            await self._broadcast({
+                "type": "status",
+                "connection_id": conn.id,
+                "status": new_status,
+            })
+
+    async def _probe_all(self) -> None:
+        """并行探测所有活跃连接并广播变更。"""
+        try:
             async with async_session_factory() as session:
-                from sqlalchemy import select
                 result = await session.execute(
                     select(DbConnection).where(DbConnection.is_active.is_(True))
                 )
@@ -73,47 +114,9 @@ class ConnectionHealthChecker:
             logger.warning("HealthChecker: 查询连接列表失败: %s", e)
             return
 
-        for conn in connections:
-            if conn.driver_type == "manual":
-                continue
-
-            connector = get_connector(conn.driver_type)
-            if not connector:
-                continue
-
-            old_status = _get_cached_status(conn.id)
-            if old_status is None:
-                old_status = "ok" if conn.connection_tested else "unknown"
-
-            # 构建配置并设短超时
-            from app.api.connections import _to_connection_config
-            config = _to_connection_config(conn)
-            config.connection_timeout = self._test_timeout
-
-            try:
-                ok, _ = await asyncio.wait_for(
-                    connector.test(config),
-                    timeout=self._test_timeout + 1,  # 比连接超时多 1s
-                )
-            except asyncio.TimeoutError:
-                ok = False
-            except Exception:
-                ok = False
-
-            new_status = "ok" if ok else "error"
-            _set_cached_status(conn.id, new_status)
-
-            # 状态变更时广播
-            if old_status != new_status:
-                logger.info(
-                    "HealthChecker: 连接 %s 状态变更 %s -> %s",
-                    conn.name, old_status, new_status,
-                )
-                await self._broadcast({
-                    "type": "status",
-                    "connection_id": conn.id,
-                    "status": new_status,
-                })
+        targets = [c for c in connections if c.driver_type != "manual"]
+        if targets:
+            await asyncio.gather(*[self._probe_one(c) for c in targets], return_exceptions=True)
 
     async def _run(self) -> None:
         """后台循环。"""
@@ -149,6 +152,13 @@ class ConnectionHealthChecker:
             await q.put({"type": "closed"})
         self._subscribers.clear()
         logger.info("HealthChecker 已停止")
+
+    @classmethod
+    def _reset_for_tests(cls) -> None:
+        """仅测试使用：重置全局单例和缓存。"""
+        global _health_checker
+        _health_checker = None
+        reset_cache_for_tests()
 
 
 # 全局单例
