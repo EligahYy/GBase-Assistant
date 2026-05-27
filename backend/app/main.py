@@ -18,10 +18,16 @@ logger = logging.getLogger(__name__)
 
 
 async def _background_sync_all_to_qdrant(embedder) -> None:
-    """后台任务：同步所有知识库到 Qdrant。不阻塞应用启动。"""
+    """后台任务：同步所有知识库到 Qdrant。不阻塞应用启动。
+
+    官方 PDF 手册（1795 页，~220 章节）的切片和索引在后台运行，
+    预计耗时 30-90 秒（取决于嵌入 API 响应速度）。
+    前端在同步完成前可正常使用，但知识问答功能需等待同步完成。
+    """
     try:
         from app.vector.ingest import sync_all_to_qdrant
 
+        logger.info("后台知识库同步开始（官方 PDF 手册切片+嵌入，预计 30-90 秒）...")
         results = await sync_all_to_qdrant(embedder)
         logger.info("后台知识库同步完成: %s", results)
     except Exception as e:
