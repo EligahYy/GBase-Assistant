@@ -183,9 +183,11 @@ async def sql_verifier_node(state: AgentStateType) -> dict:
     errors = result.errors + result.warnings
 
     logger.info("SQL Verifier: passed=%s, errors=%s", passed, errors)
+    retry = state.get("sql_retry_count", 0)
     return {
         "validation_passed": passed,
         "validation_errors": errors,
+        "sql_retry_count": retry + 1,
     }
 
 
@@ -373,7 +375,6 @@ def build_graph() -> StateGraph:
             return "sql_executor"
         retry = state.get("sql_retry_count", 0)
         if retry < 3:
-            state["sql_retry_count"] = retry + 1
             return "sql_specialist"
         return "response_formatter"
 
@@ -451,9 +452,10 @@ async def run_agent_with_ag_ui(
                 yield EventEncoder.tool_call_end(node_name)
                 prev_node = None
 
-        # 获取最终状态
-        final_state = await graph.ainvoke(initial_state, config=config)
-        response = final_state.get("final_response", "")
+        # 获取最终状态（从 checkpointer 读取，不重新执行）
+        final_state = await graph.aget_state(config)
+        state_values = final_state.values if final_state else {}
+        response = state_values.get("final_response", "") if state_values else ""
         if response:
             yield EventEncoder.text_delta(response)
 

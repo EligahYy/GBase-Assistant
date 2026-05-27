@@ -56,10 +56,37 @@ async def render_page(url: str, headless: bool = True) -> str | None:
             content = await page.evaluate("""() => {
                 const article = document.querySelector('article');
                 if (!article) return '';
-                // Remove nav, footer, sidebar elements
-                const clones = article.cloneNode(true);
-                clones.querySelectorAll('nav, .theme-doc-toc-desktop, .theme-doc-breadcrumbs, .pagination-nav').forEach(el => el.remove());
-                return clones.innerText;
+                const clone = article.cloneNode(true);
+                clone.querySelectorAll('nav, .theme-doc-toc-desktop, .theme-doc-breadcrumbs, .pagination-nav, script, style').forEach(el => el.remove());
+
+                // Convert HTML headings to Markdown
+                let html = clone.innerHTML;
+                // h1 → # , h2 → ## , h3 → ###
+                html = html.replace(/<h1[^>]*>(.*?)<\\/h1>/gi, '\\n# $1\\n');
+                html = html.replace(/<h2[^>]*>(.*?)<\\/h2>/gi, '\\n## $1\\n');
+                html = html.replace(/<h3[^>]*>(.*?)<\\/h3>/gi, '\\n### $1\\n');
+                html = html.replace(/<h4[^>]*>(.*?)<\\/h4>/gi, '\\n#### $1\\n');
+                // code blocks
+                html = html.replace(/<pre[^>]*><code[^>]*>(.*?)<\\/code><\\/pre>/gi, '\\n```\\n$1\\n```\\n');
+                html = html.replace(/<code[^>]*>(.*?)<\\/code>/gi, '`$1`');
+                // lists
+                html = html.replace(/<li[^>]*>(.*?)<\\/li>/gi, '- $1\\n');
+                // paragraphs and line breaks
+                html = html.replace(/<br\\s*\\/?>/gi, '\\n');
+                html = html.replace(/<\\/p>/gi, '\\n\\n');
+                // tables → keep as text
+                html = html.replace(/<table[^>]*>/gi, '\\n');
+                html = html.replace(/<\\/table>/gi, '\\n');
+                html = html.replace(/<tr[^>]*>/gi, '| ');
+                html = html.replace(/<\\/tr>/gi, ' |\\n');
+                html = html.replace(/<t[dh][^>]*>/gi, '| ');
+                html = html.replace(/<\\/t[dh]>/gi, ' ');
+                // strip remaining tags
+                html = html.replace(/<[^>]*>/g, '');
+                // decode entities
+                const txt = document.createElement('textarea');
+                txt.innerHTML = html;
+                return txt.value.replace(/\\n{3,}/g, '\\n\\n').trim();
             }""")
 
             # Get page title

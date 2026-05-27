@@ -159,11 +159,16 @@ class QdrantKnowledgeIndexer:
         total = 0
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
+            import hashlib
+
             embeddings = await embedder.embed([c.to_embedding_text() for c in batch])
-            points = [
-                PointStruct(id=i + j, vector=embeddings[j], payload=batch[j].to_qdrant_payload())
-                for j in range(len(batch))
-            ]
+            points = []
+            for j in range(len(batch)):
+                c = batch[j]
+                point_id = int(hashlib.sha256(
+                    f"{c.chapter_title}:{c.source_file}".encode()
+                ).hexdigest()[:16], 16)
+                points.append(PointStruct(id=point_id, vector=embeddings[j], payload=c.to_qdrant_payload()))
             await qdrant.client.upsert(collection_name=self.COLLECTION_NAME, points=points)
             total += len(batch)
             logger.info("Indexed %d/%d chunks", total, len(chunks))

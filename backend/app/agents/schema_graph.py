@@ -486,6 +486,9 @@ class SchemaGraph:
             else:
                 continue
 
+            if not ddl or not isinstance(ddl, str):
+                continue
+
             table_meta = DDLParser.parse_ddl(ddl)
             if not table_meta:
                 continue
