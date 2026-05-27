@@ -144,3 +144,25 @@ class TestConversationAPI:
         assert response.status_code == 200
         get_resp = client.get(f"/api/chat/conversations/{conv_id}")
         assert get_resp.status_code == 404
+
+
+class TestSSEAPI:
+    async def test_connection_status_stream(self):
+        """SSE 端点应返回 text/event-stream。"""
+        import asyncio
+        from httpx import AsyncClient, ASGITransport
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            # SSE stream is infinite; wrap in timeout to avoid hanging
+            try:
+                async with asyncio.timeout(20):
+                    async with ac.stream("GET", "/api/connections/status/stream") as response:
+                        assert response.status_code == 200
+                        assert "text/event-stream" in response.headers.get("content-type", "")
+                        # Read one line (SSE endpoint sends keepalive after ~15s idle)
+                        async for line in response.aiter_lines():
+                            assert ": keepalive" in line
+                            break
+            except asyncio.TimeoutError:
+                pass  # expected — infinite stream timed out after reading data

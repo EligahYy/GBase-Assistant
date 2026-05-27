@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,10 +79,36 @@ async def _background_test_connection(connection_id: str) -> None:
             config = _to_connection_config(conn)
             # 测试用短超时（5s），避免卡住
             config.connection_timeout = 5
+            old_status = get_cached_status(connection_id)
             ok, _ = await connector.test(config)
-            set_cached_status(connection_id, "ok" if ok else "error")
+            new_status = "ok" if ok else "error"
+            set_cached_status(connection_id, new_status)
+
+            # 广播状态变更到 SSE 订阅者
+            if old_status != new_status:
+                try:
+                    from app.services.connection_health_checker import get_health_checker
+                    await get_health_checker()._broadcast({
+                        "type": "status",
+                        "connection_id": connection_id,
+                        "status": new_status,
+                    })
+                except Exception:
+                    pass
     except Exception:
-        set_cached_status(connection_id, "error")
+        old_status = get_cached_status(connection_id)
+        new_status = "error"
+        set_cached_status(connection_id, new_status)
+        if old_status != new_status:
+            try:
+                from app.services.connection_health_checker import get_health_checker
+                await get_health_checker()._broadcast({
+                    "type": "status",
+                    "connection_id": connection_id,
+                    "status": new_status,
+                })
+            except Exception:
+                pass
     finally:
         clear_testing(connection_id)
 
@@ -298,6 +326,16 @@ async def test_connection(connection_id: str, db: AsyncSession = Depends(get_db)
 
     status = "ok" if ok else "error"
     set_cached_status(connection_id, status)
+    # 广播状态变更到 SSE 订阅者
+    try:
+        from app.services.connection_health_checker import get_health_checker
+        await get_health_checker()._broadcast({
+            "type": "status",
+            "connection_id": connection_id,
+            "status": status,
+        })
+    except Exception:
+        pass
     return TestConnectionResponse(status=status, message=message, driver=conn.driver_type)
 
 
@@ -382,4 +420,51 @@ async def execute_query(connection_id: str, body: QueryRequest, db: AsyncSession
         row_count=query_result.row_count,
         execution_time_ms=query_result.execution_time_ms,
         truncated=query_result.truncated,
+    )
+
+
+@router.get("/status/stream")
+async def stream_connection_status():
+    """SSE 端点：实时推送连接状态变更事件。
+
+    事件格式:
+      data: {"type":"status","connection_id":"<id>","status":"ok"|"error"}
+
+      data: {"type":"heartbeat"}
+
+    前端通过 EventSource 或 fetch + ReadableStream 消费。
+    """
+    from app.services.connection_health_checker import get_health_checker
+
+    checker = get_health_checker()
+    queue = checker.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # 15 秒无事件，发送 keepalive 注释（SSE 标准）
+                    yield ": keepalive\n\n"
+                    continue
+
+                if event.get("type") == "closed":
+                    break
+
+                data = json.dumps(event, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            checker.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
