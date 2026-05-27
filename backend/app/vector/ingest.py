@@ -316,8 +316,8 @@ async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
     results = {}
 
     # 优先尝试从官方 PDF 构建知识库
-    pdf_path = _knowledge_dir / "GBase 8a MPP Cluster产品手册_V953.pdf"
-    toc_path = _knowledge_dir / "official_toc.json"
+    pdf_path = _knowledge_dir() / "GBase 8a MPP Cluster产品手册_V953.pdf"
+    toc_path = _knowledge_dir() / "official_toc.json"
 
     if pdf_path.exists() and toc_path.exists():
         try:
