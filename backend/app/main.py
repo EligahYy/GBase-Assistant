@@ -119,6 +119,9 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
 
+    from app.api.chat_v2 import router as chat_v2_router
+    app.include_router(chat_v2_router, prefix="/api")
+
     return app
 
 
