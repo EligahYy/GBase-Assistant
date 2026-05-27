@@ -36,24 +36,16 @@ async def fetch_sitemap_urls() -> list[str]:
     return sorted(set(docs))
 
 
-async def render_page(url: str, headless: bool = True) -> str | None:
-    """Playwright 渲染页面，提取正文。"""
+async def render_page(browser, url: str) -> str | None:
+    """Playwright 渲染页面，提取正文（复用 browser 实例）。"""
+    page = await browser.new_page()
     try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        logger.error("Playwright not installed. Run: uv add playwright && playwright install chromium")
-        return None
+        await page.goto(url, wait_until="networkidle", timeout=30000)
+        # Wait for Docusaurus content to render
+        await page.wait_for_selector("article", timeout=15000)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
-        page = await browser.new_page()
-        try:
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            # Wait for Docusaurus content to render
-            await page.wait_for_selector("article", timeout=15000)
-
-            # Extract article content as Markdown
-            content = await page.evaluate("""() => {
+        # Extract article content as Markdown
+        content = await page.evaluate("""() => {
                 const article = document.querySelector('article');
                 if (!article) return '';
                 const clone = article.cloneNode(true);
@@ -105,7 +97,7 @@ async def render_page(url: str, headless: bool = True) -> str | None:
 
             return None
         finally:
-            await browser.close()
+            await page.close()
 
 
 def url_to_filename(url: str) -> str:
@@ -131,34 +123,40 @@ async def crawl_all(limit: int | None = None) -> int:
         urls = urls[:limit]
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    saved = 0
 
-    for i, url in enumerate(urls):
-        filename = url_to_filename(url)
-        filepath = OUTPUT_DIR / filename
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            saved = 0
+            for i, url in enumerate(urls):
+                filename = url_to_filename(url)
+                filepath = OUTPUT_DIR / filename
 
-        # Skip if already cached and non-empty
-        if filepath.exists() and filepath.stat().st_size > 200:
-            saved += 1
-            if (i + 1) % 50 == 0:
-                logger.info("Progress: %d/%d (cached: %d)", i + 1, len(urls), saved)
-            continue
+                # Skip if already cached and non-empty
+                if filepath.exists() and filepath.stat().st_size > 200:
+                    saved += 1
+                    if (i + 1) % 50 == 0:
+                        logger.info("Progress: %d/%d (cached: %d)", i + 1, len(urls), saved)
+                    continue
 
-        logger.info("[%d/%d] %s", i + 1, len(urls), url)
-        md_content = await render_page(url)
+                logger.info("[%d/%d] %s", i + 1, len(urls), url)
+                md_content = await render_page(browser, url)
 
-        if md_content:
-            filepath.write_text(md_content, encoding="utf-8")
-            saved += 1
-            logger.info("  -> %s (%d chars)", filename, len(md_content))
-        else:
-            logger.warning("  -> EMPTY")
+                if md_content:
+                    filepath.write_text(md_content, encoding="utf-8")
+                    saved += 1
+                    logger.info("  -> %s (%d chars)", filename, len(md_content))
+                else:
+                    logger.warning("  -> EMPTY")
 
-        # Small delay to be polite
-        await asyncio.sleep(0.5)
+                # Small delay to be polite
+                await asyncio.sleep(0.5)
 
-    logger.info("Crawl complete: %d/%d pages saved to %s", saved, len(urls), OUTPUT_DIR)
-    return saved
+            logger.info("Crawl complete: %d/%d pages saved to %s", saved, len(urls), OUTPUT_DIR)
+            return saved
+        finally:
+            await browser.close()
 
 
 if __name__ == "__main__":

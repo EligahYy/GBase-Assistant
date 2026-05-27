@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, inject, onMounted } from 'vue'
+import { ref, computed, nextTick, watch, inject, onMounted, onBeforeUnmount } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   SendOutline, ServerOutline, SunnyOutline, MoonOutline,
@@ -36,6 +36,12 @@ const activeConn = computed(() =>
 
 onMounted(() => {
   connStore.loadConnections().catch(() => {})
+})
+
+onBeforeUnmount(() => {
+  if (isStreaming.value) {
+    stopStream()
+  }
 })
 
 watch(() => chatStore.messages.length, async () => {

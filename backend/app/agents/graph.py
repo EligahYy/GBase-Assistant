@@ -25,6 +25,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _last_user_message(state: AgentStateType) -> str:
+    """从 state 中提取最后一条用户消息。"""
+    msgs = state.get("messages", [])
+    if msgs:
+        last = msgs[-1]
+        if isinstance(last, dict):
+            return last.get("content", "")
+    return ""
+
+
 # ── Agent 节点 ──
 # Orchestrator: 意图分类
 # Schema Grounding: Schema 检索
@@ -37,12 +47,7 @@ logger = logging.getLogger(__name__)
 
 async def orchestrator_node(state: AgentStateType) -> dict:
     """Orchestrator: 分类意图，记录到 state。"""
-    user_msg = ""
-    msgs = state.get("messages", [])
-    if msgs:
-        last = msgs[-1]
-        if isinstance(last, dict):
-            user_msg = last.get("content", "")
+    user_msg = _last_user_message(state)
     intent = classify_intent_v2(user_msg)
     state["intent"] = intent
     logger.info("Orchestrator: classified intent=%s for message='%s'", intent, user_msg[:50])
@@ -51,12 +56,7 @@ async def orchestrator_node(state: AgentStateType) -> dict:
 
 async def schema_grounding_node(state: AgentStateType) -> dict:
     """Schema Grounding: 多策略检索定位用户问题涉及的表和列。"""
-    user_msg = ""
-    msgs = state.get("messages", [])
-    if msgs:
-        last = msgs[-1]
-        if isinstance(last, dict):
-            user_msg = last.get("content", "")
+    user_msg = _last_user_message(state)
 
     db_id = state.get("db_connection_id")
     if not db_id:
@@ -118,12 +118,7 @@ async def sql_specialist_node(state: AgentStateType) -> dict:
     from app.database import async_session_factory
 
     grounding = state.get("grounding") or {}
-    user_msg = ""
-    msgs = state.get("messages", [])
-    if msgs:
-        last = msgs[-1]
-        if isinstance(last, dict):
-            user_msg = last.get("content", "")
+    user_msg = _last_user_message(state)
 
     try:
         llm_client = get_llm_client()
@@ -248,12 +243,7 @@ async def knowledge_specialist_node(state: AgentStateType) -> dict:
     from app.chains.qa_chain import run_qa_chain
     from app.protocols import ChatContext
 
-    user_msg = ""
-    msgs = state.get("messages", [])
-    if msgs:
-        last = msgs[-1]
-        if isinstance(last, dict):
-            user_msg = last.get("content", "")
+    user_msg = _last_user_message(state)
 
     if not user_msg:
         return {"final_response": "请输入问题。"}
@@ -278,12 +268,7 @@ async def general_specialist_node(state: AgentStateType) -> dict:
     from app.dependencies import get_llm_client
     from app.llm.prompts import build_general_prompt
 
-    user_msg = ""
-    msgs = state.get("messages", [])
-    if msgs:
-        last = msgs[-1]
-        if isinstance(last, dict):
-            user_msg = last.get("content", "")
+    user_msg = _last_user_message(state)
 
     if not user_msg:
         return {"final_response": "您好！请问有什么可以帮您？"}

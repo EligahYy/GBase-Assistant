@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -194,6 +196,20 @@ async def build_knowledge_from_md_dir(
     if not md_files:
         raise FileNotFoundError(f"No .md files in {md_dir}. Run web_crawler first.")
 
+    # 检查是否需要重建
+    state_file = md_path / ".index_state.json"
+    current_hash = hashlib.sha256(
+        "".join(f"{f.name}:{f.stat().st_mtime}:{f.stat().st_size}"
+                for f in sorted(md_files)).encode()
+    ).hexdigest()[:16]
+
+    if not clear_existing and state_file.exists():
+        with open(state_file) as f:
+            state = json.load(f)
+        if state.get("files_hash") == current_hash:
+            logger.info("MD files unchanged, skipping re-index")
+            return 0
+
     logger.info("Building knowledge from %d Markdown files in %s", len(md_files), md_dir)
 
     slicer = MDChapterSlicer()
@@ -207,5 +223,10 @@ async def build_knowledge_from_md_dir(
 
     indexer = QdrantKnowledgeIndexer()
     count = await indexer.index_chunks(all_chunks, clear_existing=clear_existing)
+
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(state_file, "w") as f:
+        json.dump({"files_hash": current_hash, "chunks": count}, f)
+
     logger.info("Knowledge base built: %d chunks", count)
     return count

@@ -1,3 +1,6 @@
+// AG-UI 客户端适配器 — Phase 4 接入 v2 前端 UI 时使用
+// 当前 v2 /api/v2/chat/stream 端点已就绪，此 composable 待 ChatPanel 升级时接入
+
 import { reactive } from 'vue'
 
 type AgentStatus = 'idle' | 'running' | 'done' | 'error'

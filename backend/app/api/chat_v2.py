@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Body
 from fastapi.responses import StreamingResponse
@@ -24,7 +25,7 @@ async def chat_stream_v2(request: ChatRequest = Body(...)):
 
     复用 v1 的 ChatRequest schema，输出升级为 AG-UI 事件类型。
     """
-    conversation_id = request.conversation_id or ""
+    conversation_id = request.conversation_id or str(uuid.uuid4())
 
     event_stream = run_agent_with_ag_ui(
         user_message=request.message,

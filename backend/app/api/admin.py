@@ -84,7 +84,6 @@ async def reindex_web(request: Request) -> ReindexWebResponse:
         raise HTTPException(status_code=503, detail="Qdrant 不可用")
 
     try:
-        embedder = get_embedder()
         count = await build_knowledge_from_md_dir()
         return ReindexWebResponse(
             status="ok",
