@@ -67,9 +67,27 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Qdrant 初始化失败，回退到文件模式: %s", e)
 
+    # 启动连接健康检查器（后台主动探测 GBase 连接状态）
+    try:
+        from app.services.connection_health_checker import get_health_checker
+
+        await get_health_checker().start()
+        logger.info("ConnectionHealthChecker 已启动")
+    except Exception as e:
+        logger.warning("ConnectionHealthChecker 启动失败: %s", e)
+
     logger.info("应用启动完成，API 文档: http://localhost:8000/docs")
     yield
     logger.info("应用关闭")
+
+    # 停止连接健康检查器
+    try:
+        from app.services.connection_health_checker import get_health_checker
+
+        await get_health_checker().stop()
+    except Exception:
+        pass
+
     try:
         from app.vector.client import get_qdrant_manager
 
