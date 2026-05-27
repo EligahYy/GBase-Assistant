@@ -62,6 +62,42 @@ async def reindex(request: Request, body: ReindexRequest | None = None) -> Reind
         raise HTTPException(status_code=500, detail=f"重建索引失败: {e}") from e
 
 
+class ReindexPDFResponse(BaseModel):
+    status: str
+    chunks: int
+    message: str
+
+
+@router.post("/reindex-pdf", response_model=ReindexPDFResponse)
+async def reindex_pdf(request: Request) -> ReindexPDFResponse:
+    """从官方 PDF 产品手册（1795 页）重建知识库索引。
+    耗时 30-90 秒，需要 X-Admin-Token 或 debug 模式。
+    """
+    if not _verify_admin_token(request):
+        raise HTTPException(status_code=403, detail="需要管理权限")
+
+    from app.vector.client import is_qdrant_available
+    from app.vector.embedder import get_embedder
+    from app.vector.ingest import sync_pdf_to_qdrant
+
+    if not is_qdrant_available():
+        raise HTTPException(status_code=503, detail="Qdrant 不可用，无法重建索引")
+
+    try:
+        embedder = get_embedder()
+        count = await sync_pdf_to_qdrant(embedder)
+        return ReindexPDFResponse(
+            status="ok",
+            chunks=count,
+            message=f"已从官方 PDF 手册索引 {count} 个章节",
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error("PDF 索引失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"PDF 索引失败: {e}") from e
+
+
 @router.get("/feedback-stats")
 async def feedback_stats(
     request: Request,
