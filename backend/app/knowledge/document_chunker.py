@@ -95,16 +95,18 @@ class PDFChapterSlicer:
         self.toc = sorted(toc_entries, key=lambda e: e.page)
 
     def slice(self) -> list[DocumentChunk]:
-        """切分 PDF，返回文档块列表。"""
+        """切分 PDF（同步方法，在调用方放入线程池执行）。"""
         logger.info("Opening PDF: %s", self.pdf_path)
         pdf = pdfplumber.open(str(self.pdf_path))
         total_pages = len(pdf.pages)
 
         chunks = []
         for i, entry in enumerate(self.toc):
-            start_page = entry.page
+            if i % 20 == 0:
+                logger.info("Slicing chapter %d/%d: %s %s",
+                            i + 1, len(self.toc), entry.num, entry.title)
 
-            # 确定结束页：下一个章节的起始页 - 1，或 PDF 末尾
+            start_page = entry.page
             if i + 1 < len(self.toc):
                 end_page = self.toc[i + 1].page - 1
                 if end_page < start_page:
@@ -117,12 +119,9 @@ class PDFChapterSlicer:
             for p in range(start_page - 1, min(end_page, total_pages)):
                 page_text = pdf.pages[p].extract_text()
                 if page_text:
-                    # 去除页眉 "GBase 8a MPP Cluster产品手册..."
                     page_text = re.sub(
-                        r'^GBase 8a MPP Cluster.*?\n',
-                        '', page_text
+                        r'^GBase 8a MPP Cluster.*?\n', '', page_text
                     )
-                    # 去除页脚 "文档版本953..."
                     page_text = re.sub(
                         r'文档版本953.*?南大通用数据技术股份有限公司.*?\n?$',
                         '', page_text, flags=re.MULTILINE
@@ -133,10 +132,7 @@ class PDFChapterSlicer:
             if not content.strip():
                 continue
 
-            # 构建父级标题路径
             parent_path = self._build_parent_path(entry)
-
-            # 大章节子分片：超过阈值时按子标题或固定大小切分
             sub_chunks = self._split_large_chapter(
                 content, entry, parent_path, start_page, end_page
             )
@@ -335,24 +331,27 @@ async def build_knowledge_from_pdf(
     toc_path: str,
     clear_existing: bool = True,
 ) -> int:
-    """从 PDF 构建官方知识库。
+    """从 PDF 构建官方知识库（异步，PDF 解析在 thread pool 中执行）。
 
     Returns:
         索引的 chunk 数量
     """
+    import asyncio
+
     logger.info("Building knowledge base from PDF: %s", pdf_path)
 
     # 1. Parse TOC
     toc = parse_toc(toc_path)
     logger.info("Loaded %d TOC entries", len(toc))
 
-    # 2. Slice PDF
+    # 2. Slice PDF in thread pool (CPU-intensive, don't block event loop)
     slicer = PDFChapterSlicer(pdf_path, toc)
-    chunks = slicer.slice()
+    chunks = await asyncio.to_thread(slicer.slice)
 
     # 3. Filter empty/small chunks
     chunks = [c for c in chunks if len(c.content) > 50]
-    logger.info("After filtering: %d chunks", len(chunks))
+    logger.info("After filtering: %d chunks (embedding will take ~%d batches)",
+                 len(chunks), (len(chunks) + 9) // 10)
 
     # 4. Index to Qdrant
     indexer = QdrantKnowledgeIndexer()
