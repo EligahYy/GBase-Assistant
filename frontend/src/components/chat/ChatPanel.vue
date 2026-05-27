@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, inject, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, watch, inject, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import {
   SendOutline, ServerOutline, SunnyOutline, MoonOutline,
@@ -12,7 +12,6 @@ import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useSSE } from '@/composables/useSSE'
 import { createStreamUrl } from '@/api/chat'
-import { getConnectionsStatus } from '@/api/connections'
 import { useTheme } from '@/composables/useTheme'
 
 const chatStore = useChatStore()
@@ -35,65 +34,8 @@ const activeConn = computed(() =>
   connStore.connections.find(c => c.id === connStore.activeConnectionId)
 )
 
-// ── 连接状态实时检测 ──
-const connStatusMap = ref<Record<string, 'ok' | 'error' | 'testing'>>({})
-const connStatusLoading = ref(false)
-const POLL_INTERVAL = 5000
-
-async function checkConnectionStatus() {
-  connStatusLoading.value = true
-  try {
-    const resp = await getConnectionsStatus()
-    for (const item of resp.connections) {
-      if (item.status === 'ok') {
-        connStatusMap.value[item.id] = 'ok'
-      } else if (item.status === 'testing') {
-        connStatusMap.value[item.id] = 'testing'
-      } else {
-        connStatusMap.value[item.id] = 'error'
-      }
-    }
-  } catch {
-    // ignore
-  } finally {
-    connStatusLoading.value = false
-  }
-}
-
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-function startPolling() {
-  checkConnectionStatus()
-  if (pollTimer) clearInterval(pollTimer)
-  pollTimer = setInterval(checkConnectionStatus, POLL_INTERVAL)
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-function handleVisibilityChange() {
-  if (document.visibilityState === 'visible') {
-    checkConnectionStatus()
-  }
-}
-
 onMounted(() => {
   connStore.loadConnections().catch(() => {})
-  startPolling()
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-})
-
-onBeforeUnmount(() => {
-  stopPolling()
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-})
-
-watch(() => connStore.activeConnectionId, () => {
-  startPolling()
 })
 
 watch(() => chatStore.messages.length, async () => {
@@ -197,15 +139,15 @@ const hints = [
           v-if="activeConn"
           class="conn-badge"
           :class="{
-            'status-ok': connStatusMap[activeConn.id] === 'ok',
-            'status-error': connStatusMap[activeConn.id] === 'error',
-            'status-testing': connStatusMap[activeConn.id] === 'testing',
+            'status-ok': connStore.connStatusMap[activeConn.id] === 'ok',
+            'status-error': connStore.connStatusMap[activeConn.id] === 'error',
+            'status-testing': connStore.connStatusMap[activeConn.id] === 'testing',
           }"
         >
-          <div class="dot" :class="{ pulsing: connStatusMap[activeConn.id] !== 'error' }" />
+          <div class="dot" :class="{ pulsing: connStore.connStatusMap[activeConn.id] !== 'error' }" />
           <n-icon :component="ServerOutline" size="12" />
           <span>{{ activeConn.name }}</span>
-          <span v-if="connStatusMap[activeConn.id] === 'testing'" class="status-checking">检测中</span>
+          <span v-if="connStore.connStatusMap[activeConn.id] === 'testing'" class="status-checking">检测中</span>
         </div>
         <div v-else class="conn-badge muted">
           <div class="dot" />
