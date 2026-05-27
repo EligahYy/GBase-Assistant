@@ -93,34 +93,42 @@ gbase8a-assistant/
 
 ## 4. 系统架构
 
-当前真实架构：
+当前真实架构（v2 多智能体 + v1 兼容并存）：
 
 ```text
 Vue SPA
   ├─ Chat / Settings / ErrorCode / SqlEditor / DataBrowser / Insights
   │
-  └─ HTTP + SSE
+  └─ HTTP + AG-UI SSE (v2) / SSE (v1)
         │
-FastAPI
-  ├─ Chat orchestration
-  ├─ Text-to-SQL chain
-  ├─ QA / RAG chain
-  ├─ SQL validator + sandbox
-  ├─ Connection / Schema / Admin / Insights APIs
+FastAPI Gateway
+  ├─ /api/v2/chat/stream     → LangGraph Multi-Agent (AG-UI events)
+  ├─ /api/chat/stream         → v1 Chat Service (backward compat)
+  ├─ /api/connections/*       → REST + SSE status stream
+  │
+  ├─ LangGraph Agents
+  │   ├─ Orchestrator (ReAct: Think→Plan→Act→Observe→Decide)
+  │   ├─ Schema Grounding (DDL语义图谱 + 多策略检索)
+  │   ├─ SQL Specialist (LiteLLM + prompt builder + extract)
+  │   ├─ SQL Verifier (sqlglot 三层验证)
+  │   ├─ SQL Executor (sandbox: readonly + timeout + row limit)
+  │   ├─ Knowledge Specialist (Hybrid RAG: precise + semantic + RRF)
+  │   └─ General Specialist (direct chat)
   │
   ├─ SQLite       对话、消息、连接、反馈、摘要预埋
-  ├─ Qdrant       Schema / Example / Knowledge 向量检索
+  ├─ Qdrant       Schema / Example / Knowledge / Official Manual 向量检索
   ├─ LiteLLM      Intent / SQL generation / Knowledge QA
-  └─ GBase 8a     只读查询执行、Schema 同步、性能洞察
+  └─ GBase 8a     只读查询执行、Schema 同步、连接健康检查
 ```
 
 设计原则：
 
 - **MVP 优先**：每个阶段都要有可演示闭环。
 - **Protocol 驱动**：核心能力依赖 `backend/app/protocols.py`，实现通过依赖注入替换。
-- **渐进复杂度**：先函数链，只有出现复杂状态、checkpoint、人工审批时才评估 LangGraph。
-- **知识库文件为源**：Qdrant 是索引与检索层，`knowledge/` 文件仍是可审计源。
+- **多智能体编排**：LangGraph StateGraph + AgentState 共享状态，Orchestrator-Subagent 模式。
+- **知识库文件为源**：Qdrant 是索引与检索层，`knowledge/` 官方 PDF 手册为权威知识源。
 - **安全优先**：SQL 执行只能作为只读能力；生产必须配套数据库账号层只读权限。
+- **v1/v2 并存**：v1 `/api/chat/stream` 不受影响，v2 `/api/v2/chat/stream` 独立演进。
 
 ---
 
@@ -128,14 +136,22 @@ FastAPI
 
 ```text
 backend/app/
-├── main.py              # FastAPI app factory + lifespan，初始化 DB / Qdrant / embedding
+├── main.py              # FastAPI app factory + lifespan，初始化 DB / Qdrant / embedding / HealthChecker
 ├── config.py            # Settings，读取 .env 与 models.yaml
 ├── database.py          # async SQLAlchemy engine/session
 ├── protocols.py         # 核心接口与数据结构
 ├── dependencies.py      # Protocol 绑定与 Qdrant 自动降级
+├── agents/              # LangGraph 多智能体（v2）
+│   ├── state.py         # AgentState TypedDict（23 字段，字段所有权隔离）
+│   ├── orchestrator.py  # 意图分类 + 路由决策
+│   ├── schema_graph.py  # Schema Knowledge Graph（DDL解析+角色推断+关系图+检索）
+│   └── graph.py         # LangGraph 图构建 + 8 节点 + AG-UI Runner
+├── gateway/             # AG-UI 事件协议（v2）
+│   └── ag_ui_encoder.py # 8 种标准 SSE 事件编码器
 ├── api/
-│   ├── chat.py          # 聊天 HTTP 入参/出参与服务层绑定
-│   ├── connections.py   # 连接 CRUD、状态、Schema 浏览、SQL 查询
+│   ├── chat.py          # v1 聊天 API
+│   ├── chat_v2.py       # v2 LangGraph + AG-UI 聊天 API
+│   ├── connections.py   # 连接 CRUD、状态 SSE stream、Schema 浏览、SQL 查询
 │   ├── tools.py         # 错误码查询
 │   ├── admin.py         # reindex、feedback enrich 等管理接口
 │   ├── insights.py      # 性能洞察 API
