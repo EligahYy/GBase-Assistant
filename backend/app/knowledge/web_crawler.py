@@ -37,67 +37,52 @@ async def fetch_sitemap_urls() -> list[str]:
 
 
 async def render_page(browser, url: str) -> str | None:
-    """Playwright 渲染页面，提取正文（复用 browser 实例）。"""
+    """Playwright 渲染页面，提取正文为 Markdown（复用 browser 实例）。"""
     page = await browser.new_page()
     try:
         await page.goto(url, wait_until="networkidle", timeout=30000)
-        # Wait for Docusaurus content to render
         await page.wait_for_selector("article", timeout=15000)
 
-        # Extract article content as Markdown
         content = await page.evaluate("""() => {
-                const article = document.querySelector('article');
-                if (!article) return '';
-                const clone = article.cloneNode(true);
-                clone.querySelectorAll('nav, .theme-doc-toc-desktop, .theme-doc-breadcrumbs, .pagination-nav, script, style').forEach(el => el.remove());
+            const article = document.querySelector('article');
+            if (!article) return '';
+            const clone = article.cloneNode(true);
+            clone.querySelectorAll('nav, .theme-doc-toc-desktop, .theme-doc-breadcrumbs, .pagination-nav, script, style').forEach(el => el.remove());
+            let html = clone.innerHTML;
+            html = html.replace(/<h1[^>]*>(.*?)<\\/h1>/gi, '\\n# $1\\n');
+            html = html.replace(/<h2[^>]*>(.*?)<\\/h2>/gi, '\\n## $1\\n');
+            html = html.replace(/<h3[^>]*>(.*?)<\\/h3>/gi, '\\n### $1\\n');
+            html = html.replace(/<h4[^>]*>(.*?)<\\/h4>/gi, '\\n#### $1\\n');
+            html = html.replace(/<pre[^>]*><code[^>]*>(.*?)<\\/code><\\/pre>/gi, '\\n```\\n$1\\n```\\n');
+            html = html.replace(/<code[^>]*>(.*?)<\\/code>/gi, '`$1`');
+            html = html.replace(/<li[^>]*>(.*?)<\\/li>/gi, '- $1\\n');
+            html = html.replace(/<br\\s*\\/?>/gi, '\\n');
+            html = html.replace(/<\\/p>/gi, '\\n\\n');
+            html = html.replace(/<table[^>]*>/gi, '\\n');
+            html = html.replace(/<\\/table>/gi, '\\n');
+            html = html.replace(/<tr[^>]*>/gi, '| ');
+            html = html.replace(/<\\/tr>/gi, ' |\\n');
+            html = html.replace(/<t[dh][^>]*>/gi, '| ');
+            html = html.replace(/<\\/t[dh]>/gi, ' ');
+            html = html.replace(/<[^>]*>/g, '');
+            const txt = document.createElement('textarea');
+            txt.innerHTML = html;
+            return txt.value.replace(/\\n{3,}/g, '\\n\\n').trim();
+        }""")
 
-                // Convert HTML headings to Markdown
-                let html = clone.innerHTML;
-                // h1 → # , h2 → ## , h3 → ###
-                html = html.replace(/<h1[^>]*>(.*?)<\\/h1>/gi, '\\n# $1\\n');
-                html = html.replace(/<h2[^>]*>(.*?)<\\/h2>/gi, '\\n## $1\\n');
-                html = html.replace(/<h3[^>]*>(.*?)<\\/h3>/gi, '\\n### $1\\n');
-                html = html.replace(/<h4[^>]*>(.*?)<\\/h4>/gi, '\\n#### $1\\n');
-                // code blocks
-                html = html.replace(/<pre[^>]*><code[^>]*>(.*?)<\\/code><\\/pre>/gi, '\\n```\\n$1\\n```\\n');
-                html = html.replace(/<code[^>]*>(.*?)<\\/code>/gi, '`$1`');
-                // lists
-                html = html.replace(/<li[^>]*>(.*?)<\\/li>/gi, '- $1\\n');
-                // paragraphs and line breaks
-                html = html.replace(/<br\\s*\\/?>/gi, '\\n');
-                html = html.replace(/<\\/p>/gi, '\\n\\n');
-                // tables → keep as text
-                html = html.replace(/<table[^>]*>/gi, '\\n');
-                html = html.replace(/<\\/table>/gi, '\\n');
-                html = html.replace(/<tr[^>]*>/gi, '| ');
-                html = html.replace(/<\\/tr>/gi, ' |\\n');
-                html = html.replace(/<t[dh][^>]*>/gi, '| ');
-                html = html.replace(/<\\/t[dh]>/gi, ' ');
-                // strip remaining tags
-                html = html.replace(/<[^>]*>/g, '');
-                // decode entities
-                const txt = document.createElement('textarea');
-                txt.innerHTML = html;
-                return txt.value.replace(/\\n{3,}/g, '\\n\\n').trim();
-            }""")
+        title = await page.title()
+        title = re.sub(r'\s*[|–-]\s*GBASE.*$', '', title).strip()
 
-            # Get page title
-            title = await page.title()
-            # Clean up title (remove site suffix)
-            title = re.sub(r'\s*[|–-]\s*GBASE.*$', '', title).strip()
+        if content and len(content) > 100:
+            md = f"# {title}\n\n"
+            path = url.replace(BASE_URL, "")
+            md += f"> 来源: {url}\n\n"
+            md += content
+            return md
 
-            if content and len(content) > 100:
-                # Build markdown with title
-                md = f"# {title}\n\n"
-                # Get relative URL path for reference
-                path = url.replace(BASE_URL, "")
-                md += f"> 来源: {url}\n\n"
-                md += content
-                return md
-
-            return None
-        finally:
-            await page.close()
+        return None
+    finally:
+        await page.close()
 
 
 def url_to_filename(url: str) -> str:
