@@ -97,6 +97,40 @@ async def reindex_web(request: Request) -> ReindexWebResponse:
         raise HTTPException(status_code=500, detail=f"索引失败: {e}") from e
 
 
+class ReindexPDFResponse(BaseModel):
+    status: str
+    chunks: int
+    message: str
+
+
+@router.post("/reindex-pdf", response_model=ReindexPDFResponse)
+async def reindex_pdf(request: Request) -> ReindexPDFResponse:
+    """从 PDF 产品手册重建知识库索引。
+    首次运行提取文本并缓存（~5 分钟），后续从缓存秒级加载。
+    """
+    if not _verify_admin_token(request):
+        raise HTTPException(status_code=403, detail="需要管理权限")
+
+    from app.vector.client import is_qdrant_available
+    from app.knowledge.document_chunker import build_knowledge_from_pdf
+
+    if not is_qdrant_available():
+        raise HTTPException(status_code=503, detail="Qdrant 不可用")
+
+    try:
+        count = await build_knowledge_from_pdf()
+        return ReindexPDFResponse(
+            status="ok",
+            chunks=count,
+            message=f"已从 PDF 手册索引 {count} 个章节",
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error("PDF 索引失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"PDF 索引失败: {e}") from e
+
+
 @router.get("/feedback-stats")
 async def feedback_stats(
     request: Request,

@@ -230,3 +230,136 @@ async def build_knowledge_from_md_dir(
 
     logger.info("Knowledge base built: %d chunks", count)
     return count
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PDF 页面缓存（一次性提取，后续秒级加载）
+# ═══════════════════════════════════════════════════════════════════
+
+def _knowledge_dir() -> Path:
+    return Path(__file__).parent.parent.parent.parent / "knowledge"
+
+
+class PDFPageCache:
+    """PDF 页面文本缓存：首次从 PDF 逐页提取（慢），后续从 JSON 秒级加载。"""
+
+    def __init__(self, pdf_path: str | Path):
+        self.pdf_path = Path(pdf_path)
+        self.cache_path = self.pdf_path.with_suffix(".pages.json")
+
+    def is_cached(self) -> bool:
+        return self.cache_path.exists() and self.cache_path.stat().st_size > 1000
+
+    def extract_and_save(self) -> int:
+        """从 PDF 提取所有页面文本并缓存（CPU 密集，~5 分钟）。"""
+        import pdfplumber
+
+        logger.info("Extracting text from PDF: %s", self.pdf_path)
+        pdf = pdfplumber.open(str(self.pdf_path))
+        pages = {}
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text()
+            if text:
+                text = re.sub(r'^GBase 8a MPP Cluster.*?\n', '', text)
+                text = re.sub(
+                    r'文档版本953.*?南大通用数据技术股份有限公司.*?\n?$',
+                    '', text, flags=re.MULTILINE
+                )
+                pages[i + 1] = text.strip()
+        pdf.close()
+
+        with open(self.cache_path, "w", encoding="utf-8") as f:
+            json.dump(pages, f, ensure_ascii=False)
+        logger.info("PDF cache saved: %d pages -> %s (%.1f MB)",
+                     len(pages), self.cache_path,
+                     self.cache_path.stat().st_size / 1024 / 1024)
+        return len(pages)
+
+    def load(self) -> dict[int, str]:
+        """从缓存加载页面文本（秒级）。"""
+        with open(self.cache_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {int(k): v for k, v in data.items()}
+
+
+def slice_from_pdf_cache(pdf_path: str | Path, toc_json_path: str | Path) -> list[DocumentChunk]:
+    """从 PDF 缓存 + TOC 章节目录切片为文档块。
+
+    需要先运行 extract_and_save() 生成缓存，或自动触发。
+    """
+    cache = PDFPageCache(pdf_path)
+    if not cache.is_cached():
+        logger.info("PDF cache not found, extracting...")
+        cache.extract_and_save()
+
+    pages = cache.load()
+    total_pages = max(pages.keys()) if pages else 0
+
+    with open(toc_json_path, encoding="utf-8") as f:
+        toc_data = json.load(f)
+
+    logger.info("Slicing from %d cached pages (%d TOC entries)", total_pages, len(toc_data))
+
+    # Sort TOC by page number
+    toc_data.sort(key=lambda e: e.get("page", 1))
+
+    slicer = MDChapterSlicer()
+    all_chunks = []
+
+    for i, entry in enumerate(toc_data):
+        if i % 50 == 0:
+            logger.info("Slicing chapter %d/%d", i + 1, len(toc_data))
+
+        start_page = entry["page"]
+        if i + 1 < len(toc_data):
+            end_page = toc_data[i + 1]["page"] - 1
+            if end_page < start_page:
+                end_page = start_page
+        else:
+            end_page = total_pages
+
+        text_parts = []
+        for p in range(start_page, end_page + 1):
+            pt = pages.get(p, "")
+            if pt:
+                text_parts.append(pt)
+
+        content = "\n\n".join(text_parts)
+        if len(content.strip()) < 50:
+            continue
+
+        title = f"{entry['num']} {entry['title']}"
+        chunks = slicer._split_if_large(content, title, f"pdf:{entry['num']}", "")
+        all_chunks.extend(chunks)
+
+    logger.info("Sliced %d chunks from PDF cache", len(all_chunks))
+    return all_chunks
+
+
+async def build_knowledge_from_pdf(
+    pdf_path: str | None = None,
+    toc_path: str | None = None,
+    clear_existing: bool = True,
+) -> int:
+    """从 PDF 产品手册构建知识库。
+
+    首次运行提取所有页面文本并缓存（~5 分钟），后续从缓存秒级切片。
+    """
+    if pdf_path is None:
+        pdf_path = str(_knowledge_dir() / "GBase 8a MPP Cluster产品手册_V953.pdf")
+    if toc_path is None:
+        toc_path = str(_knowledge_dir() / "official_toc.json")
+
+    if not Path(pdf_path).exists():
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+    if not Path(toc_path).exists():
+        raise FileNotFoundError(f"TOC not found: {toc_path}")
+
+    # Slice from cache (auto-extracts on first run)
+    chunks = await asyncio.to_thread(slice_from_pdf_cache, pdf_path, toc_path)
+
+    # Index
+    indexer = QdrantKnowledgeIndexer()
+    count = await indexer.index_chunks(chunks, clear_existing=clear_existing)
+    logger.info("PDF knowledge base built: %d chunks", count)
+    return count
