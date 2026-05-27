@@ -159,6 +159,8 @@ export function connectStatusStream(
           // ": keepalive" lines are ignored
         }
       }
+      // Stream ended normally (server closed connection)
+      onError?.(new Error('SSE stream ended'))
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         onError?.(e instanceof Error ? e : new Error(String(e)))

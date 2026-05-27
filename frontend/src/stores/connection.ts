@@ -32,6 +32,18 @@ export const useConnectionStore = defineStore('connection', () => {
 
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
+    // 先获取全量快照作为基线，再启动 SSE（避免 SSE 事件被快照覆盖）
+    getConnectionsStatus().then(resp => {
+      const newMap: Record<string, ConnStatus> = {}
+      for (const item of resp.connections) {
+        if (item.status === 'ok') newMap[item.id] = 'ok'
+        else if (item.status === 'testing') newMap[item.id] = 'testing'
+        else newMap[item.id] = 'error'
+      }
+      connStatusMap.value = newMap
+    }).catch(() => {})
+
+    // 快照请求发出后再启动 SSE
     sseController = connectStatusStream(
       baseUrl,
       (event: StatusStreamEvent) => {
@@ -52,17 +64,6 @@ export const useConnectionStore = defineStore('connection', () => {
         }, SSE_RECONNECT_DELAY)
       },
     )
-
-    // 连接后立即获取一次全量状态快照（弥合 SSE 连接建立前可能错过的更新）
-    getConnectionsStatus().then(resp => {
-      const newMap: Record<string, ConnStatus> = {}
-      for (const item of resp.connections) {
-        if (item.status === 'ok') newMap[item.id] = 'ok'
-        else if (item.status === 'testing') newMap[item.id] = 'testing'
-        else newMap[item.id] = 'error'
-      }
-      connStatusMap.value = newMap
-    }).catch(() => {})
   }
 
   function stopStatusStream() {
