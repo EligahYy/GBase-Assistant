@@ -1,51 +1,31 @@
-"""官方 PDF 产品手册章节切片器 + Qdrant 索引。
+"""官方知识库：Markdown 文档切片器 + Qdrant 索引。
 
-将 GBase 8a 官方 PDF 手册按章节目录切分为独立文档块，
-嵌入 Qdrant knowledge 集合，替换旧的模型生成内容。
-
-用法:
-  .venv/bin/python -m app.knowledge.document_chunker --pdf path/to/manual.pdf --toc path/to/toc.json
+从 knowledge/official/ 目录下的 .md 文件（由 web_crawler.py 从 gbase.cn 爬取）
+切片并索引到 Qdrant knowledge 集合。
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pdfplumber
-
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Data Classes
-# ═══════════════════════════════════════════════════════════════════
-
-@dataclass
-class TOCEntry:
-    num: str          # "4.8.2"
-    title: str        # "语法格式"
-    page: int         # PDF 页码 (1-based)
-    depth: int        # 层级深度
-
 @dataclass
 class DocumentChunk:
-    chapter_num: str
     chapter_title: str
-    page_start: int
-    page_end: int
     content: str
+    source_file: str = ""
     metadata: dict = field(default_factory=dict)
 
     def to_embedding_text(self) -> str:
-        """生成用于向量嵌入的文本。"""
         parts = [
-            f"章节: {self.chapter_num} {self.chapter_title}",
+            f"标题: {self.chapter_title}",
             f"来源: {self.metadata.get('source', 'GBase 8a 产品手册')}",
-            f"页码范围: {self.page_start}-{self.page_end}",
             "",
             self.content,
         ]
@@ -53,201 +33,102 @@ class DocumentChunk:
 
     def to_qdrant_payload(self) -> dict:
         return {
-            "chapter_num": self.chapter_num,
-            "chapter_title": self.chapter_title,
-            "page_start": self.page_start,
-            "page_end": self.page_end,
+            "title": self.chapter_title,
+            "source_file": self.source_file,
             "source": self.metadata.get("source", "GBase 8a 产品手册"),
             "version": self.metadata.get("version", "V9.5.3"),
-            "content": self.content[:2000],  # 截断存储，完整内容在嵌入文本中
+            "url": self.metadata.get("url", ""),
+            "content": self.content[:2000],
         }
 
 
-# ═══════════════════════════════════════════════════════════════════
-# TOC Parser
-# ═══════════════════════════════════════════════════════════════════
+class MDChapterSlicer:
+    """按 Markdown 标题切分文档。"""
 
-def parse_toc(toc_json_path: str | Path) -> list[TOCEntry]:
-    """从 JSON 文件加载章节目录。"""
-    with open(toc_json_path, encoding="utf-8") as f:
-        data = json.load(f)
+    MAX_CHUNK_SIZE = 5000
+    CHUNK_OVERLAP = 500
 
-    entries = []
-    for item in data:
-        entries.append(TOCEntry(
-            num=item["num"],
-            title=item["title"],
-            page=item["page"],
-            depth=item["depth"],
-        ))
-    return entries
+    def slice_file(self, md_path: Path, base_url: str = "") -> list[DocumentChunk]:
+        """切分单个 .md 文件。按 ## 标题分块。"""
+        content = md_path.read_text(encoding="utf-8")
+        source = md_path.name
 
+        # Extract page title from first # heading
+        page_title = source
+        title_match = re.match(r'^#\s+(.+)', content)
+        if title_match:
+            page_title = title_match.group(1).strip()
 
-# ═══════════════════════════════════════════════════════════════════
-# PDF Chapter Slicer
-# ═══════════════════════════════════════════════════════════════════
-
-class PDFChapterSlicer:
-    """按章节目录将 PDF 切分为文档块。"""
-
-    def __init__(self, pdf_path: str | Path, toc_entries: list[TOCEntry]):
-        self.pdf_path = Path(pdf_path)
-        self.toc = sorted(toc_entries, key=lambda e: e.page)
-
-    def slice(self) -> list[DocumentChunk]:
-        """切分 PDF（同步方法，在调用方放入线程池执行）。"""
-        logger.info("Opening PDF: %s", self.pdf_path)
-        pdf = pdfplumber.open(str(self.pdf_path))
-        total_pages = len(pdf.pages)
-
+        # Split by ## headings
+        sections = re.split(r'\n(?=##\s)', content)
         chunks = []
-        for i, entry in enumerate(self.toc):
-            if i % 20 == 0:
-                logger.info("Slicing chapter %d/%d: %s %s",
-                            i + 1, len(self.toc), entry.num, entry.title)
 
-            start_page = entry.page
-            if i + 1 < len(self.toc):
-                end_page = self.toc[i + 1].page - 1
-                if end_page < start_page:
-                    end_page = start_page
-            else:
-                end_page = total_pages
-
-            # 提取页面文本
-            text_parts = []
-            for p in range(start_page - 1, min(end_page, total_pages)):
-                page_text = pdf.pages[p].extract_text()
-                if page_text:
-                    page_text = re.sub(
-                        r'^GBase 8a MPP Cluster.*?\n', '', page_text
-                    )
-                    page_text = re.sub(
-                        r'文档版本953.*?南大通用数据技术股份有限公司.*?\n?$',
-                        '', page_text, flags=re.MULTILINE
-                    )
-                    text_parts.append(page_text.strip())
-
-            content = "\n\n".join(text_parts)
-            if not content.strip():
+        for section in sections:
+            section = section.strip()
+            if not section:
                 continue
 
-            parent_path = self._build_parent_path(entry)
-            sub_chunks = self._split_large_chapter(
-                content, entry, parent_path, start_page, end_page
-            )
+            # Extract section heading
+            heading_match = re.match(r'^#{1,3}\s+(.+)', section)
+            section_title = heading_match.group(1).strip() if heading_match else page_title
+
+            # Build full title path
+            full_title = f"{page_title} > {section_title}" if section_title != page_title else page_title
+
+            # Sub-split if too large
+            sub_chunks = self._split_if_large(section, full_title, source, base_url)
             chunks.extend(sub_chunks)
 
-        pdf.close()
-        logger.info("Sliced %d chapters from %d pages (%d chunks)",
-                     len(self.toc), total_pages, len(chunks))
         return chunks
 
-    def _split_large_chapter(
-        self, content: str, entry: TOCEntry, parent_path: str,
-        start_page: int, end_page: int,
-    ) -> list[DocumentChunk]:
-        """大章节子分片：按子标题切分，或固定大小切分。"""
-        MAX_CHUNK_SIZE = 5000   # 超过此字符数则子分片
-        CHUNK_OVERLAP = 500     # 相邻 chunk 重叠字符数
-
-        if len(content) <= MAX_CHUNK_SIZE:
+    def _split_if_large(self, content: str, title: str, source: str, url: str) -> list[DocumentChunk]:
+        if len(content) <= self.MAX_CHUNK_SIZE:
             return [DocumentChunk(
-                chapter_num=entry.num,
-                chapter_title=f"{parent_path}{entry.title}" if parent_path else entry.title,
-                page_start=start_page,
-                page_end=end_page,
+                chapter_title=title,
                 content=content,
-                metadata={
-                    "source": "GBase 8a MPP Cluster产品手册",
-                    "version": "V9.5.3",
-                    "depth": entry.depth,
-                    "parent_path": parent_path,
-                },
+                source_file=source,
+                metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
             )]
 
-        # 尝试按子标题切分（匹配 "5.1.5.1 函数名" 或 "函数名()" 等模式）
+        # Split by sub-headings or fixed size
         sub_headings = list(re.finditer(
-            r'(?:^|\n)\s*((?:\d+\.?){1,4}\s+[^\n]{2,80}|[A-Z_]+\s*\([^)]*\)[^\n]{0,60}|[#＃]\s+[^\n]{2,80})\n',
+            r'(?:^|\n)(?:#{1,4}\s+[^\n]{2,80}|[A-Z_]+\s*\([^)]*\)[^\n]{0,60})\n',
             content, re.MULTILINE
         ))
 
+        chunks = []
         if len(sub_headings) >= 2:
-            # 按子标题边界切分
-            chunks = []
             for i, m in enumerate(sub_headings):
-                chunk_start = m.start()
-                chunk_end = sub_headings[i + 1].start() if i + 1 < len(sub_headings) else len(content)
-                chunk_content = content[chunk_start:chunk_end].strip()
+                start = m.start()
+                end = sub_headings[i + 1].start() if i + 1 < len(sub_headings) else len(content)
+                chunk_content = content[start:end].strip()
                 if len(chunk_content) < 50:
                     continue
-
-                sub_title = m.group(1).strip()
+                sub_title = m.group(0).strip().lstrip('#').strip()
                 chunks.append(DocumentChunk(
-                    chapter_num=entry.num,
-                    chapter_title=f"{parent_path}{entry.title} > {sub_title}",
-                    page_start=start_page,
-                    page_end=end_page,
+                    chapter_title=f"{title} > {sub_title}",
                     content=chunk_content,
-                    metadata={
-                        "source": "GBase 8a MPP Cluster产品手册",
-                        "version": "V9.5.3",
-                        "depth": entry.depth + 1,
-                        "parent_path": f"{parent_path}{entry.title}",
-                    },
+                    source_file=source,
+                    metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
                 ))
             if chunks:
-                logger.debug("Split %s into %d sub-chunks by headings", entry.num, len(chunks))
                 return chunks
 
-        # 回退：固定大小切分
-        chunks = []
+        # Fixed-size fallback
         pos = 0
         part = 0
         while pos < len(content):
-            chunk_end = min(pos + MAX_CHUNK_SIZE, len(content))
-            chunk_content = content[pos:chunk_end]
+            end = min(pos + self.MAX_CHUNK_SIZE, len(content))
             chunks.append(DocumentChunk(
-                chapter_num=entry.num,
-                chapter_title=f"{parent_path}{entry.title} (第{part + 1}部分)",
-                page_start=start_page,
-                page_end=end_page,
-                content=chunk_content,
-                metadata={
-                    "source": "GBase 8a MPP Cluster产品手册",
-                    "version": "V9.5.3",
-                    "depth": entry.depth + 1,
-                    "parent_path": f"{parent_path}{entry.title}",
-                    "sub_part": part + 1,
-                },
+                chapter_title=f"{title} (第{part + 1}部分)",
+                content=content[pos:end],
+                source_file=source,
+                metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
             ))
-            pos = chunk_end - CHUNK_OVERLAP
+            pos = end - self.CHUNK_OVERLAP
             part += 1
-
-        logger.debug("Split %s into %d fixed-size sub-chunks", entry.num, len(chunks))
         return chunks
 
-    def _build_parent_path(self, entry: TOCEntry) -> str:
-        """构建父级标题路径，如 '4 管理员指南 > 4.8 备份恢复管理 > '"""
-        if entry.depth == 0:
-            return ""
-
-        parts = entry.num.split('.')
-        parents = []
-        for i in range(1, len(parts)):
-            parent_num = '.'.join(parts[:i])
-            # 查找父章节
-            for e in self.toc:
-                if e.num == parent_num:
-                    parents.append(e.title)
-                    break
-
-        return ' > '.join(parents) + ' > ' if parents else ''
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Qdrant Indexer
-# ═══════════════════════════════════════════════════════════════════
 
 class QdrantKnowledgeIndexer:
     """将文档块索引到 Qdrant knowledge 集合。"""
@@ -257,30 +138,15 @@ class QdrantKnowledgeIndexer:
     def __init__(self, embedder=None):
         self._embedder = embedder
 
-    async def index_chunks(
-        self,
-        chunks: list[DocumentChunk],
-        clear_existing: bool = True,
-    ) -> int:
-        """将文档块嵌入并索引到 Qdrant。
-
-        Args:
-            chunks: 文档块列表
-            clear_existing: 是否先清空旧数据
-
-        Returns:
-            索引的文档块数量
-        """
+    async def index_chunks(self, chunks: list[DocumentChunk], clear_existing: bool = True) -> int:
         from app.vector.client import get_qdrant_manager
         from app.vector.embedder import get_embedder
+        from qdrant_client.models import PointStruct
 
         embedder = self._embedder or get_embedder()
         qdrant = get_qdrant_manager()
-
-        # 确保集合存在
         await qdrant.ensure_collections(dimension=embedder.dimension)
 
-        # 清空旧数据（模型生成的内容）
         if clear_existing:
             logger.info("Clearing existing knowledge collection...")
             try:
@@ -289,85 +155,52 @@ class QdrantKnowledgeIndexer:
             except Exception as e:
                 logger.warning("Failed to clear collection: %s", e)
 
-        # 分批嵌入和索引
-        batch_size = 10  # 阿里云 embedding 限制
-        total_indexed = 0
-
+        batch_size = 10
+        total = 0
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
-            texts = [c.to_embedding_text() for c in batch]
-            payloads = [c.to_qdrant_payload() for c in batch]
-
-            # 嵌入
-            embeddings = await embedder.embed(texts)
-
-            # 索引到 Qdrant
-            from qdrant_client.models import PointStruct
+            embeddings = await embedder.embed([c.to_embedding_text() for c in batch])
             points = [
-                PointStruct(
-                    id=i + j,
-                    vector=embeddings[j],
-                    payload=payloads[j],
-                )
+                PointStruct(id=i + j, vector=embeddings[j], payload=batch[j].to_qdrant_payload())
                 for j in range(len(batch))
             ]
-
-            await qdrant.client.upsert(
-                collection_name=self.COLLECTION_NAME,
-                points=points,
-            )
-            total_indexed += len(batch)
-            logger.info("Indexed %d/%d chunks", total_indexed, len(chunks))
-
-        return total_indexed
+            await qdrant.client.upsert(collection_name=self.COLLECTION_NAME, points=points)
+            total += len(batch)
+            logger.info("Indexed %d/%d chunks", total, len(chunks))
+        return total
 
 
-# ═══════════════════════════════════════════════════════════════════
-# CLI Entry Point
-# ═══════════════════════════════════════════════════════════════════
-
-async def build_knowledge_from_pdf(
-    pdf_path: str,
-    toc_path: str,
+async def build_knowledge_from_md_dir(
+    md_dir: str | None = None,
     clear_existing: bool = True,
 ) -> int:
-    """从 PDF 构建官方知识库（异步，PDF 解析在 thread pool 中执行）。
+    """从 Markdown 目录构建知识库（秒级）。
 
-    Returns:
-        索引的 chunk 数量
+    从 knowledge/official/ 下所有 .md 文件切片并索引到 Qdrant。
     """
-    import asyncio
+    if md_dir is None:
+        md_dir = str(Path(__file__).parent.parent.parent.parent / "knowledge" / "official")
 
-    logger.info("Building knowledge base from PDF: %s", pdf_path)
+    md_path = Path(md_dir)
+    if not md_path.exists():
+        raise FileNotFoundError(f"Markdown directory not found: {md_dir}. Run web_crawler first.")
 
-    # 1. Parse TOC
-    toc = parse_toc(toc_path)
-    logger.info("Loaded %d TOC entries", len(toc))
+    md_files = sorted(md_path.glob("*.md"))
+    if not md_files:
+        raise FileNotFoundError(f"No .md files in {md_dir}. Run web_crawler first.")
 
-    # 2. Slice PDF in thread pool (CPU-intensive, don't block event loop)
-    slicer = PDFChapterSlicer(pdf_path, toc)
-    chunks = await asyncio.to_thread(slicer.slice)
+    logger.info("Building knowledge from %d Markdown files in %s", len(md_files), md_dir)
 
-    # 3. Filter empty/small chunks
-    chunks = [c for c in chunks if len(c.content) > 50]
-    logger.info("After filtering: %d chunks (embedding will take ~%d batches)",
-                 len(chunks), (len(chunks) + 9) // 10)
+    slicer = MDChapterSlicer()
+    all_chunks = []
+    for f in md_files:
+        chunks = slicer.slice_file(f)
+        all_chunks.extend(chunks)
 
-    # 4. Index to Qdrant
+    all_chunks = [c for c in all_chunks if len(c.content) > 50]
+    logger.info("Sliced %d chunks from %d files", len(all_chunks), len(md_files))
+
     indexer = QdrantKnowledgeIndexer()
-    count = await indexer.index_chunks(chunks, clear_existing=clear_existing)
-
-    logger.info("Knowledge base built: %d chunks indexed", count)
+    count = await indexer.index_chunks(all_chunks, clear_existing=clear_existing)
+    logger.info("Knowledge base built: %d chunks", count)
     return count
-
-
-if __name__ == "__main__":
-    import asyncio
-    import sys
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-
-    pdf = sys.argv[1] if len(sys.argv) > 1 else "../knowledge/GBase 8a MPP Cluster产品手册_V953.pdf"
-    toc = sys.argv[2] if len(sys.argv) > 2 else "../knowledge/official_toc.json"
-
-    asyncio.run(build_knowledge_from_pdf(pdf, toc))

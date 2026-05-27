@@ -21,7 +21,7 @@ dependencies = [
     "uvicorn[standard]>=0.44.0",
     "cryptography>=44.0",
     "langgraph>=0.2.0",
-    "pdfplumber>=0.11.9",
+    "playwright>=1.60.0",
 ]
 
 # NOTE: gbase-connector-python 不在 PyPI，需从官网下载源码安装

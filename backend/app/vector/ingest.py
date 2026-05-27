@@ -313,7 +313,7 @@ async def ingest_ops_docs(embedder: Embedder, force: bool = False) -> int:
 async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
     """一键同步所有知识库到 Qdrant（使用旧 JSON 文件，不含 PDF）。
 
-    PDF 手册体积大（1795 页），通过 Admin API /api/admin/reindex-pdf 手动触发。
+    PDF 手册体积大（1795 页），通过 Admin API /api/admin/reindex-web 手动触发。
     """
     await get_qdrant_manager().ensure_collections(dimension=embedder.dimension)
     results = {}
@@ -325,27 +325,3 @@ async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
 
     logger.info("全量索引完成: %s", results)
     return results
-
-
-async def sync_pdf_to_qdrant(embedder: Embedder) -> int:
-    """从官方 PDF 手册构建知识库（耗时 30-90 秒，通过 Admin API 触发）。
-
-    Returns:
-        索引的 chunk 数量
-    """
-    from app.knowledge.document_chunker import build_knowledge_from_pdf
-
-    pdf_path = _knowledge_dir() / "GBase 8a MPP Cluster产品手册_V953.pdf"
-    toc_path = _knowledge_dir() / "official_toc.json"
-
-    if not pdf_path.exists() or not toc_path.exists():
-        raise FileNotFoundError(
-            f"PDF 手册或目录文件不存在。请将 PDF 放入 knowledge/ 目录。\n"
-            f"  PDF:  {pdf_path} (exists={pdf_path.exists()})\n"
-            f"  TOC: {toc_path} (exists={toc_path.exists()})"
-        )
-
-    logger.info("开始索引官方 PDF 手册（预计 30-90 秒）...")
-    count = await build_knowledge_from_pdf(str(pdf_path), str(toc_path), clear_existing=True)
-    logger.info("官方 PDF 索引完成: %d chunks", count)
-    return count
