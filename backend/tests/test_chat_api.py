@@ -19,7 +19,7 @@ async def test_v2_chat_stream_responds_ag_ui_events():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(
-            "/api/v2/chat/stream",
+            "/api/chat/stream",
             json={"message": "你好", "model": "deepseek/deepseek-chat"},
             headers={"Accept": "text/event-stream"},
             timeout=10,
@@ -39,7 +39,7 @@ async def test_v2_chat_sql_intent():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(
-            "/api/v2/chat/stream",
+            "/api/chat/stream",
             json={"message": "查询所有订单", "model": "deepseek/deepseek-chat"},
             headers={"Accept": "text/event-stream"},
             timeout=10,
@@ -55,7 +55,7 @@ async def test_v2_chat_general_intent():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(
-            "/api/v2/chat/stream",
+            "/api/chat/stream",
             json={"message": "你好", "model": "deepseek/deepseek-chat"},
             headers={"Accept": "text/event-stream"},
             timeout=10,

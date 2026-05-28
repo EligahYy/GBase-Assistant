@@ -1,8 +1,10 @@
-"""聊天 API：HTTP 入参/出参与服务层绑定。"""
+"""聊天 API — v2 多智能体 AG-UI 流式聊天 + 对话管理。"""
 
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,62 +12,76 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agents.graph import run_agent_with_ag_ui
 from app.database import get_db
-from app.dependencies import get_example_retriever, get_knowledge_retriever, get_schema_retriever
 from app.models.conversation import Conversation
-from app.protocols import ExampleRetriever, KnowledgeRetriever
-from app.schemas.chat import ChatRequest, ChatResponse, ConversationResponse
-from app.services.chat_service import ChatService
+from app.schemas.chat import ChatRequest, ConversationResponse
 from app.services.conversation_service import (
     create_sql_feedback,
     get_conversation_summary_payload,
     serialize_conversation,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-def _build_chat_service(
-    db: AsyncSession,
-    example_retriever: ExampleRetriever,
-    knowledge_retriever: KnowledgeRetriever,
-) -> ChatService:
-    """构建聊天服务，API 层只负责依赖装配。"""
-    return ChatService(
-        db=db,
-        schema_retriever=get_schema_retriever(db),
-        example_retriever=example_retriever,
-        knowledge_retriever=knowledge_retriever,
+@router.post("/stream")
+async def chat_stream(request: ChatRequest = Body(...)):
+    """流式聊天接口 — AG-UI 标准 SSE 事件流（多智能体协作）。"""
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+
+    event_stream = run_agent_with_ag_ui(
+        user_message=request.message,
+        conversation_id=conversation_id,
+        model=request.model or "deepseek/deepseek-chat",
+        db_connection_id=request.db_connection_id,
     )
 
+    async def persistent_stream():
+        async for event in event_stream:
+            yield event
+        if conversation_id:
+            try:
+                from app.database import async_session_factory
+                from app.models.conversation import Conversation
+                from app.models.message import Message
+                from sqlalchemy import select
+                from datetime import UTC, datetime
 
-@router.post("", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest,
-    db: AsyncSession = Depends(get_db),
-    example_retriever: ExampleRetriever = Depends(get_example_retriever),
-    knowledge_retriever: KnowledgeRetriever = Depends(get_knowledge_retriever),
-):
-    """非流式聊天接口。"""
-    service = _build_chat_service(db, example_retriever, knowledge_retriever)
-    return await service.run(request)
+                async with async_session_factory() as db:
+                    result = await db.execute(
+                        select(Conversation).where(Conversation.id == conversation_id)
+                    )
+                    conv = result.scalar_one_or_none()
+                    if not conv:
+                        conv = Conversation(
+                            id=conversation_id,
+                            title=request.message[:50],
+                            db_connection_id=request.db_connection_id,
+                            model_used=request.model,
+                            created_at=datetime.now(UTC),
+                        )
+                        db.add(conv)
 
+                    user_msg = Message(
+                        id=str(uuid.uuid4()),
+                        conversation_id=conversation_id,
+                        role="user",
+                        content=request.message,
+                        created_at=datetime.now(UTC),
+                    )
+                    db.add(user_msg)
+                    await db.commit()
+            except Exception as e:
+                logger.warning("Failed to persist conversation: %s", e)
 
-@router.post("/stream")
-async def chat_stream(
-    request: ChatRequest,
-    db: AsyncSession = Depends(get_db),
-    example_retriever: ExampleRetriever = Depends(get_example_retriever),
-    knowledge_retriever: KnowledgeRetriever = Depends(get_knowledge_retriever),
-):
-    """流式聊天接口，返回 SSE。"""
-    service = _build_chat_service(db, example_retriever, knowledge_retriever)
-    conversation_id, events = await service.stream(request)
     return StreamingResponse(
-        events,
+        persistent_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
             "X-Conversation-Id": conversation_id,
         },
