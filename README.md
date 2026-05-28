@@ -25,7 +25,7 @@ Vue 3 Chat UI ←── AG-UI SSE ──→ FastAPI Gateway
                                SQL Executor
 ```
 
-**v2 多智能体架构**（`v2-multi-agent-refactor` 分支）：
+**v2 多智能体架构**（当前版本）：
 - **7 个 Agent**：Orchestrator（ReAct 循环）+ 6 个 Specialist
 - **AG-UI 标准事件**：`RUN_STARTED` → `TOOL_CALL_START/END` → `TEXT_MESSAGE_CONTENT` → `RUN_FINISHED`
 - **Schema Knowledge Graph**：DDL 语义解析 → 列角色推断 → JOIN 关系图 → 多策略检索
@@ -92,11 +92,13 @@ make dev-frontend
 
 | 端点 | 说明 |
 |------|------|
-| `POST /api/chat` | v1 非流式聊天 |
-| `POST /api/chat/stream` | v1 SSE 流式聊天 |
-| `POST /api/v2/chat/stream` | v2 AG-UI 多智能体流式聊天 |
+| `POST /api/chat/stream` | AG-UI 多智能体流式聊天 |
+| `GET /api/chat/conversations` | 对话历史列表 |
+| `GET /api/connections` | 数据库连接管理 |
 | `GET /api/connections/status/stream` | 连接状态实时推送 |
 | `GET /api/health` | 系统健康检查 |
+| `POST /api/admin/reindex-pdf` | 从 PDF 手册重建知识库索引 |
+| `POST /api/admin/reindex` | 重建 JSON 知识库索引 |
 
 ## 项目结构
 
@@ -127,6 +129,21 @@ gbase8a-assistant/
 ├── deploy/              # Docker / Nginx 部署配置
 └── Makefile             # 常用开发命令
 ```
+
+### Admin API：知识库索引手动触发
+
+```bash
+# PDF 产品手册索引（首次 ~5 分钟提取文本，后续秒级）
+curl -X POST http://localhost:8000/api/admin/reindex-pdf
+
+# JSON 知识库索引（FAQ/错误码/运维文档）
+curl -X POST http://localhost:8000/api/admin/reindex
+
+# 查看索引结果
+curl http://localhost:8000/api/admin/feedback-stats
+```
+
+> 前提：PDF 手册需放在 `knowledge/` 目录下，`official_toc.json` 目录文件存在。debug 模式下无需 Token。
 
 ## 常用命令
 
