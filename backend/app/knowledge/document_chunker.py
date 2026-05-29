@@ -157,23 +157,41 @@ class QdrantKnowledgeIndexer:
             except Exception as e:
                 logger.warning("Failed to clear collection: %s", e)
 
-        batch_size = 10
-        total = 0
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            import hashlib
+        import hashlib
 
-            embeddings = await embedder.embed([c.to_embedding_text() for c in batch])
-            points = []
-            for j in range(len(batch)):
-                c = batch[j]
-                point_id = int(hashlib.sha256(
-                    f"{c.chapter_title}:{c.source_file}".encode()
-                ).hexdigest()[:16], 16)
-                points.append(PointStruct(id=point_id, vector=embeddings[j], payload=c.to_qdrant_payload()))
-            await qdrant.client.upsert(collection_name=self.COLLECTION_NAME, points=points)
-            total += len(batch)
+        # 并发 embedding，用 Semaphore 限制同时 5 批，避免 API 限流
+        batch_size = 10
+        max_concurrent = 4
+        semaphore = asyncio.Semaphore(max_concurrent)
+        qdrant_client = qdrant.client
+
+        async def embed_and_upsert(batch_idx: int, batch: list[DocumentChunk]):
+            async with semaphore:
+                texts = [c.to_embedding_text() for c in batch]
+                embeddings = await embedder.embed(texts)
+                points = [
+                    PointStruct(
+                        id=int(hashlib.sha256(
+                            f"{c.chapter_title}:{c.source_file}".encode()
+                        ).hexdigest()[:16], 16),
+                        vector=embeddings[j],
+                        payload=c.to_qdrant_payload(),
+                    )
+                    for j, c in enumerate(batch)
+                ]
+                await qdrant_client.upsert(collection_name=self.COLLECTION_NAME, points=points)
+                return batch_idx, len(batch)
+
+        tasks = []
+        for i in range(0, len(chunks), batch_size):
+            tasks.append(embed_and_upsert(i, chunks[i:i + batch_size]))
+
+        total = 0
+        for coro in asyncio.as_completed(tasks):
+            _, count = await coro
+            total += count
             logger.info("Indexed %d/%d chunks", total, len(chunks))
+
         return total
 
 

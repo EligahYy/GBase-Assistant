@@ -27,7 +27,10 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest = Body(...)):
+async def chat_stream(
+    request: ChatRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
     """流式聊天接口 — AG-UI 标准 SSE 事件流（多智能体协作）。"""
     conversation_id = request.conversation_id or str(uuid.uuid4())
 
@@ -43,36 +46,34 @@ async def chat_stream(request: ChatRequest = Body(...)):
             yield event
         if conversation_id:
             try:
-                from app.database import async_session_factory
                 from app.models.conversation import Conversation
                 from app.models.message import Message
                 from sqlalchemy import select
                 from datetime import UTC, datetime
 
-                async with async_session_factory() as db:
-                    result = await db.execute(
-                        select(Conversation).where(Conversation.id == conversation_id)
-                    )
-                    conv = result.scalar_one_or_none()
-                    if not conv:
-                        conv = Conversation(
-                            id=conversation_id,
-                            title=request.message[:50],
-                            db_connection_id=request.db_connection_id,
-                            model_used=request.model,
-                            created_at=datetime.now(UTC),
-                        )
-                        db.add(conv)
-
-                    user_msg = Message(
-                        id=str(uuid.uuid4()),
-                        conversation_id=conversation_id,
-                        role="user",
-                        content=request.message,
+                result = await db.execute(
+                    select(Conversation).where(Conversation.id == conversation_id)
+                )
+                conv = result.scalar_one_or_none()
+                if not conv:
+                    conv = Conversation(
+                        id=conversation_id,
+                        title=request.message[:50],
+                        db_connection_id=request.db_connection_id,
+                        model_used=request.model,
                         created_at=datetime.now(UTC),
                     )
-                    db.add(user_msg)
-                    await db.commit()
+                    db.add(conv)
+
+                user_msg = Message(
+                    id=str(uuid.uuid4()),
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=request.message,
+                    created_at=datetime.now(UTC),
+                )
+                db.add(user_msg)
+                await db.commit()
             except Exception as e:
                 logger.warning("Failed to persist conversation: %s", e)
 

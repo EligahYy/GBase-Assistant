@@ -105,30 +105,35 @@ class ReindexPDFResponse(BaseModel):
 
 @router.post("/reindex-pdf", response_model=ReindexPDFResponse)
 async def reindex_pdf(request: Request) -> ReindexPDFResponse:
-    """从 PDF 产品手册重建知识库索引。
-    首次运行提取文本并缓存（~5 分钟），后续从缓存秒级加载。
+    """从 PDF 产品手册重建知识库索引（后台异步执行）。
+
+    立即返回，索引在后台运行。通过日志观察进度。
     """
     if not _verify_admin_token(request):
         raise HTTPException(status_code=403, detail="需要管理权限")
 
     from app.vector.client import is_qdrant_available
-    from app.knowledge.document_chunker import build_knowledge_from_pdf
 
     if not is_qdrant_available():
         raise HTTPException(status_code=503, detail="Qdrant 不可用")
 
-    try:
-        count = await build_knowledge_from_pdf()
-        return ReindexPDFResponse(
-            status="ok",
-            chunks=count,
-            message=f"已从 PDF 手册索引 {count} 个章节",
-        )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        logger.error("PDF 索引失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"PDF 索引失败: {e}") from e
+    import asyncio
+    from app.knowledge.document_chunker import build_knowledge_from_pdf
+
+    async def _run():
+        try:
+            count = await build_knowledge_from_pdf()
+            logger.info("PDF reindex 完成: %d chunks", count)
+        except Exception as e:
+            logger.error("PDF reindex 失败: %s", e)
+
+    asyncio.create_task(_run())
+    logger.info("PDF reindex 已放入后台任务")
+    return ReindexPDFResponse(
+        status="running",
+        chunks=0,
+        message="索引任务已启动，正在后台执行。请观察后端日志查看进度。",
+    )
 
 
 @router.get("/feedback-stats")
