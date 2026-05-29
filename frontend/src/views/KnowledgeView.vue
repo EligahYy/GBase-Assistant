@@ -5,7 +5,7 @@ import {
   NIcon, NSpace, NModal, useMessage,
   type DataTableColumn, type UploadFileInfo,
 } from 'naive-ui'
-import { TrashOutline, RefreshOutline, CloudUploadOutline } from '@vicons/ionicons5'
+import { TrashOutline, RefreshOutline, CloudUploadOutline, DocumentTextOutline } from '@vicons/ionicons5'
 import {
   fetchDocuments, uploadDocument, deleteDocument, reindexDocument,
   reindexAll, fetchIndexState, getProgressSSEUrl,
@@ -16,27 +16,22 @@ defineOptions({ name: 'KnowledgeView' })
 
 const msg = useMessage()
 const documents = ref<KnowledgeDocument[]>([])
-const total = ref(0)
 const indexState = ref<IndexStateResponse>({ total_documents: 0, total_chunks: 0, ready_documents: 0, last_indexed_at: null })
 const loading = ref(false)
 const showReindexAllModal = ref(false)
 const progressMap = ref<Record<string, { phase: string; indexed: number; total: number }>>({})
 const eventSources: Record<string, EventSource> = {}
 
-function statusTag(status: string) {
+function statusTagConfig(status: string) {
   const map: Record<string, { type: 'default' | 'info' | 'success' | 'warning' | 'error'; label: string }> = {
-    pending:   { type: 'default',  label: '等待中' },
-    parsing:   { type: 'info',     label: '解析中' },
-    chunking:  { type: 'info',     label: '切片中' },
-    indexing:  { type: 'info',     label: '索引中' },
-    ready:     { type: 'success',  label: '就绪' },
-    error:     { type: 'error',    label: '失败' },
+    pending:  { type: 'default', label: '等待中' },
+    parsing:  { type: 'info',    label: '解析中' },
+    chunking: { type: 'info',    label: '切片中' },
+    indexing: { type: 'info',    label: '索引中' },
+    ready:    { type: 'success', label: '就绪' },
+    error:    { type: 'error',   label: '失败' },
   }
-  return map[status] || { type: 'default', label: status }
-}
-
-function fileTypeTag(type: string) {
-  return type === 'pdf' ? { type: 'error' as const, label: 'PDF' } : { type: 'info' as const, label: 'MD' }
+  return map[status] || { type: 'default' as const, label: status }
 }
 
 function formatSize(bytes: number) {
@@ -47,14 +42,12 @@ function formatSize(bytes: number) {
 
 function formatTime(iso: string | null) {
   if (!iso) return '-'
-  const d = new Date(iso)
-  return d.toLocaleString('zh-CN')
+  return new Date(iso).toLocaleString('zh-CN')
 }
 
 function connectProgress(docId: string) {
   if (eventSources[docId]) return
-  const url = getProgressSSEUrl(docId)
-  const es = new EventSource(url)
+  const es = new EventSource(getProgressSSEUrl(docId))
   es.onmessage = (e) => {
     try {
       const { event, data } = JSON.parse(e.data)
@@ -66,21 +59,16 @@ function connectProgress(docId: string) {
         }
       } else if (event === 'complete') {
         delete progressMap.value[docId]
-        es.close()
-        delete eventSources[docId]
+        es.close(); delete eventSources[docId]
         load()
       } else if (event === 'error') {
         delete progressMap.value[docId]
-        es.close()
-        delete eventSources[docId]
+        es.close(); delete eventSources[docId]
         load()
       }
-    } catch {}
+    } catch { /* ignore */ }
   }
-  es.onerror = () => {
-    es.close()
-    delete eventSources[docId]
-  }
+  es.onerror = () => { es.close(); delete eventSources[docId] }
   eventSources[docId] = es
 }
 
@@ -89,7 +77,6 @@ async function load() {
   try {
     const [docsRes, stateRes] = await Promise.all([fetchDocuments({}), fetchIndexState()])
     documents.value = docsRes.documents
-    total.value = docsRes.total
     indexState.value = stateRes
     for (const d of docsRes.documents) {
       if (['pending', 'parsing', 'chunking', 'indexing'].includes(d.status)) {
@@ -108,7 +95,6 @@ async function handleUpload(options: { file: UploadFileInfo; onFinish: () => voi
   try {
     const doc = await uploadDocument(options.file.file)
     documents.value.unshift(doc)
-    total.value++
     connectProgress(doc.id)
     msg.success(`${options.file.name} 上传成功，开始索引`)
     options.onFinish()
@@ -122,11 +108,7 @@ async function remove(doc: KnowledgeDocument) {
   try {
     await deleteDocument(doc.id)
     documents.value = documents.value.filter(d => d.id !== doc.id)
-    total.value--
-    if (eventSources[doc.id]) {
-      eventSources[doc.id].close()
-      delete eventSources[doc.id]
-    }
+    if (eventSources[doc.id]) { eventSources[doc.id].close(); delete eventSources[doc.id] }
     delete progressMap.value[doc.id]
     msg.success('已删除')
   } catch (e: any) {
@@ -158,31 +140,37 @@ async function handleReindexAll() {
 }
 
 onMounted(load)
-onUnmounted(() => {
-  Object.values(eventSources).forEach(es => es.close())
-})
+onUnmounted(() => { Object.values(eventSources).forEach(es => es.close()) })
 
 const columns: DataTableColumn<KnowledgeDocument>[] = [
-  { title: '文件名', key: 'filename', ellipsis: { tooltip: true }, width: 300 },
   {
-    title: '类型', key: 'file_type', width: 80,
+    title: '文件名', key: 'filename', ellipsis: { tooltip: true }, width: 280,
     render(row) {
-      const t = fileTypeTag(row.file_type)
+      return h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, [
+        h(NIcon, { size: 16, color: 'var(--text-3)' }, { default: () => h(DocumentTextOutline) }),
+        h('span', row.filename),
+      ])
+    },
+  },
+  {
+    title: '类型', key: 'file_type', width: 70,
+    render(row) {
+      const t = row.file_type === 'pdf' ? { type: 'error' as const, label: 'PDF' } : { type: 'info' as const, label: 'MD' }
       return h(NTag, { type: t.type, size: 'small', bordered: false }, { default: () => t.label })
     },
   },
-  { title: '大小', key: 'file_size', width: 100, render(row) { return formatSize(row.file_size) } },
+  { title: '大小', key: 'file_size', width: 90, render(row: KnowledgeDocument) { return formatSize(row.file_size) } },
   {
-    title: '状态', key: 'status', width: 100,
+    title: '状态', key: 'status', width: 90,
     render(row) {
-      const t = statusTag(row.status)
+      const t = statusTagConfig(row.status)
       return h(NTag, { type: t.type, size: 'small', bordered: false }, { default: () => t.label })
     },
   },
-  { title: '分块数', key: 'chunk_count', width: 80, render(row) { return row.chunk_count || '-' } },
-  { title: '索引时间', key: 'indexed_at', width: 170, render(row) { return formatTime(row.indexed_at) } },
+  { title: '分块数', key: 'chunk_count', width: 70, render(row: KnowledgeDocument) { return row.chunk_count || '-' } },
+  { title: '索引时间', key: 'indexed_at', width: 160, render(row: KnowledgeDocument) { return formatTime(row.indexed_at) } },
   {
-    title: '操作', key: 'actions', width: 120,
+    title: '操作', key: 'actions', width: 100,
     render(row) {
       return h(NSpace, { size: 'small' }, {
         default: () => [
@@ -199,77 +187,108 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 
 <template>
   <div class="knowledge-page">
+    <!-- Header -->
     <div class="page-header">
       <h1>知识库管理</h1>
-      <div class="header-actions">
-        <n-button quaternary @click="showReindexAllModal = true">
-          <template #icon><n-icon :component="RefreshOutline" /></template>
-          全量重建索引
-        </n-button>
-      </div>
+      <n-button quaternary @click="showReindexAllModal = true">
+        <template #icon><n-icon :component="RefreshOutline" /></template>
+        全量重建索引
+      </n-button>
     </div>
 
     <!-- Summary Cards -->
     <div class="summary-row">
-      <n-card size="small"><div class="stat-label">文档总数</div><div class="stat-value">{{ indexState.total_documents }}</div></n-card>
-      <n-card size="small"><div class="stat-label">总分块数</div><div class="stat-value">{{ indexState.total_chunks }}</div></n-card>
-      <n-card size="small"><div class="stat-label">已就绪</div><div class="stat-value">{{ indexState.ready_documents }}</div></n-card>
-      <n-card size="small"><div class="stat-label">最后索引</div><div class="stat-value stat-time">{{ formatTime(indexState.last_indexed_at) }}</div></n-card>
-    </div>
-
-    <!-- Upload + Table -->
-    <div class="content-row">
-      <n-card size="small" title="上传文档" class="upload-card">
-        <n-upload
-          multiple
-          directory-dnd
-          accept=".pdf,.md"
-          :custom-request="handleUpload"
-          :show-file-list="false"
-        >
-          <n-button block>
-            <template #icon><n-icon :component="CloudUploadOutline" /></template>
-            点击或拖拽上传 (.pdf / .md)
-          </n-button>
-        </n-upload>
-      </n-card>
-
-      <n-card size="small" title="文档列表" class="table-card">
-        <n-data-table
-          :columns="columns"
-          :data="documents"
-          :loading="loading"
-          :pagination="{ pageSize: 20 }"
-          flex-height
-          striped
-          size="small"
-        />
-      </n-card>
-    </div>
-
-    <!-- Progress Section -->
-    <div v-if="Object.keys(progressMap).length" class="progress-section">
-      <n-card size="small" title="索引进度">
-        <div v-for="(prog, docId) in progressMap" :key="docId" class="progress-item">
-          <div class="progress-filename">
-            {{ documents.find(d => d.id === docId)?.filename || docId }}
-          </div>
-          <div class="progress-bar-row">
-            <n-tag :type="statusTag(prog.phase).type" size="small" :bordered="false">
-              {{ statusTag(prog.phase).label }}
-            </n-tag>
-            <n-progress
-              v-if="prog.total > 0"
-              type="line"
-              :percentage="Math.round((prog.indexed / prog.total) * 100)"
-              :height="20"
-              :border-radius="4"
-              :fill-border-radius="4"
-              style="flex:1"
-            />
-          </div>
+      <div class="stat-card">
+        <div class="stat-icon docs-icon"><n-icon :component="DocumentTextOutline" size="20" /></div>
+        <div class="stat-body">
+          <div class="stat-label">文档总数</div>
+          <div class="stat-value">{{ indexState.total_documents }}</div>
         </div>
-      </n-card>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon chunks-icon"><n-icon :component="CloudUploadOutline" size="20" /></div>
+        <div class="stat-body">
+          <div class="stat-label">总分块数</div>
+          <div class="stat-value">{{ indexState.total_chunks }}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon ready-icon" style="background: rgba(22,163,74,0.1); color: var(--success)">✓</div>
+        <div class="stat-body">
+          <div class="stat-label">已就绪</div>
+          <div class="stat-value">{{ indexState.ready_documents }}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-body" style="flex:1">
+          <div class="stat-label">最后索引时间</div>
+          <div class="stat-value stat-time">{{ formatTime(indexState.last_indexed_at) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload Area -->
+    <div class="upload-row">
+      <n-upload
+        multiple
+        directory-dnd
+        accept=".pdf,.md"
+        :custom-request="handleUpload"
+        :show-file-list="false"
+      >
+        <n-button size="small" :loading="false">
+          <template #icon><n-icon :component="CloudUploadOutline" /></template>
+          上传文档 (.pdf / .md)
+        </n-button>
+      </n-upload>
+      <span class="upload-hint">支持 PDF 和 Markdown 文件，上传后自动索引</span>
+    </div>
+
+    <!-- Indexing Progress (shown above table when active) -->
+    <div v-if="Object.keys(progressMap).length" class="progress-row">
+      <div v-for="(prog, docId) in progressMap" :key="docId" class="progress-item">
+        <div class="progress-header">
+          <span class="progress-filename">
+            {{ documents.find(d => d.id === docId)?.filename || docId }}
+          </span>
+          <n-tag :type="statusTagConfig(prog.phase).type" size="tiny" :bordered="false">
+            {{ statusTagConfig(prog.phase).label }}
+          </n-tag>
+        </div>
+        <n-progress
+          v-if="prog.total > 0"
+          type="line"
+          :percentage="Math.round((prog.indexed / prog.total) * 100)"
+          :height="6"
+          :border-radius="3"
+          :fill-border-radius="3"
+          :indicator-placement="'inside'"
+          processing
+        />
+        <n-progress
+          v-else
+          type="line"
+          :percentage="0"
+          :height="6"
+          :border-radius="3"
+          :fill-border-radius="3"
+          :indicator-placement="'inside'"
+          processing
+        />
+      </div>
+    </div>
+
+    <!-- Document Table -->
+    <div class="table-wrapper">
+      <n-data-table
+        :columns="columns"
+        :data="documents"
+        :loading="loading"
+        :pagination="{ pageSize: 20 }"
+        striped
+        size="small"
+        :bordered="false"
+      />
     </div>
 
     <!-- Reindex All Modal -->
@@ -287,66 +306,126 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 
 <style scoped>
 .knowledge-page {
-  padding: 24px;
-  max-width: 1200px;
+  padding: 24px 32px;
+  max-width: 1100px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 20px;
+  height: 100%;
+  overflow-y: auto;
 }
+
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 .page-header h1 {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-0);
   margin: 0;
 }
+
+/* ── Summary Cards ── */
 .summary-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+}
+.stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.docs-icon {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+.chunks-icon {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+}
+.stat-body {
+  min-width: 0;
+}
 .stat-label {
   font-size: 12px;
   color: var(--text-3);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .stat-value {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   color: var(--text-0);
+  line-height: 1.2;
 }
 .stat-time {
   font-size: 13px;
+  font-weight: 500;
 }
-.content-row {
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 16px;
-  align-items: start;
+
+/* ── Upload Row ── */
+.upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-.upload-card {
-  position: sticky;
-  top: 24px;
+.upload-hint {
+  font-size: 12px;
+  color: var(--text-4);
+}
+
+/* ── Progress Row ── */
+.progress-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
 }
 .progress-item {
-  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .progress-filename {
   font-size: 13px;
   color: var(--text-1);
-  margin-bottom: 6px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.progress-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+
+/* ── Table ── */
+.table-wrapper {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 </style>

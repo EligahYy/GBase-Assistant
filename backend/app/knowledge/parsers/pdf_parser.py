@@ -55,8 +55,31 @@ class PdfParser:
         finally:
             pdf.close()
 
+    # 中文技术文档常见标题模式
+    _HEADING_PATTERN = re.compile(
+        r'(?:^|\n)\s*'
+        r'(?:'
+        r'第[一二三四五六七八九十百千0-9]+[章节]'  # 第X章/第X节
+        r'|(?:[0-9]+\.)+[0-9]+'                     # 1.2.3 编号
+        r'|(?:[0-9]+[、．.])'                        # 1、 或 1.
+        r')\s*[^\n]{2,80}\n'                          # 标题文字
+    )
+
     def _extract_flat(self, pdf, total_pages: int) -> list[Section]:
-        """No TOC — each page becomes a Section."""
+        """无 TOC 时：先提取全文，按标题模式切分；检测不到标题则按页。"""
+        full_text_parts: list[str] = []
+        for i in range(total_pages):
+            text = pdf.pages[i].extract_text()
+            if text:
+                full_text_parts.append(self._clean_header_footer(text))
+
+        full_text = "\n\n".join(full_text_parts)
+        heading_spans = list(self._HEADING_PATTERN.finditer(full_text))
+
+        if len(heading_spans) >= 2:
+            return self._split_by_headings(full_text, heading_spans)
+
+        # 回退：按页分割
         sections: list[Section] = []
         for i in range(total_pages):
             page = pdf.pages[i]
@@ -64,6 +87,18 @@ class PdfParser:
             if text and len(text.strip()) >= 50:
                 text = self._clean_header_footer(text)
                 sections.append(Section(heading=f"Page {i + 1}", content=text, page=i + 1))
+        return sections
+
+    def _split_by_headings(self, full_text: str, heading_spans: list) -> list[Section]:
+        """按标题位置切分全文为 Sections。"""
+        sections: list[Section] = []
+        for idx, m in enumerate(heading_spans):
+            start = m.start()
+            end = heading_spans[idx + 1].start() if idx + 1 < len(heading_spans) else len(full_text)
+            content = full_text[start:end].strip()
+            heading = m.group(0).strip()
+            if len(content) >= 50:
+                sections.append(Section(heading=heading, content=content))
         return sections
 
     def _extract_by_toc(self, pdf, toc_entries: list[dict], total_pages: int) -> list[Section]:
