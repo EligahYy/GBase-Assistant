@@ -109,11 +109,12 @@ async def _semantic_match(query: str, top_k: int) -> list[tuple[float, dict]]:
         collection = get_settings().models_config.get("collections", {}).get("error_codes", "error_codes")
 
         embeddings = await embedder.embed([query])
-        results = await qdrant.search(
+        results = await qdrant.query_points(
             collection_name=collection,
-            query_vector=embeddings[0],
+            query=embeddings[0],
             limit=top_k,
         )
+        results = results.points if results else []
         return [
             (
                 float(r.score) if r.score is not None else 0.0,
@@ -169,13 +170,14 @@ async def query_error_code(payload: ErrorCodeQuery) -> ErrorCodeResponse:
             else:
                 mode = "empty"
 
-    # 4. 追加 RAG 知识库手册内容（error_codes 集合 + knowledge 集合）
-    manual_chunks = await _search_knowledge_for_error(payload.query, top_k=3)
-    if manual_chunks:
-        for chunk in manual_chunks:
-            results.append(ErrorCodeItem(
-                code="手册参考",
-                category="manual",
+    # 4. 非精确匹配时，追加 RAG 知识库手册内容作为参考
+    if mode != "exact":
+        manual_chunks = await _search_knowledge_for_error(payload.query, top_k=3)
+        if manual_chunks:
+            for chunk in manual_chunks:
+                results.append(ErrorCodeItem(
+                    code="手册参考",
+                    category="manual",
                 description=chunk.get("title", ""),
                 solution=chunk.get("content", "")[:2000],
                 keywords=[],
@@ -203,12 +205,13 @@ async def _search_knowledge_for_error(query: str, top_k: int = 3) -> list[dict]:
         embeddings = await embedder.embed([enhanced_query])
 
         # 同时查 knowledge 集合获取手册内容
-        results = await qdrant.search(
+        results = await qdrant.query_points(
             collection_name="knowledge",
-            query_vector=embeddings[0],
+            query=embeddings[0],
             limit=top_k,
             score_threshold=0.3,
         )
+        results = results.points if results else []
         return [
             {
                 "title": (r.payload or {}).get("title", ""),
