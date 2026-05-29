@@ -30,6 +30,11 @@ def _last_user_message(state: AgentStateType) -> str:
     msgs = state.get("messages", [])
     if msgs:
         last = msgs[-1]
+        # LangGraph add_messages reducer converts dicts to LangChain message objects
+        if hasattr(last, "content"):
+            content = last.content
+            if isinstance(content, str):
+                return content
         if isinstance(last, dict):
             return last.get("content", "")
     return ""
