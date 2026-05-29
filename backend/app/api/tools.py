@@ -40,7 +40,7 @@ class ErrorCodeResponse(BaseModel):
 @lru_cache
 def _load_error_codes() -> list[dict]:
     """从 knowledge/docs/error_codes.json 加载所有错误码（带缓存）。"""
-    path = Path(get_settings().knowledge_dir) / "docs" / "error_codes.json"
+    path = Path(get_settings().knowledge_dir) / "error_codes.json"
     if not path.exists():
         logger.warning("error_codes.json 不存在: %s", path)
         return []

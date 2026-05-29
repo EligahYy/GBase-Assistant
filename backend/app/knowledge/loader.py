@@ -34,12 +34,11 @@ def _knowledge_dir() -> Path:
 
 @lru_cache
 def load_dialect_rules() -> dict:
-    """加载所有方言规则 YAML，合并为一个 dict。结果缓存。"""
-    rules_dir = _knowledge_dir() / "dialect_rules"
+    """方言规则从 PDF 产品手册提取后存放于 knowledge/dialect_rules/。目录不存在时返回空默认。"""
     result: dict = {"unsupported": [], "syntax": [], "functions": {"supported": [], "unsupported": []}}
 
+    rules_dir = _knowledge_dir() / "dialect_rules"
     if not rules_dir.exists():
-        logger.warning("dialect_rules 目录不存在: %s", rules_dir)
         return result
 
     for yaml_file in rules_dir.glob("*.yaml"):
