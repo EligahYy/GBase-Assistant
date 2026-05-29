@@ -170,25 +170,26 @@ async def query_error_code(payload: ErrorCodeQuery) -> ErrorCodeResponse:
             else:
                 mode = "empty"
 
-    # 4. 非精确匹配时，追加 RAG 知识库手册内容作为参考
+    # 4. 非精确匹配时，追加 RAG 知识库手册内容（仅高相似度结果）
     if mode != "exact":
-        manual_chunks = await _search_knowledge_for_error(payload.query, top_k=3)
+        manual_chunks = await _search_knowledge_for_error(payload.query, top_k=2)
         if manual_chunks:
             for chunk in manual_chunks:
+                score = chunk.get("score", 0)
                 results.append(ErrorCodeItem(
                     code="手册参考",
                     category="manual",
-                description=chunk.get("title", ""),
-                solution=chunk.get("content", "")[:2000],
-                keywords=[],
-                score=chunk.get("score"),
-            ))
+                    description=chunk.get("title", ""),
+                    solution=chunk.get("content", "")[:500],
+                    keywords=[],
+                    score=score,
+                ))
 
     return ErrorCodeResponse(query=payload.query, mode=mode, results=results)
 
 
-async def _search_knowledge_for_error(query: str, top_k: int = 3) -> list[dict]:
-    """在 knowledge 集合中搜索与错误码/错误相关的手册章节。"""
+async def _search_knowledge_for_error(query: str, top_k: int = 2) -> list[dict]:
+    """在 knowledge 集合中搜索与错误码相关的手册章节，仅返回高相似度结果。"""
     from app.vector.client import is_qdrant_available
 
     if not is_qdrant_available():
@@ -200,16 +201,14 @@ async def _search_knowledge_for_error(query: str, top_k: int = 3) -> list[dict]:
 
         embedder = get_embedder()
         qdrant = get_qdrant_manager().client
-        # 增强查询语义
         enhanced_query = f"GBase 8a 错误码 {query} 错误排查 解决方案"
         embeddings = await embedder.embed([enhanced_query])
 
-        # 同时查 knowledge 集合获取手册内容
         results = await qdrant.query_points(
             collection_name="knowledge",
             query=embeddings[0],
             limit=top_k,
-            score_threshold=0.3,
+            score_threshold=0.5,
         )
         results = results.points if results else []
         return [
