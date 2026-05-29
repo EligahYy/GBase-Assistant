@@ -78,7 +78,9 @@ async function sendMessage() {
     model: selectedModel.value,
   })
   const serverConversationId = await streamPost(url, body, (chunk) => {
-    if (chunk.type === 'text') {
+    if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
+      chatStore.appendStreamToken(streamingId, (chunk.delta as string) || '')
+    } else if (chunk.type === 'text') {
       chatStore.appendStreamToken(streamingId, chunk.content)
     } else if (chunk.type === 'sql') {
       chatStore.setStreamSql(streamingId, chunk.content)
