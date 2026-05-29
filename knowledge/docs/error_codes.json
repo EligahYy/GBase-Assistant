@@ -1,0 +1,394 @@
+[
+  {
+    "code": "1040",
+    "category": "connection",
+    "description": "连接数已达到上限（Too many connections）。当前数据库实例的并发连接数超过 max_connections 配置值。",
+    "solution": "1) 临时方案：`SET GLOBAL max_connections = 500;` 调高上限；\n2) 长期方案：检查应用连接池是否泄漏，确保 connection 用完即关闭；\n3) 排查异常长连接：`SHOW PROCESSLIST;` 找到 sleep 时间过长的连接 KILL 掉；\n4) 使用连接池（如 HikariCP、Druid）复用连接。",
+    "keywords": ["连接数", "Too many connections", "max_connections", "1040"]
+  },
+  {
+    "code": "1044",
+    "category": "permission",
+    "description": "用户对该数据库无访问权限（Access denied for user '...' to database '...'）。",
+    "solution": "1) 用 root 账户登录后授权：`GRANT SELECT, INSERT, UPDATE, DELETE ON db.* TO 'user'@'%';`\n2) 刷新权限：`FLUSH PRIVILEGES;`\n3) 检查用户是否存在：`SELECT user, host FROM mysql.user;`\n4) 注意 host 通配符是否覆盖客户端 IP。",
+    "keywords": ["权限", "Access denied", "GRANT", "授权", "1044"]
+  },
+  {
+    "code": "1045",
+    "category": "permission",
+    "description": "用户名或密码错误（Access denied for user '...'@'...' (using password: YES)）。",
+    "solution": "1) 确认用户名、密码、登录主机均正确；\n2) 修改密码：`ALTER USER 'user'@'%' IDENTIFIED BY 'newpwd';`\n3) 检查 host 限制：`SELECT user, host FROM mysql.user WHERE user = 'xxx';`\n4) 排查中间件是否丢失了 password 字段。",
+    "keywords": ["认证失败", "密码错误", "登录失败", "1045"]
+  },
+  {
+    "code": "1049",
+    "category": "table_column",
+    "description": "数据库不存在（Unknown database '...'）。指定的库名在当前实例中找不到。",
+    "solution": "1) 列出所有数据库：`SHOW DATABASES;`\n2) 检查库名拼写、大小写（GBase 8a 默认大小写敏感）；\n3) 创建库：`CREATE DATABASE db_name DEFAULT CHARSET utf8;`\n4) 切换库：`USE db_name;`",
+    "keywords": ["数据库不存在", "Unknown database", "USE", "1049"]
+  },
+  {
+    "code": "1050",
+    "category": "table_column",
+    "description": "表已存在（Table '...' already exists）。CREATE TABLE 时目标表已存在。",
+    "solution": "1) 使用 `CREATE TABLE IF NOT EXISTS` 避免重复创建；\n2) 先删除旧表：`DROP TABLE IF EXISTS xxx;` 后重建；\n3) 如需保留数据，改为 ALTER TABLE 修改结构；\n4) 检查是否在不同 schema 下产生冲突。",
+    "keywords": ["表已存在", "Table already exists", "CREATE TABLE", "1050"]
+  },
+  {
+    "code": "1051",
+    "category": "table_column",
+    "description": "表不存在（Unknown table '...'）。DROP TABLE 或操作时目标表缺失。",
+    "solution": "1) 使用 `DROP TABLE IF EXISTS xxx;` 容忍不存在；\n2) 列出表：`SHOW TABLES;` 检查表名；\n3) 注意当前所在的库是否正确。",
+    "keywords": ["表不存在", "Unknown table", "DROP TABLE", "1051"]
+  },
+  {
+    "code": "1054",
+    "category": "table_column",
+    "description": "列名不存在（Unknown column '...' in '...'）。SELECT/WHERE/ORDER BY 引用了不存在的列。",
+    "solution": "1) 查看表结构：`DESC table_name;` 或 `SHOW CREATE TABLE table_name;`\n2) 检查列名拼写、大小写；\n3) 多表 JOIN 时使用 `表名.列名` 限定；\n4) 确认是否引用了别名而别名未定义。",
+    "keywords": ["列不存在", "Unknown column", "DESC", "1054"]
+  },
+  {
+    "code": "1055",
+    "category": "syntax",
+    "description": "GROUP BY 与 SELECT 列不一致（only_full_group_by 模式）。SELECT 中出现非聚合且不在 GROUP BY 列表中的列。",
+    "solution": "1) 将所有非聚合列加入 GROUP BY；\n2) 对非分组列使用聚合函数（MAX/MIN/SUM/AVG/ANY_VALUE）；\n3) 关闭严格模式：`SET sql_mode = '';`（不推荐生产环境）；\n4) 重写为窗口函数：`ROW_NUMBER() OVER(PARTITION BY ...)`。",
+    "keywords": ["GROUP BY", "only_full_group_by", "聚合", "1055"]
+  },
+  {
+    "code": "1062",
+    "category": "constraint",
+    "description": "唯一键冲突（Duplicate entry '...' for key '...'）。INSERT 或 UPDATE 时违反 UNIQUE/PRIMARY KEY 约束。",
+    "solution": "1) 改为 `INSERT IGNORE` 忽略冲突；\n2) 改为 `REPLACE INTO` 覆盖旧值（注意会触发 DELETE+INSERT）；\n3) 改为 `INSERT ... ON DUPLICATE KEY UPDATE` 做 upsert；\n4) 检查业务是否真的需要唯一约束，是否可以放宽；\n5) 注意：GBase 8a 在分布式表上的唯一约束不强制全局一致。",
+    "keywords": ["唯一键", "Duplicate entry", "主键冲突", "1062"]
+  },
+  {
+    "code": "1064",
+    "category": "syntax",
+    "description": "SQL 语法错误（You have an error in your SQL syntax）。GBase 8a 解析器无法识别语句。",
+    "solution": "1) 仔细阅读报错位置（near '...'）定位错误处；\n2) 检查关键字拼写、引号闭合、分号结尾；\n3) GBase 8a 不支持的 MySQL 8.0 新特性（CTE WITH RECURSIVE 在部分版本受限、JSON 函数、GIS 等）需替换；\n4) 用 sqlglot 或在线 SQL 格式化工具校验。",
+    "keywords": ["语法错误", "SQL syntax", "near", "1064"]
+  },
+  {
+    "code": "1075",
+    "category": "syntax",
+    "description": "AUTO_INCREMENT 列定义错误（Incorrect table definition; can be only one auto column and it must be defined as a key）。",
+    "solution": "1) AUTO_INCREMENT 列必须同时是主键或唯一键；\n2) 一张表只能有一个 AUTO_INCREMENT 列；\n3) 推荐写法：`id INT AUTO_INCREMENT PRIMARY KEY`；\n4) 在分布式表上慎用，自增值不保证全局连续。",
+    "keywords": ["AUTO_INCREMENT", "自增", "1075"]
+  },
+  {
+    "code": "1136",
+    "category": "data_type",
+    "description": "INSERT 列数与值数量不一致（Column count doesn't match value count）。",
+    "solution": "1) 显式指定列名：`INSERT INTO t (col1, col2) VALUES (...);`\n2) 检查 VALUES 子句中括号是否对齐；\n3) 多值插入时每行括号内列数必须一致；\n4) 用 `DESC table_name` 比对表结构。",
+    "keywords": ["INSERT", "列数不匹配", "Column count", "1136"]
+  },
+  {
+    "code": "1138",
+    "category": "data_type",
+    "description": "对 NOT NULL 列插入了 NULL（Invalid use of NULL value）。",
+    "solution": "1) 为 NOT NULL 列提供有效值；\n2) 修改列定义增加默认值：`ALTER TABLE t MODIFY col INT DEFAULT 0;`\n3) 业务层做 null 兜底；\n4) 在导入工具（gbase_loader）中配置 NULL 替换策略。",
+    "keywords": ["NULL 不允许", "NOT NULL", "1138"]
+  },
+  {
+    "code": "1146",
+    "category": "table_column",
+    "description": "表不存在（Table '...' doesn't exist）。SELECT/INSERT 引用了不存在的表。",
+    "solution": "1) 检查表名拼写、库名前缀；\n2) `SHOW TABLES LIKE '%xxx%';` 模糊查找；\n3) 当前库与目标表是否在同一库：`USE db_name;`\n4) 大小写敏感场景下检查 lower_case_table_names 设置；\n5) 是否需要重新执行建表脚本。",
+    "keywords": ["表不存在", "doesn't exist", "1146"]
+  },
+  {
+    "code": "1153",
+    "category": "performance",
+    "description": "查询包数据超过 max_allowed_packet 限制（Got a packet bigger than 'max_allowed_packet'）。",
+    "solution": "1) 调整服务端参数：`SET GLOBAL max_allowed_packet = 256*1024*1024;`\n2) 客户端连接也需同步配置；\n3) 大批量 INSERT 拆分成多个小批次；\n4) BLOB/TEXT 列写入超大值时考虑分片或外部存储；\n5) 修改 my.cnf 持久化配置。",
+    "keywords": ["max_allowed_packet", "包过大", "1153"]
+  },
+  {
+    "code": "1166",
+    "category": "syntax",
+    "description": "列名超长（Incorrect column name '...'）。GBase 8a 列名长度有限制，通常 ≤ 64 字符。",
+    "solution": "1) 缩短列名（建议 ≤ 30 字符便于维护）；\n2) 避免使用保留字、特殊字符；\n3) 中文列名需要反引号包裹但不推荐；\n4) 使用规范的命名风格 snake_case。",
+    "keywords": ["列名超长", "Incorrect column name", "1166"]
+  },
+  {
+    "code": "1170",
+    "category": "syntax",
+    "description": "BLOB/TEXT 列在索引时未指定长度（BLOB/TEXT column '...' used in key specification without a key length）。",
+    "solution": "1) 创建索引时指定前缀长度：`CREATE INDEX idx ON t (col(64));`\n2) 改用 VARCHAR 替代 TEXT（如长度可控）；\n3) GBase 8a 列存储中索引意义有限，可考虑不建该索引；\n4) 确认是否真的需要索引，列存查询本身扫描快。",
+    "keywords": ["BLOB", "TEXT", "索引长度", "1170"]
+  },
+  {
+    "code": "1175",
+    "category": "performance",
+    "description": "在安全更新模式下未使用主键 WHERE 条件（You are using safe update mode）。",
+    "solution": "1) UPDATE/DELETE 加上主键或索引列的 WHERE；\n2) 临时关闭：`SET SQL_SAFE_UPDATES = 0;`（生产环境慎用）；\n3) 全表更新：明确 `WHERE 1=1`；\n4) 检查 IDE/客户端是否默认开启安全模式。",
+    "keywords": ["safe update", "1175"]
+  },
+  {
+    "code": "1213",
+    "category": "constraint",
+    "description": "事务死锁（Deadlock found when trying to get lock; try restarting transaction）。",
+    "solution": "1) 应用层捕获该异常并重试；\n2) 调整事务大小，缩短锁持有时间；\n3) 确保多事务以相同顺序访问表与行；\n4) GBase 8a 主要面向 OLAP，避免高频 OLTP 事务；\n5) `SHOW ENGINE INNODB STATUS` 排查锁等待链。",
+    "keywords": ["死锁", "Deadlock", "1213"]
+  },
+  {
+    "code": "1216",
+    "category": "constraint",
+    "description": "外键约束失败（Cannot add or update a child row: a foreign key constraint fails）。",
+    "solution": "1) 注意：GBase 8a 在语法层接受 FK，但**不强制执行**。如果应用依赖 FK 校验，应改在应用层；\n2) 若使用了真实校验（其他兼容模式下），先确保主表存在对应记录再插入子表；\n3) 调整插入顺序：先父表再子表；\n4) 临时禁用：`SET FOREIGN_KEY_CHECKS = 0;` 完成后恢复。",
+    "keywords": ["外键", "foreign key", "1216", "1452"]
+  },
+  {
+    "code": "1264",
+    "category": "data_type",
+    "description": "列值超出范围（Out of range value for column '...'）。",
+    "solution": "1) 检查列类型与值范围：TINYINT(-128~127)、INT(-2^31~2^31-1)、BIGINT(-2^63~2^63-1)；\n2) 改用更大的类型：INT → BIGINT；\n3) DECIMAL(10,2) 表示总长 10 位含小数 2 位，最大 99999999.99；\n4) 应用层校验输入。",
+    "keywords": ["超出范围", "Out of range", "1264"]
+  },
+  {
+    "code": "1265",
+    "category": "data_type",
+    "description": "数据被截断（Data truncated for column '...'）。VARCHAR/CHAR 长度不足或日期格式不匹配。",
+    "solution": "1) 增加列长度：`ALTER TABLE t MODIFY col VARCHAR(255);`\n2) 应用层在写入前截断或校验；\n3) 检查字符集，UTF-8 中文占 3 字节；\n4) 时间字符串需符合 'YYYY-MM-DD HH:MM:SS' 格式。",
+    "keywords": ["数据截断", "Data truncated", "1265"]
+  },
+  {
+    "code": "1267",
+    "category": "data_type",
+    "description": "字符集不一致（Illegal mix of collations）。多个列的字符集或排序规则在比较/JOIN 时冲突。",
+    "solution": "1) 显式 CONVERT：`WHERE CONVERT(a USING utf8) = b;`\n2) 统一字符集建表：`CREATE TABLE t (...) DEFAULT CHARSET = utf8mb4;`\n3) ALTER 修改：`ALTER TABLE t CONVERT TO CHARACTER SET utf8mb4;`\n4) 数据库初始化时强制统一字符集（`gbase_default_character_set = utf8`）。",
+    "keywords": ["字符集", "collation", "1267"]
+  },
+  {
+    "code": "1292",
+    "category": "data_type",
+    "description": "日期/时间值无效（Incorrect datetime value）。日期格式不被识别，或值超出合法范围。",
+    "solution": "1) 标准格式：'YYYY-MM-DD HH:MM:SS'；\n2) 用 STR_TO_DATE 转换：`STR_TO_DATE('2024/01/05', '%Y/%m/%d')`；\n3) 注意 0000-00-00 在严格 sql_mode 下被拒绝；\n4) 月份/日期范围合法（DATETIME: 1000-01-01 至 9999-12-31）。",
+    "keywords": ["日期", "datetime", "1292"]
+  },
+  {
+    "code": "1305",
+    "category": "syntax",
+    "description": "函数不存在（FUNCTION '...' does not exist）。GBase 8a 不支持该 MySQL 函数。",
+    "solution": "1) 检查 GBase 8a 函数白名单（参考 `knowledge/dialect_rules/function_mapping.yaml`）；\n2) 常见不支持：JSON_EXTRACT/JSON_OBJECT、ST_*（GIS）、REGEXP_REPLACE 部分版本；\n3) 改用 GBase 8a 等价实现或在应用层处理；\n4) 确认是否拼错或大小写问题。",
+    "keywords": ["函数不存在", "FUNCTION does not exist", "1305"]
+  },
+  {
+    "code": "1366",
+    "category": "data_type",
+    "description": "整型列接收到非法字符串值（Incorrect integer value）。",
+    "solution": "1) 应用层确保数值类型不被引号转义；\n2) 显式 CAST：`CAST(val AS SIGNED)`；\n3) 关闭严格模式可允许隐式转换：`SET sql_mode = '';`（不推荐）；\n4) ORM 框架检查类型映射。",
+    "keywords": ["整型转换", "Incorrect integer value", "1366"]
+  },
+  {
+    "code": "1406",
+    "category": "data_type",
+    "description": "字符串数据过长（Data too long for column '...'）。VARCHAR/CHAR 长度不足以容纳该值。",
+    "solution": "1) 扩列：`ALTER TABLE t MODIFY col VARCHAR(1000);`\n2) 改用 TEXT 存储不定长大文本；\n3) 应用层做长度校验；\n4) 注意 UTF-8 中文每字符占 3 字节，VARCHAR(100) 实际能存约 33 个中文。",
+    "keywords": ["数据过长", "Data too long", "1406"]
+  },
+  {
+    "code": "1452",
+    "category": "constraint",
+    "description": "外键约束失败：父行不存在（Cannot add or update a child row）。",
+    "solution": "1) GBase 8a 不强制执行外键，但语法兼容；\n2) 如果业务确实需要，先 INSERT 父表再 INSERT 子表；\n3) 在应用层校验数据完整性；\n4) `SET FOREIGN_KEY_CHECKS = 0;` 临时绕过（数据迁移时可用）。",
+    "keywords": ["外键", "foreign key", "child row", "1452"]
+  },
+  {
+    "code": "1690",
+    "category": "data_type",
+    "description": "数值超出 BIGINT 范围（BIGINT value is out of range）。",
+    "solution": "1) 改用 DECIMAL 存储超大整数：`DECIMAL(38, 0)`；\n2) 检查计算逻辑，是否乘法溢出；\n3) 拆分计算步骤，避免中间结果溢出；\n4) UNSIGNED BIGINT 上限 18446744073709551615，分清符号。",
+    "keywords": ["BIGINT 溢出", "out of range", "1690"]
+  },
+  {
+    "code": "1701",
+    "category": "constraint",
+    "description": "外键约束阻止删除（Cannot delete or update a parent row）。",
+    "solution": "1) GBase 8a 不强制 FK，正常情况下不会触发；\n2) 若启用了严格 FK 模式：先删子表数据再删父表；\n3) 使用 ON DELETE CASCADE 让删除自动级联（语法支持但行为不强制）；\n4) `SET FOREIGN_KEY_CHECKS = 0;` 强制删除。",
+    "keywords": ["外键", "parent row", "1701"]
+  },
+  {
+    "code": "2002",
+    "category": "connection",
+    "description": "无法连接到本地 socket 文件（Can't connect to local MySQL server through socket '...'）。",
+    "solution": "1) 检查 GBase 8a 服务是否启动：`gcadmin showcluster` / `service gbased status`；\n2) socket 路径是否正确（通常在 /tmp/gbase.sock 或配置文件指定）；\n3) 改用 TCP 连接：`-h 127.0.0.1 -P 5258`；\n4) 文件权限检查：socket 文件归属与权限。",
+    "keywords": ["socket", "Can't connect", "2002"]
+  },
+  {
+    "code": "2003",
+    "category": "connection",
+    "description": "无法连接到 GBase 8a 服务器（Can't connect to GBase server on '...'）。",
+    "solution": "1) 检查目标 IP 与端口是否可达：`telnet host 5258`；\n2) 防火墙/安全组放行 5258（默认）；\n3) 服务是否监听：`netstat -lntp | grep 5258`；\n4) 集群所有节点是否都在线：`gcadmin showcluster`；\n5) DNS 解析是否正确。",
+    "keywords": ["连接失败", "Can't connect", "5258", "2003"]
+  },
+  {
+    "code": "2006",
+    "category": "connection",
+    "description": "服务端连接已断开（GBase server has gone away）。长时间空闲或大查询导致连接超时。",
+    "solution": "1) 应用层启用连接保活/重连机制；\n2) 调高 wait_timeout / interactive_timeout；\n3) 大查询拆分为多个小查询；\n4) 检查 max_allowed_packet 是否足够；\n5) 连接池配置 testOnBorrow/idleConnectionTestPeriod。",
+    "keywords": ["连接断开", "gone away", "2006"]
+  },
+  {
+    "code": "2013",
+    "category": "connection",
+    "description": "查询期间连接丢失（Lost connection to GBase server during query）。",
+    "solution": "1) 增大 net_read_timeout/net_write_timeout；\n2) 排查网络抖动、丢包；\n3) 大查询添加 LIMIT 或 WHERE 收窄；\n4) 检查 GBase 8a 节点日志，是否有内存不足、节点重启；\n5) JDBC 加 `socketTimeout` 参数避免长时间挂起。",
+    "keywords": ["查询中断", "Lost connection", "2013"]
+  },
+  {
+    "code": "GBA-1001",
+    "category": "gbase_specific",
+    "description": "DISTRIBUTED BY 列必须是基础数据类型。GBase 8a 不允许在 BLOB/TEXT/JSON 等大字段或自定义类型上做哈希分布。",
+    "solution": "1) 改用整型/字符串列作为分布键：`DISTRIBUTED BY ('user_id')`；\n2) 高基数、查询常用 JOIN 列优先；\n3) 避免 NULL 占比高的列（NULL 全部落到 0 号节点导致倾斜）；\n4) 维度小表用 REPLICATED 替代。",
+    "keywords": ["DISTRIBUTED BY", "分布键", "GBA-1001"]
+  },
+  {
+    "code": "GBA-1002",
+    "category": "gbase_specific",
+    "description": "REPLICATED 表数据量过大警告。复制表会在每个节点保存完整副本，超过推荐阈值（建议 < 100MB）会浪费存储且降低写入性能。",
+    "solution": "1) 仅小型维度表使用 REPLICATED；\n2) 超过阈值改为 DISTRIBUTED BY；\n3) 定期清理历史数据；\n4) 评估是否能拆分为多个小维度表。",
+    "keywords": ["REPLICATED", "复制表", "GBA-1002"]
+  },
+  {
+    "code": "GBA-1003",
+    "category": "gbase_specific",
+    "description": "ENCODING 编码类型不被支持。GBase 8a 当前版本不识别该列级压缩编码。",
+    "solution": "1) 使用支持的编码：RLE、LZO、LZ4、DICT、NULL；\n2) 不指定 ENCODING 让系统自动选择；\n3) 高重复值列推荐 RLE，长文本列推荐 LZO/LZ4；\n4) 字典列（基数低）推荐 DICT。",
+    "keywords": ["ENCODING", "压缩编码", "GBA-1003"]
+  },
+  {
+    "code": "GBA-1004",
+    "category": "gbase_specific",
+    "description": "数据倾斜警告。某个分布节点数据量显著高于其他节点（通常超过 30%）。",
+    "solution": "1) 用 `SELECT DBNODE(), COUNT(*) FROM t GROUP BY DBNODE();` 检查分布；\n2) 重新选择分布键，避免高重复值列；\n3) 复合分布键：`DISTRIBUTED BY ('col1','col2')`；\n4) 数据预处理打散热点；\n5) 重建表迁移数据：CREATE TABLE new AS SELECT ... DISTRIBUTED BY ...。",
+    "keywords": ["数据倾斜", "DBNODE", "GBA-1004"]
+  },
+  {
+    "code": "GBA-1005",
+    "category": "gbase_specific",
+    "description": "GBase 8a 不支持 TRIGGER。CREATE TRIGGER 语法被解析器拒绝。",
+    "solution": "1) 将触发器逻辑迁移到应用层；\n2) 使用调度任务（cron + SQL 脚本）替代；\n3) 通过 ETL 工具实现行级别处理；\n4) GBase 8a 设计为分析型数据库，避免行级事件驱动。",
+    "keywords": ["触发器", "TRIGGER", "GBA-1005"]
+  },
+  {
+    "code": "GBA-1006",
+    "category": "gbase_specific",
+    "description": "GBase 8a 不支持 JSON 函数。JSON_EXTRACT、JSON_OBJECT 等无法识别。",
+    "solution": "1) 入库前将 JSON 解析为关系字段；\n2) 用 SUBSTRING / LOCATE 做简单字符串提取（不推荐）；\n3) ETL 阶段用 Python/Spark 处理 JSON 后入库；\n4) 业务层在应用代码处理嵌套结构。",
+    "keywords": ["JSON", "JSON_EXTRACT", "GBA-1006"]
+  },
+  {
+    "code": "GBA-1007",
+    "category": "gbase_specific",
+    "description": "GBase 8a 不支持 SELECT ... FOR UPDATE / LOCK IN SHARE MODE。OLAP 场景下行级锁意义有限。",
+    "solution": "1) 移除 FOR UPDATE 子句；\n2) 应用层用乐观锁（version 字段）替代；\n3) 真正需要事务一致性的强 OLTP 场景，建议另选 OLTP 数据库；\n4) 用 SELECT INTO 临时表隔离数据后处理。",
+    "keywords": ["FOR UPDATE", "行锁", "GBA-1007"]
+  },
+  {
+    "code": "GBA-1008",
+    "category": "gbase_specific",
+    "description": "GBase 8a 存储过程游标支持有限。CURSOR 语法报错或行为异常。",
+    "solution": "1) 改用 SET-based 操作（一条 SQL 完成）；\n2) 用临时表 + JOIN 替代逐行处理；\n3) 复杂逻辑迁移到应用层（Python/Java）；\n4) 评估是否真的需要游标，OLAP 场景大多数可向量化。",
+    "keywords": ["游标", "CURSOR", "存储过程", "GBA-1008"]
+  },
+  {
+    "code": "GBA-2001",
+    "category": "cluster_mpp",
+    "description": "节点不可达（Node unreachable）。集群中某计算节点状态为 OFFLINE 或心跳超时。",
+    "solution": "1) `gcadmin showcluster` 查看节点状态；\n2) ping 节点 IP，检查网络；\n3) 重启节点服务：`service gcware restart && service gbased restart`；\n4) 查看日志：/opt/gbase/log/gcluster/ 与 gbase/log/；\n5) 联系运维查 corosync/gcware 集群组件。",
+    "keywords": ["节点不可达", "OFFLINE", "GBA-2001"]
+  },
+  {
+    "code": "GBA-2002",
+    "category": "cluster_mpp",
+    "description": "跨节点查询超时（Cross-node query timeout）。MPP 计划中某个 fragment 在远端节点执行超时。",
+    "solution": "1) 调高 query_timeout：`SET gcluster_query_timeout = 600;`\n2) 检查涉及节点的 CPU/IO 负载；\n3) 是否存在数据倾斜，导致单节点压力过大；\n4) 优化 SQL：减少跨节点 shuffle，让 JOIN 列与分布键一致；\n5) 拆分大查询。",
+    "keywords": ["跨节点", "查询超时", "GBA-2002"]
+  },
+  {
+    "code": "GBA-2003",
+    "category": "cluster_mpp",
+    "description": "VC（Virtual Cluster）不可用。多 VC 部署中目标 VC 无可用节点。",
+    "solution": "1) `gcadmin showcluster` 查看 VC 状态；\n2) 切换到健康 VC：`SET gcluster_vc = 'vc01';`\n3) 检查 VC 内所有节点是否在线；\n4) 联系 DBA 重启该 VC。",
+    "keywords": ["VC", "Virtual Cluster", "GBA-2003"]
+  },
+  {
+    "code": "GBA-2004",
+    "category": "cluster_mpp",
+    "description": "内存不足，查询被取消（Out of memory at gcluster/gnode）。聚合或排序占用超出节点 work_mem 限制。",
+    "solution": "1) 调整 work_mem 上限（节点级配置）；\n2) 优化查询：避免大笛卡尔积、加 LIMIT；\n3) 大表 GROUP BY/ORDER BY 检查是否能下推到节点本地完成；\n4) 拆分批次执行；\n5) 评估增加节点物理内存或扩容集群。",
+    "keywords": ["内存不足", "OOM", "work_mem", "GBA-2004"]
+  },
+  {
+    "code": "GBA-2005",
+    "category": "cluster_mpp",
+    "description": "数据 redistribute 失败。MPP 执行计划中跨节点重分布数据时网络/磁盘异常。",
+    "solution": "1) 查看节点磁盘空间：df -h；\n2) 网络丢包检查：ping/iperf；\n3) 优化 SQL 减少 redistribute（让 JOIN 键与分布键一致）；\n4) 启用查询计划查看：`EXPLAIN <sql>` 找出 redistribute 节点；\n5) 重试或降级查询。",
+    "keywords": ["redistribute", "数据重分布", "GBA-2005"]
+  },
+  {
+    "code": "GBA-3001",
+    "category": "performance",
+    "description": "查询执行时间过长，被自动 KILL（Query exceeded execution time）。",
+    "solution": "1) `EXPLAIN` 查看执行计划，定位全表扫描/笛卡尔积；\n2) 添加合理 WHERE 过滤条件；\n3) 大表 JOIN 时小表用 REPLICATED；\n4) 调高 max_execution_time（生产环境要权衡）；\n5) 拆分查询为多个步骤。",
+    "keywords": ["查询超时", "execution time", "GBA-3001"]
+  },
+  {
+    "code": "GBA-3002",
+    "category": "performance",
+    "description": "扫描行数超过阈值警告。单次查询扫描的数据量过大，可能引发性能问题。",
+    "solution": "1) 添加分区裁剪：`WHERE dt = '2024-01-05'`；\n2) 使用列裁剪：避免 `SELECT *`；\n3) 检查是否漏掉了关键 WHERE；\n4) 大表拆分按时间分区；\n5) 必要时建索引（GBase 8a 列存场景下索引收益有限）。",
+    "keywords": ["全表扫描", "扫描量", "GBA-3002"]
+  },
+  {
+    "code": "GBA-3003",
+    "category": "performance",
+    "description": "并发查询数过载。超过 gcluster_max_concurrent_queries 限制。",
+    "solution": "1) 调整并发上限：`SET GLOBAL gcluster_max_concurrent_queries = 200;`\n2) 应用层做限流；\n3) 加查询队列（如 Apache ShardingSphere）；\n4) 大查询调度到低峰执行；\n5) 评估扩容集群。",
+    "keywords": ["并发", "concurrent queries", "GBA-3003"]
+  },
+  {
+    "code": "GBA-3004",
+    "category": "performance",
+    "description": "索引建议但未使用。EXPLAIN 显示存在可用索引但优化器未选择。",
+    "solution": "1) 强制使用索引：`USE INDEX (idx_name)`；\n2) 收集统计信息：`ANALYZE TABLE t;`\n3) 检查 WHERE 条件是否破坏索引（函数包裹列、隐式转换）；\n4) GBase 8a 列存对索引依赖低，关注分布键和分区更重要。",
+    "keywords": ["索引未使用", "USE INDEX", "GBA-3004"]
+  },
+  {
+    "code": "GBA-4001",
+    "category": "import_export",
+    "description": "LOAD DATA 文件不存在或权限不足。",
+    "solution": "1) 确认文件路径在 GBase 8a 服务进程可访问的位置；\n2) 文件权限：`chmod 644 file.csv`；\n3) 启用 local 模式：`LOAD DATA LOCAL INFILE 'path' INTO TABLE t;`\n4) secure_file_priv 配置限制了载入路径，需将文件放入许可目录；\n5) 大文件改用 gbase_loader。",
+    "keywords": ["LOAD DATA", "导入", "GBA-4001"]
+  },
+  {
+    "code": "GBA-4002",
+    "category": "import_export",
+    "description": "gbase_loader 字段分隔符不匹配。CSV 文件实际分隔符与 loader 配置不一致。",
+    "solution": "1) 检查文件实际分隔符（hexdump 看不可见字符）；\n2) 配置正确的 -F 参数：`-F ','` 或 `-F '\\t'`；\n3) 字段中包含分隔符时启用引号包裹：`-q '\"'`；\n4) BOM 头需用 -e UTF-8 + 预处理去除。",
+    "keywords": ["gbase_loader", "分隔符", "GBA-4002"]
+  },
+  {
+    "code": "GBA-4003",
+    "category": "import_export",
+    "description": "导入数据类型不匹配（type mismatch in row N）。CSV 某字段值无法转换为目标列类型。",
+    "solution": "1) 在 loader 配置中指定 NULL 替换：`-N '\\\\N'`；\n2) 跳过错误行：`-K errors.log -e UTF8 -m 1000`；\n3) 字段日期格式：`-D '%Y-%m-%d'`；\n4) 预处理 CSV：用 awk/sed 修正异常值；\n5) 临时改列类型为 VARCHAR 接收，再 SQL 清洗。",
+    "keywords": ["导入失败", "类型转换", "GBA-4003"]
+  },
+  {
+    "code": "GBA-5001",
+    "category": "license",
+    "description": "License 已过期或节点数超出授权（License expired / Node count exceeds limit）。",
+    "solution": "1) `gcadmin showLicense` 查看授权状态；\n2) 联系 GBase 厂商更新 license 文件；\n3) 替换 license：将新 license 文件 cp 到对应目录后重启 gcware；\n4) 测试环境可申请试用 license；\n5) 节点超限：缩减集群规模或升级授权。",
+    "keywords": ["License", "授权", "过期", "GBA-5001"]
+  },
+  {
+    "code": "GBA-5002",
+    "category": "license",
+    "description": "未授权的功能（Feature not licensed）。当前 license 不包含该高级功能（如多 VC、加密、备份等）。",
+    "solution": "1) 联系 GBase 商务确认授权范围；\n2) 升级 license 包含所需功能；\n3) 改用社区版功能等价实现；\n4) 评估功能必要性。",
+    "keywords": ["功能未授权", "License", "GBA-5002"]
+  }
+]

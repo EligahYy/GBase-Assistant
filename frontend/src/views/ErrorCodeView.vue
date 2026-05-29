@@ -20,7 +20,7 @@ const mode = ref<ErrorCodeMode | null>(null)
 const results = ref<ErrorCodeItem[]>([])
 const lastQuery = ref('')
 
-const quickQueries = ['1064', '1146', '2003', 'GBA-2001', '数据倾斜', '连接超时', 'DISTRIBUTED BY']
+const quickQueries = ['1040', '1044', '1062', '1153', '1170', '1213', 'GBA-2001', '分布式执行', '数据重分布', '集群同步']
 
 const modeLabel: Record<ErrorCodeMode, string> = {
   exact: '精确匹配',
@@ -80,6 +80,7 @@ function categoryLabel(cat: string): string {
     performance: '性能',
     import_export: '导入导出',
     license: '授权',
+    manual: '手册参考',
   }
   return map[cat] || cat || '通用'
 }
@@ -170,7 +171,7 @@ function categoryLabel(cat: string): string {
               <header class="card-head">
                 <div class="head-main">
                   <n-icon :component="AlertCircleOutline" size="16" class="head-icon" />
-                  <span class="code-label">{{ item.code }}</span>
+                  <span class="code-label" :class="{ 'is-manual': item.code === '手册参考' }">{{ item.code === '手册参考' ? '📖' : '' }} {{ item.code }}</span>
                 </div>
                 <div class="head-meta">
                   <span class="category-badge">{{ categoryLabel(item.category) }}</span>
@@ -180,11 +181,11 @@ function categoryLabel(cat: string): string {
 
               <section class="card-body">
                 <div class="body-block">
-                  <h3 class="block-title">描述</h3>
+                  <h3 class="block-title">{{ item.code === '手册参考' ? '手册章节' : '描述' }}</h3>
                   <p class="block-text">{{ item.description }}</p>
                 </div>
                 <div v-if="item.solution" class="body-block">
-                  <h3 class="block-title">解决方案</h3>
+                  <h3 class="block-title">{{ item.code === '手册参考' ? '手册内容' : '解决方案' }}</h3>
                   <pre class="block-pre">{{ item.solution }}</pre>
                 </div>
                 <div v-if="item.keywords?.length" class="kw-list">
@@ -482,6 +483,11 @@ function categoryLabel(cat: string): string {
   font-family: var(--font-mono);
   color: var(--text-0);
   letter-spacing: 0.02em;
+}
+.code-label.is-manual {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: #8b5cf6;
 }
 .head-meta {
   display: flex;

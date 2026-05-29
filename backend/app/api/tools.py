@@ -137,30 +137,87 @@ async def query_error_code(payload: ErrorCodeQuery) -> ErrorCodeResponse:
     """
     错误码查询。
     - 若 query 精确匹配某个 code，返回该条目（mode=exact）；
-    - 否则优先 Qdrant 语义检索（mode=semantic）；
-    - 不可用时回退文件关键词匹配（mode=keyword）。
+    - 否则优先 Qdrant 语义检索 error_codes 集合（mode=semantic）；
+    - 不可用时回退文件关键词匹配（mode=keyword）；
+    - 所有模式下追加 knowledge 集合检索手册相关章节（manual_context）。
     """
     entries = _load_error_codes()
     if not entries:
         raise HTTPException(status_code=503, detail="错误码知识库尚未就绪")
 
+    results: list[ErrorCodeItem] = []
+    mode: Literal["exact", "semantic", "keyword", "empty"] = "empty"
+
     # 1. 精确匹配
     exact = _exact_match(payload.query, entries)
     if exact:
-        return ErrorCodeResponse(query=payload.query, mode="exact", results=[_to_item(e) for e in exact])
+        results = [_to_item(e) for e in exact]
+        mode = "exact"
+    else:
+        # 2. 语义检索
+        semantic = await _semantic_match(payload.query, payload.top_k)
+        if semantic:
+            results = [_to_item(e, score=s) for s, e in semantic if e.get("code")]
+            mode = "semantic"
 
-    # 2. 语义检索
-    semantic = await _semantic_match(payload.query, payload.top_k)
-    if semantic:
-        return ErrorCodeResponse(
-            query=payload.query,
-            mode="semantic",
-            results=[_to_item(e, score=s) for s, e in semantic if e.get("code")],
+        # 3. 关键词回退
+        if not results:
+            matched = _keyword_match(payload.query, entries, payload.top_k)
+            if matched:
+                results = [_to_item(e) for e in matched]
+                mode = "keyword"
+            else:
+                mode = "empty"
+
+    # 4. 追加 RAG 知识库手册内容（error_codes 集合 + knowledge 集合）
+    manual_chunks = await _search_knowledge_for_error(payload.query, top_k=3)
+    if manual_chunks:
+        for chunk in manual_chunks:
+            results.append(ErrorCodeItem(
+                code="手册参考",
+                category="manual",
+                description=chunk.get("title", ""),
+                solution=chunk.get("content", "")[:2000],
+                keywords=[],
+                score=chunk.get("score"),
+            ))
+
+    return ErrorCodeResponse(query=payload.query, mode=mode, results=results)
+
+
+async def _search_knowledge_for_error(query: str, top_k: int = 3) -> list[dict]:
+    """在 knowledge 集合中搜索与错误码/错误相关的手册章节。"""
+    from app.vector.client import is_qdrant_available
+
+    if not is_qdrant_available():
+        return []
+
+    try:
+        from app.vector.client import get_qdrant_manager
+        from app.vector.embedder import get_embedder
+
+        embedder = get_embedder()
+        qdrant = get_qdrant_manager().client
+        # 增强查询语义
+        enhanced_query = f"GBase 8a 错误码 {query} 错误排查 解决方案"
+        embeddings = await embedder.embed([enhanced_query])
+
+        # 同时查 knowledge 集合获取手册内容
+        results = await qdrant.search(
+            collection_name="knowledge",
+            query_vector=embeddings[0],
+            limit=top_k,
+            score_threshold=0.3,
         )
-
-    # 3. 关键词回退
-    matched = _keyword_match(payload.query, entries, payload.top_k)
-    if matched:
-        return ErrorCodeResponse(query=payload.query, mode="keyword", results=[_to_item(e) for e in matched])
-
-    return ErrorCodeResponse(query=payload.query, mode="empty", results=[])
+        return [
+            {
+                "title": (r.payload or {}).get("title", ""),
+                "content": (r.payload or {}).get("content", ""),
+                "score": float(r.score) if r.score else 0.0,
+            }
+            for r in results
+            if (r.payload or {}).get("content")
+        ]
+    except Exception as e:
+        logger.debug("知识库错误码搜索跳过: %s", e)
+        return []
