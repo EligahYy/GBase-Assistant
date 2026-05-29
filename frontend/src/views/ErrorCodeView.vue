@@ -20,7 +20,7 @@ const mode = ref<ErrorCodeMode | null>(null)
 const results = ref<ErrorCodeItem[]>([])
 const lastQuery = ref('')
 
-const quickQueries = ['1040', '1044', '1062', '1153', '1170', '1213', 'GBA-2001', '分布式执行', '数据重分布', '集群同步']
+const quickQueries = ['GBA-03CR-0001', 'GBA-03GA-0001', 'GBA-02IS-0001', 'GBA-02DU-0001', 'GBA-02DD-0001', 'GBA-02EX-0001', 'gcware 异常', '数据分布', 'insert 错误', '节点故障']
 
 const modeLabel: Record<ErrorCodeMode, string> = {
   exact: '精确匹配',
