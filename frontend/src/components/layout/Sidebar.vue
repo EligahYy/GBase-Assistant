@@ -12,6 +12,7 @@ import {
   TerminalOutline,
   GridOutline,
   SpeedometerOutline,
+  LibraryOutline,
   ChevronBackOutline,
   ChevronForwardOutline,
 } from '@vicons/ionicons5'
@@ -120,6 +121,7 @@ const navItems = [
   { path: '/sql-editor', icon: TerminalOutline, label: 'SQL 编辑器' },
   { path: '/insights', icon: SpeedometerOutline, label: '性能洞察' },
   { path: '/tools/error-code', icon: AlertCircleOutline, label: '错误码查询' },
+  { path: '/knowledge', icon: LibraryOutline, label: '知识库' },
   { path: '/settings', icon: SettingsOutline, label: '设置' },
 ]
 </script>
