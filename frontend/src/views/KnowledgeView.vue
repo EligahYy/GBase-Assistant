@@ -8,10 +8,11 @@ import {
 import {
   TrashOutline, RefreshOutline, CloudUploadOutline,
   DocumentTextOutline, AlertCircleOutline, CheckmarkCircleOutline,
+  CloseCircleOutline,
 } from '@vicons/ionicons5'
 import {
   fetchDocuments, uploadDocument, deleteDocument, reindexDocument,
-  reindexAll, fetchIndexState, getProgressSSEUrl,
+  reindexAll, cancelIndexing, fetchIndexState, getProgressSSEUrl,
   type KnowledgeDocument, type IndexStateResponse,
 } from '@/api/knowledge'
 
@@ -166,6 +167,18 @@ async function handleReindexAll() {
     load()
   } catch (e: any) {
     msg.error(e.message || '失败')
+  }
+}
+
+async function cancel(docId: string) {
+  try {
+    await cancelIndexing(docId)
+    if (eventSources[docId]) { eventSources[docId].close(); delete eventSources[docId] }
+    delete progressMap.value[docId]
+    msg.success('已取消索引')
+    load()
+  } catch (e: any) {
+    msg.error(e.message || '取消失败')
   }
 }
 
@@ -340,18 +353,20 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
             <span v-if="prog.total > 0" class="progress-pct">
               {{ Math.round((prog.indexed / prog.total) * 100) }}%
             </span>
+            <n-button text size="tiny" type="warning" @click="cancel(docId)" style="flex-shrink:0">
+              取消
+            </n-button>
           </div>
           <div class="progress-desc">
             {{ PHASE_INFO[prog.phase]?.description || '处理中...' }}
           </div>
           <n-progress
             type="line"
-            :percentage="prog.total > 0 ? Math.round((prog.indexed / prog.total) * 100) : 0"
+            :percentage="prog.total > 0 ? Math.round((prog.indexed / prog.total) * 100) : undefined"
             :height="6"
             :border-radius="3"
             :fill-border-radius="3"
             :show-indicator="false"
-            :processing="prog.phase !== 'ready' && prog.total === 0"
             :status="prog.phase === 'ready' ? 'success' : 'default'"
             :color="prog.phase === 'error' ? 'var(--error)' : undefined"
           />

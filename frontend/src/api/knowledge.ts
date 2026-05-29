@@ -56,6 +56,10 @@ export async function reindexDocument(id: string): Promise<void> {
   await apiClient.post(`/admin/knowledge/documents/${id}/reindex`)
 }
 
+export async function cancelIndexing(id: string): Promise<void> {
+  await apiClient.post(`/admin/knowledge/documents/${id}/cancel`)
+}
+
 export async function reindexAll(): Promise<void> {
   await apiClient.post('/admin/knowledge/reindex-all')
 }

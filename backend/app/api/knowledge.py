@@ -64,6 +64,7 @@ class IndexStateResponse(BaseModel):
 
 _parser_registry = None
 _progress_queues: dict[str, list[asyncio.Queue]] = {}
+_cancel_events: dict[str, asyncio.Event] = {}
 
 
 def _get_parser_registry():
@@ -191,14 +192,18 @@ async def upload_document(
 async def _index_document(doc_id: str, file_path: str, file_type: str):
     from app.database import async_session_factory
 
+    # 创建取消事件
+    cancel_event = asyncio.Event()
+    _cancel_events[doc_id] = cancel_event
+
     async with async_session_factory() as db:
         doc = await db.get(KnowledgeDocument, doc_id)
         if not doc:
+            _cancel_events.pop(doc_id, None)
             return
         registry = _get_parser_registry()
 
         async def update_status(status: str):
-            """更新 DB 状态并发送 SSE 阶段变更（不含计数，前端会合并保留已有 indexed/total）。"""
             try:
                 doc.status = status
                 await db.commit()
@@ -207,22 +212,19 @@ async def _index_document(doc_id: str, file_path: str, file_type: str):
             _emit_progress(doc_id, "progress", {"phase": status})
 
         async def progress_fn(phase: str, data: dict):
-            """发送 SSE 进度事件。前端按 phase 键合并，不清除其他字段。"""
             _emit_progress(doc_id, "progress", {"phase": phase, **data})
 
         try:
-            # 预检查：验证 embedding 可用
+            # 预检查：验证 Qdrant 和 embedding 可用
             from app.vector.client import is_qdrant_available
             from app.vector.embedder import get_embedder
             if not is_qdrant_available():
-                raise RuntimeError("Qdrant 向量库不可用，请检查 Qdrant 服务是否启动")
+                raise RuntimeError("Qdrant 服务未连接，请确认 Qdrant 已启动 (localhost:6333)")
             try:
-                get_embedder()
+                embedder = get_embedder()
+                logger.info("Embedder ready: dim=%d", embedder.dimension)
             except Exception as e:
-                raise RuntimeError(f"Embedding 模型初始化失败: {e}")
-
-            # 发送初始状态
-            _emit_progress(doc_id, "progress", {"phase": "parsing", "indexed": 0, "total": 0})
+                raise RuntimeError(f"Embedding 模型加载失败 — 请检查 models.yaml 中 embedding 配置及对应的 API Key: {e}")
 
             count = await run_indexing_pipeline(
                 document_id=doc_id,
@@ -231,21 +233,29 @@ async def _index_document(doc_id: str, file_path: str, file_type: str):
                 parser_registry=registry,
                 status_callback=update_status,
                 progress_callback=progress_fn,
+                cancel_event=cancel_event,
             )
             doc.status = "ready"
             doc.chunk_count = count
             doc.indexed_at = datetime.now(UTC)
             await db.commit()
             _emit_progress(doc_id, "complete", {"chunk_count": count, "phase": "ready"})
+        except asyncio.CancelledError:
+            doc.status = "error"
+            doc.error_message = "用户取消了索引任务"
+            await db.commit()
+            _emit_progress(doc_id, "error", {"message": "索引已被取消", "phase": "error"})
         except Exception as e:
             logger.error("Index failed for document %s: %s", doc_id, e)
-            err_msg = str(e).replace("\n", " ")
+            err_msg = str(e).replace("\n", " ").replace('"', "'")
             if len(err_msg) > 300:
                 err_msg = err_msg[:300] + "..."
             doc.status = "error"
             doc.error_message = err_msg
             await db.commit()
             _emit_progress(doc_id, "error", {"message": err_msg, "phase": "error"})
+        finally:
+            _cancel_events.pop(doc_id, None)
 
 
 @router.get("/documents/{document_id}/index-progress")
@@ -336,6 +346,22 @@ async def index_state(
         last_indexed_at=last.isoformat() if last else None,
     )
 
+
+@router.post("/documents/{document_id}/cancel")
+async def cancel_indexing(request: Request, document_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    """取消正在进行的索引任务。"""
+    if not _verify_admin_token(request):
+        raise HTTPException(status_code=403, detail="需要管理权限")
+    event = _cancel_events.get(document_id)
+    if event:
+        event.set()
+        doc = await db.get(KnowledgeDocument, document_id)
+        if doc and doc.status in ("pending", "parsing", "chunking", "indexing"):
+            doc.status = "error"
+            doc.error_message = "用户取消了索引任务"
+            await db.commit()
+        return {"status": "cancelled", "document_id": document_id}
+    raise HTTPException(status_code=404, detail="未找到正在进行的索引任务")
 
 @router.post("/reindex-all")
 async def reindex_all(request: Request) -> dict:

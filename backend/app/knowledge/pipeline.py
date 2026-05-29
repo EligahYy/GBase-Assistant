@@ -20,13 +20,9 @@ async def run_indexing_pipeline(
     parser_registry: ParserRegistry,
     status_callback=None,
     progress_callback=None,
+    cancel_event: asyncio.Event | None = None,
 ) -> int:
-    """执行完整的索引管道：Parse → Chunk → Index。
-
-    status_callback(status: str) — 状态变更回调
-    progress_callback(phase: str, data: dict) — 进度回调
-    返回 chunk 数量
-    """
+    """执行完整的索引管道：Parse → Chunk → Index。"""
     parser = parser_registry.get(file_type)
     if not parser:
         raise ValueError(f"Unsupported file type: {file_type}")
@@ -37,6 +33,8 @@ async def run_indexing_pipeline(
     parsed = await parser.parse(file_path)
     if not parsed.sections:
         raise ValueError("Document produced no sections — may be empty or unreadable")
+    if cancel_event and cancel_event.is_set():
+        raise asyncio.CancelledError("索引任务已被取消")
 
     # Phase 2: Chunk
     await _update_status(status_callback, "chunking")
@@ -46,11 +44,12 @@ async def run_indexing_pipeline(
         chunker.chunk, parsed, source_file=file_path.name, document_id=document_id
     )
     logger.info("Produced %d chunks for document %s", len(chunks), document_id)
+    if cancel_event and cancel_event.is_set():
+        raise asyncio.CancelledError("索引任务已被取消")
 
     # Phase 3: Index
     await _update_status(status_callback, "indexing")
-
-    indexer = DocumentIndexer(progress_callback=progress_callback)
+    indexer = DocumentIndexer(progress_callback=progress_callback, cancel_event=cancel_event)
     count = await indexer.index(chunks, document_id=document_id, clear_existing=True)
 
     await _update_status(status_callback, "ready")
