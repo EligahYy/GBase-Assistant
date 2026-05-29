@@ -350,7 +350,7 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
             :height="6"
             :border-radius="3"
             :fill-border-radius="3"
-            :indicator-placement="'inside'"
+            :show-indicator="false"
             :processing="prog.phase !== 'ready' && prog.total === 0"
             :status="prog.phase === 'ready' ? 'success' : 'default'"
             :color="prog.phase === 'error' ? 'var(--error)' : undefined"
@@ -507,9 +507,9 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   white-space: nowrap;
 }
 .progress-pct {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-2);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary, #3b82f6);
   font-family: var(--font-mono);
   flex-shrink: 0;
 }
