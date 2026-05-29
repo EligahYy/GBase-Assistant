@@ -42,7 +42,9 @@ async def run_indexing_pipeline(
     await _update_status(status_callback, "chunking")
     logger.info("Chunking document %s: %d sections", document_id, len(parsed.sections))
     chunker = SemanticChunker(ChunkConfig())
-    chunks = chunker.chunk(parsed, source_file=file_path.name, document_id=document_id)
+    chunks = await asyncio.to_thread(
+        chunker.chunk, parsed, source_file=file_path.name, document_id=document_id
+    )
     logger.info("Produced %d chunks for document %s", len(chunks), document_id)
 
     # Phase 3: Index
