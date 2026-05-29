@@ -198,17 +198,32 @@ async def _index_document(doc_id: str, file_path: str, file_type: str):
         registry = _get_parser_registry()
 
         async def update_status(status: str):
+            """更新 DB 状态并发送 SSE 阶段变更（不含计数，前端会合并保留已有 indexed/total）。"""
             try:
                 doc.status = status
                 await db.commit()
-                _emit_progress(doc_id, "progress", {"phase": status})
             except Exception:
                 pass
+            _emit_progress(doc_id, "progress", {"phase": status})
 
         async def progress_fn(phase: str, data: dict):
-            _emit_progress(doc_id, "progress", {**data, "phase": phase})
+            """发送 SSE 进度事件。前端按 phase 键合并，不清除其他字段。"""
+            _emit_progress(doc_id, "progress", {"phase": phase, **data})
 
         try:
+            # 预检查：验证 embedding 可用
+            from app.vector.client import is_qdrant_available
+            from app.vector.embedder import get_embedder
+            if not is_qdrant_available():
+                raise RuntimeError("Qdrant 向量库不可用，请检查 Qdrant 服务是否启动")
+            try:
+                get_embedder()
+            except Exception as e:
+                raise RuntimeError(f"Embedding 模型初始化失败: {e}")
+
+            # 发送初始状态
+            _emit_progress(doc_id, "progress", {"phase": "parsing", "indexed": 0, "total": 0})
+
             count = await run_indexing_pipeline(
                 document_id=doc_id,
                 file_path=Path(file_path),
@@ -221,13 +236,16 @@ async def _index_document(doc_id: str, file_path: str, file_type: str):
             doc.chunk_count = count
             doc.indexed_at = datetime.now(UTC)
             await db.commit()
-            _emit_progress(doc_id, "complete", {"chunk_count": count})
+            _emit_progress(doc_id, "complete", {"chunk_count": count, "phase": "ready"})
         except Exception as e:
             logger.error("Index failed for document %s: %s", doc_id, e)
+            err_msg = str(e).replace("\n", " ")
+            if len(err_msg) > 300:
+                err_msg = err_msg[:300] + "..."
             doc.status = "error"
-            doc.error_message = str(e)
+            doc.error_message = err_msg
             await db.commit()
-            _emit_progress(doc_id, "error", {"message": str(e)})
+            _emit_progress(doc_id, "error", {"message": err_msg, "phase": "error"})
 
 
 @router.get("/documents/{document_id}/index-progress")

@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, h } from 'vue'
+import { ref, onMounted, onUnmounted, h, computed } from 'vue'
 import {
   NCard, NDataTable, NUpload, NButton, NTag, NProgress,
-  NIcon, NSpace, NModal, useMessage,
+  NIcon, NSpace, NModal, NAlert, useMessage,
   type DataTableColumn, type UploadFileInfo,
 } from 'naive-ui'
-import { TrashOutline, RefreshOutline, CloudUploadOutline, DocumentTextOutline } from '@vicons/ionicons5'
+import {
+  TrashOutline, RefreshOutline, CloudUploadOutline,
+  DocumentTextOutline, AlertCircleOutline, CheckmarkCircleOutline,
+} from '@vicons/ionicons5'
 import {
   fetchDocuments, uploadDocument, deleteDocument, reindexDocument,
   reindexAll, fetchIndexState, getProgressSSEUrl,
@@ -19,17 +22,26 @@ const documents = ref<KnowledgeDocument[]>([])
 const indexState = ref<IndexStateResponse>({ total_documents: 0, total_chunks: 0, ready_documents: 0, last_indexed_at: null })
 const loading = ref(false)
 const showReindexAllModal = ref(false)
-const progressMap = ref<Record<string, { phase: string; indexed: number; total: number }>>({})
+const progressMap = ref<Record<string, { phase: string; indexed: number; total: number; error?: string }>>({})
 const eventSources: Record<string, EventSource> = {}
+
+// ── Phase metadata ──
+const PHASE_INFO: Record<string, { label: string; description: string }> = {
+  parsing:  { label: '解析文件',  description: '正在提取文档内容...' },
+  chunking: { label: '智能切片',  description: '正在按语义边界切分文档...' },
+  indexing: { label: '向量索引',  description: '正在生成 Embedding 并写入向量库...' },
+  ready:    { label: '完成',      description: '索引完成' },
+  error:    { label: '失败',      description: '索引失败' },
+}
 
 function statusTagConfig(status: string) {
   const map: Record<string, { type: 'default' | 'info' | 'success' | 'warning' | 'error'; label: string }> = {
-    pending:  { type: 'default', label: '等待中' },
-    parsing:  { type: 'info',    label: '解析中' },
-    chunking: { type: 'info',    label: '切片中' },
-    indexing: { type: 'info',    label: '索引中' },
-    ready:    { type: 'success', label: '就绪' },
-    error:    { type: 'error',   label: '失败' },
+    pending:   { type: 'default', label: '等待中' },
+    parsing:   { type: 'info',    label: '解析中' },
+    chunking:  { type: 'info',    label: '切片中' },
+    indexing:  { type: 'info',    label: '索引中' },
+    ready:     { type: 'success', label: '就绪' },
+    error:     { type: 'error',   label: '失败' },
   }
   return map[status] || { type: 'default' as const, label: status }
 }
@@ -47,28 +59,46 @@ function formatTime(iso: string | null) {
 
 function connectProgress(docId: string) {
   if (eventSources[docId]) return
+
+  // Initialize progress entry
+  progressMap.value[docId] = { phase: 'pending', indexed: 0, total: 0 }
+
   const es = new EventSource(getProgressSSEUrl(docId))
   es.onmessage = (e) => {
     try {
       const { event, data } = JSON.parse(e.data)
+      if (event === 'heartbeat') return
+
+      const entry = progressMap.value[docId]
+      if (!entry) return
+
       if (event === 'progress') {
-        progressMap.value[docId] = {
-          phase: data.phase || '',
-          indexed: (data.indexed as number) || 0,
-          total: (data.total as number) || 0,
-        }
+        // Merge: only update fields present in the event, don't reset others
+        if (data.phase) entry.phase = data.phase
+        if (typeof data.indexed === 'number') entry.indexed = data.indexed
+        if (typeof data.total === 'number') entry.total = data.total
       } else if (event === 'complete') {
-        delete progressMap.value[docId]
+        // Show completion briefly, then remove
+        entry.phase = 'ready'
+        entry.indexed = entry.total || (data.chunk_count as number) || 0
+        setTimeout(() => {
+          delete progressMap.value[docId]
+          load()
+        }, 2000)
         es.close(); delete eventSources[docId]
-        load()
       } else if (event === 'error') {
-        delete progressMap.value[docId]
+        entry.phase = 'error'
+        entry.error = (data.message as string) || '未知错误'
+        // Keep error visible until user dismisses
         es.close(); delete eventSources[docId]
         load()
       }
-    } catch { /* ignore */ }
+    } catch { /* ignore malformed SSE data */ }
   }
-  es.onerror = () => { es.close(); delete eventSources[docId] }
+  es.onerror = () => {
+    // SSE disconnected — keep current progress state, reconnect on next load()
+    es.close(); delete eventSources[docId]
+  }
   eventSources[docId] = es
 }
 
@@ -139,6 +169,10 @@ async function handleReindexAll() {
   }
 }
 
+function dismissError(docId: string) {
+  delete progressMap.value[docId]
+}
+
 onMounted(load)
 onUnmounted(() => { Object.values(eventSources).forEach(es => es.close()) })
 
@@ -168,6 +202,13 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
     },
   },
   { title: '分块数', key: 'chunk_count', width: 70, render(row: KnowledgeDocument) { return row.chunk_count || '-' } },
+  {
+    title: '错误信息', key: 'error_message', width: 200, ellipsis: { tooltip: true },
+    render(row: KnowledgeDocument) {
+      if (!row.error_message) return '-'
+      return h('span', { style: { color: 'var(--error)', fontSize: '12px' } }, row.error_message)
+    },
+  },
   { title: '索引时间', key: 'indexed_at', width: 160, render(row: KnowledgeDocument) { return formatTime(row.indexed_at) } },
   {
     title: '操作', key: 'actions', width: 100,
@@ -189,7 +230,10 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   <div class="knowledge-page">
     <!-- Header -->
     <div class="page-header">
-      <h1>知识库管理</h1>
+      <div>
+        <h1>知识库管理</h1>
+        <p class="page-subtitle">管理文档上传、索引和向量化，提升 RAG 检索质量</p>
+      </div>
       <n-button quaternary @click="showReindexAllModal = true">
         <template #icon><n-icon :component="RefreshOutline" /></template>
         全量重建索引
@@ -199,36 +243,45 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
     <!-- Summary Cards -->
     <div class="summary-row">
       <div class="stat-card">
-        <div class="stat-icon docs-icon"><n-icon :component="DocumentTextOutline" size="20" /></div>
+        <div class="stat-icon" style="background:rgba(59,130,246,.1);color:#3b82f6">
+          <n-icon :component="DocumentTextOutline" size="20" />
+        </div>
         <div class="stat-body">
           <div class="stat-label">文档总数</div>
           <div class="stat-value">{{ indexState.total_documents }}</div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon chunks-icon"><n-icon :component="CloudUploadOutline" size="20" /></div>
+        <div class="stat-icon" style="background:rgba(139,92,246,.1);color:#8b5cf6">
+          <n-icon :component="CloudUploadOutline" size="20" />
+        </div>
         <div class="stat-body">
           <div class="stat-label">总分块数</div>
           <div class="stat-value">{{ indexState.total_chunks }}</div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-icon ready-icon" style="background: rgba(22,163,74,0.1); color: var(--success)">✓</div>
+        <div class="stat-icon" style="background:rgba(22,163,74,.1);color:var(--success)">
+          <n-icon :component="CheckmarkCircleOutline" size="20" />
+        </div>
         <div class="stat-body">
           <div class="stat-label">已就绪</div>
           <div class="stat-value">{{ indexState.ready_documents }}</div>
         </div>
       </div>
       <div class="stat-card">
-        <div class="stat-body" style="flex:1">
+        <div class="stat-icon" style="background:rgba(245,158,11,.1);color:#f59e0b">
+          <n-icon :component="RefreshOutline" size="20" />
+        </div>
+        <div class="stat-body">
           <div class="stat-label">最后索引时间</div>
           <div class="stat-value stat-time">{{ formatTime(indexState.last_indexed_at) }}</div>
         </div>
       </div>
     </div>
 
-    <!-- Upload Area -->
-    <div class="upload-row">
+    <!-- Upload Toolbar -->
+    <div class="toolbar-row">
       <n-upload
         multiple
         directory-dnd
@@ -236,45 +289,76 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
         :custom-request="handleUpload"
         :show-file-list="false"
       >
-        <n-button size="small" :loading="false">
+        <n-button size="small">
           <template #icon><n-icon :component="CloudUploadOutline" /></template>
-          上传文档 (.pdf / .md)
+          上传文档
         </n-button>
       </n-upload>
-      <span class="upload-hint">支持 PDF 和 Markdown 文件，上传后自动索引</span>
+      <span class="toolbar-hint">支持 PDF 和 Markdown，上传后自动解析、切片、向量化</span>
     </div>
 
-    <!-- Indexing Progress (shown above table when active) -->
-    <div v-if="Object.keys(progressMap).length" class="progress-row">
-      <div v-for="(prog, docId) in progressMap" :key="docId" class="progress-item">
-        <div class="progress-header">
-          <span class="progress-filename">
-            {{ documents.find(d => d.id === docId)?.filename || docId }}
-          </span>
-          <n-tag :type="statusTagConfig(prog.phase).type" size="tiny" :bordered="false">
-            {{ statusTagConfig(prog.phase).label }}
-          </n-tag>
-        </div>
-        <n-progress
-          v-if="prog.total > 0"
-          type="line"
-          :percentage="Math.round((prog.indexed / prog.total) * 100)"
-          :height="6"
-          :border-radius="3"
-          :fill-border-radius="3"
-          :indicator-placement="'inside'"
-          processing
-        />
-        <n-progress
-          v-else
-          type="line"
-          :percentage="0"
-          :height="6"
-          :border-radius="3"
-          :fill-border-radius="3"
-          :indicator-placement="'inside'"
-          processing
-        />
+    <!-- Indexing Progress -->
+    <div v-if="Object.keys(progressMap).length" class="progress-section">
+      <div
+        v-for="(prog, docId) in progressMap"
+        :key="docId"
+        class="progress-card"
+        :class="{ 'is-error': prog.phase === 'error' }"
+      >
+        <!-- Error state -->
+        <template v-if="prog.phase === 'error'">
+          <div class="progress-top">
+            <div class="progress-title">
+              <n-icon :component="AlertCircleOutline" size="18" color="var(--error)" />
+              <span class="progress-filename">
+                {{ documents.find(d => d.id === docId)?.filename || docId }}
+              </span>
+              <n-tag type="error" size="tiny" :bordered="false">索引失败</n-tag>
+            </div>
+            <n-button text size="tiny" @click="dismissError(docId)">关闭</n-button>
+          </div>
+          <n-alert type="error" :show-icon="false" style="margin-top:8px">
+            {{ prog.error || '未知错误，请查看后端日志' }}
+          </n-alert>
+        </template>
+
+        <!-- Active progress -->
+        <template v-else>
+          <div class="progress-top">
+            <div class="progress-title">
+              <span class="progress-filename">
+                {{ documents.find(d => d.id === docId)?.filename || docId }}
+              </span>
+              <n-tag
+                :type="prog.phase === 'ready' ? 'success' : 'info'"
+                size="tiny"
+                :bordered="false"
+              >
+                {{ PHASE_INFO[prog.phase]?.label || prog.phase }}
+              </n-tag>
+            </div>
+            <span v-if="prog.total > 0" class="progress-pct">
+              {{ Math.round((prog.indexed / prog.total) * 100) }}%
+            </span>
+          </div>
+          <div class="progress-desc">
+            {{ PHASE_INFO[prog.phase]?.description || '处理中...' }}
+          </div>
+          <n-progress
+            type="line"
+            :percentage="prog.total > 0 ? Math.round((prog.indexed / prog.total) * 100) : 0"
+            :height="6"
+            :border-radius="3"
+            :fill-border-radius="3"
+            :indicator-placement="'inside'"
+            :processing="prog.phase !== 'ready' && prog.total === 0"
+            :status="prog.phase === 'ready' ? 'success' : 'default'"
+            :color="prog.phase === 'error' ? 'var(--error)' : undefined"
+          />
+          <div v-if="prog.total > 0" class="progress-count">
+            {{ prog.indexed }} / {{ prog.total }} 块
+          </div>
+        </template>
       </div>
     </div>
 
@@ -288,10 +372,10 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
         striped
         size="small"
         :bordered="false"
+        :empty-text="'暂无文档，上传 PDF 或 Markdown 文件开始构建知识库'"
       />
     </div>
 
-    <!-- Reindex All Modal -->
     <n-modal
       v-model:show="showReindexAllModal"
       preset="dialog"
@@ -306,8 +390,8 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 
 <style scoped>
 .knowledge-page {
-  padding: 24px 32px;
-  max-width: 1100px;
+  padding: 28px 36px;
+  max-width: 1160px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -316,9 +400,10 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   overflow-y: auto;
 }
 
+/* ── Header ── */
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
 }
 .page-header h1 {
@@ -326,6 +411,11 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   font-weight: 600;
   color: var(--text-0);
   margin: 0;
+}
+.page-subtitle {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 4px 0 0;
 }
 
 /* ── Summary Cards ── */
@@ -344,25 +434,15 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   padding: 16px 18px;
 }
 .stat-icon {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.docs-icon {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
-}
-.chunks-icon {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8b5cf6;
-}
-.stat-body {
-  min-width: 0;
-}
+.stat-body { min-width: 0; }
 .stat-label {
   font-size: 12px;
   color: var(--text-3);
@@ -379,44 +459,71 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   font-weight: 500;
 }
 
-/* ── Upload Row ── */
-.upload-row {
+/* ── Toolbar ── */
+.toolbar-row {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.upload-hint {
+.toolbar-hint {
   font-size: 12px;
   color: var(--text-4);
 }
 
-/* ── Progress Row ── */
-.progress-row {
+/* ── Progress Section ── */
+.progress-section {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.progress-card {
   background: var(--bg-panel);
   border: 1px solid var(--seam-1);
   border-radius: var(--radius-lg);
   padding: 14px 18px;
 }
-.progress-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.progress-card.is-error {
+  border-color: rgba(220, 38, 38, .2);
+  background: rgba(220, 38, 38, .03);
 }
-.progress-header {
+.progress-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+.progress-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .progress-filename {
   font-size: 13px;
-  color: var(--text-1);
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--text-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.progress-pct {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.progress-desc {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 6px 0 8px;
+}
+.progress-count {
+  font-size: 11px;
+  color: var(--text-4);
+  margin-top: 4px;
+  text-align: right;
+  font-family: var(--font-mono);
 }
 
 /* ── Table ── */

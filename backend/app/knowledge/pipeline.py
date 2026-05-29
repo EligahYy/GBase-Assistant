@@ -50,13 +50,7 @@ async def run_indexing_pipeline(
     # Phase 3: Index
     await _update_status(status_callback, "indexing")
 
-    async def progress_fn(phase: str, data: dict):
-        if progress_callback:
-            await progress_callback(phase, data)
-        if status_callback:
-            await status_callback(f"indexing:{data.get('indexed', 0)}/{data.get('total', 0)}")
-
-    indexer = DocumentIndexer(progress_callback=progress_fn)
+    indexer = DocumentIndexer(progress_callback=progress_callback)
     count = await indexer.index(chunks, document_id=document_id, clear_existing=True)
 
     await _update_status(status_callback, "ready")
