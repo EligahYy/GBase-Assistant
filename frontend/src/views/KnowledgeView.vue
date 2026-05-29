@@ -350,12 +350,14 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
                 {{ PHASE_INFO[prog.phase]?.label || prog.phase }}
               </n-tag>
             </div>
-            <span v-if="prog.total > 0" class="progress-pct">
-              {{ Math.round((prog.indexed / prog.total) * 100) }}%
-            </span>
-            <n-button text size="tiny" type="warning" @click="cancel(docId)" style="flex-shrink:0">
-              取消
-            </n-button>
+            <div class="progress-actions">
+              <span v-if="prog.total > 0" class="progress-pct">
+                {{ Math.round((prog.indexed / prog.total) * 100) }}%
+              </span>
+              <n-button text size="tiny" type="warning" @click="cancel(docId)">
+                取消
+              </n-button>
+            </div>
           </div>
           <div class="progress-desc">
             {{ PHASE_INFO[prog.phase]?.description || '处理中...' }}
@@ -521,12 +523,17 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.progress-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
 .progress-pct {
   font-size: 18px;
   font-weight: 700;
   color: var(--primary, #3b82f6);
   font-family: var(--font-mono);
-  flex-shrink: 0;
 }
 .progress-desc {
   font-size: 12px;
