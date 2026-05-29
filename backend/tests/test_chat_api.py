@@ -34,7 +34,7 @@ async def test_v2_chat_stream_responds_ag_ui_events():
 
 @pytest.mark.asyncio
 async def test_v2_chat_sql_intent():
-    """SQL 意图应触发 TOOL_CALL_START 事件。"""
+    """SQL 意图应产生流式 TEXT_MESSAGE_CONTENT 和 RUN_FINISHED。"""
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -45,12 +45,13 @@ async def test_v2_chat_sql_intent():
             timeout=10,
         )
         body = response.text
-        assert "TOOL_CALL_START" in body, f"Missing TOOL_CALL_START: {body[:300]}"
+        assert "TEXT_MESSAGE_CONTENT" in body, f"Missing TEXT_MESSAGE_CONTENT: {body[:300]}"
+        assert "RUN_FINISHED" in body, f"Missing RUN_FINISHED: {body[:300]}"
 
 
 @pytest.mark.asyncio
 async def test_v2_chat_general_intent():
-    """通用意图应路由到 general_specialist。"""
+    """通用意图应产生流式 TEXT_MESSAGE_CONTENT 回复。"""
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -61,4 +62,4 @@ async def test_v2_chat_general_intent():
             timeout=10,
         )
         body = response.text
-        assert "general_specialist" in body, f"Missing general_specialist: {body[:300]}"
+        assert "TEXT_MESSAGE_CONTENT" in body, f"Missing TEXT_MESSAGE_CONTENT: {body[:300]}"
