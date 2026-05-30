@@ -1,0 +1,16 @@
+# backend/config/glossary.yaml
+# GBase 8a 业务词汇表 — Semantic Mapper Agent 的 query_glossary() 工具数据源
+# 自动提取: DDL COMMENT 中的候选映射，人工确认后加入
+# 手动补充: 直接编辑此文件，格式如下:
+#
+# terms:
+#   销售额:
+#     table: product_sale
+#     column: pay_amount
+#     synonyms: [销售金额, 营收, 收入]
+#   产品线:
+#     table: product
+#     column: category
+#     synonyms: [品类, 产品分类]
+
+terms: {}
