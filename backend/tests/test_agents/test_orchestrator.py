@@ -31,14 +31,14 @@ class TestClassifyIntentV2:
 
 
 class TestRouteAfterIntent:
-    def test_sql_intent_routes_to_schema_grounding(self):
+    def test_sql_intent_routes_to_semantic_mapper(self):
         state = AgentStateType(
             messages=[],
             intent="sql",
             conversation_id="c1",
             model="m1",
         )
-        assert route_after_intent(state) == "schema_grounding"
+        assert route_after_intent(state) == "semantic_mapper"
 
     def test_qa_intent_routes_to_knowledge_specialist(self):
         state = AgentStateType(

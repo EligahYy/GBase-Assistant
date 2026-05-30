@@ -9,7 +9,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_stream_writer
 
-from app.agents.orchestrator import classify_intent_v2, route_after_intent
+from app.agents.orchestrator import classify_intent_v2, route_after_intent, supervisor_check_node
+from app.agents.semantic_mapper import semantic_mapper_node
 from app.agents.schema_graph import get_schema_graph, SchemaGraph
 from app.agents.state import AgentStateType
 from app.gateway.ag_ui_encoder import EventEncoder
@@ -121,14 +122,28 @@ async def sql_specialist_node(state: AgentStateType) -> dict:
                 schemas = await schema_retriever.retrieve(user_msg, state["db_connection_id"])
 
         grounded_tables = set(grounding.get("tables", []))
-        if grounded_tables and schemas:
-            filtered = [s for s in schemas if s.table_name in grounded_tables]
-            if filtered:
-                schemas = filtered
+
+        # Use grounded tables as a hint but DON'T filter — trust the vector search
+        # and let the prompt's business_terms guide the LLM
+
+        # Fetch few-shot examples
+        examples_list: list = []
+        try:
+            from app.dependencies import get_example_retriever
+            example_retriever = get_example_retriever()
+            if example_retriever:
+                examples_list = await example_retriever.retrieve(user_msg, top_k=3)
+        except Exception:
+            pass
+
+        business_terms = state.get("business_terms")
+        chart_config_hint = state.get("chart_config")
 
         messages = build_sql_prompt(
             message=user_msg, dialect_rules=dialect_rules,
-            schemas=schemas, examples=[], history=[],
+            schemas=schemas, examples=examples_list, history=[],
+            business_terms=business_terms,
+            chart_config=chart_config_hint,
         )
 
         response_text = ""
@@ -149,7 +164,22 @@ async def sql_verifier_node(state: AgentStateType) -> dict:
     sql = state.get("generated_sql")
     if not sql:
         return {"validation_passed": False, "validation_errors": ["未生成 SQL"]}
-    result = validate_sql(sql, schemas=None)
+
+    # Build schemas for Layer 3 cross-reference check
+    schemas_arg = None
+    grounding = state.get("grounding") or {}
+    tables_list = grounding.get("tables", [])
+    if tables_list and state.get("db_connection_id"):
+        from app.agents.schema_graph import get_schema_graph
+        g = get_schema_graph(state["db_connection_id"])
+        if g._built:
+            schemas_arg = []
+            for t in tables_list:
+                if t in g.tables:
+                    meta = g.tables[t]
+                    schemas_arg.append({"table_name": t, "columns": [{"name": c.name, "type": c.data_type} for c in meta.columns]})
+
+    result = validate_sql(sql, schemas=schemas_arg)
     logger.info("SQL Verifier: passed=%s", result.is_valid)
     retry = state.get("sql_retry_count", 0)
     return {
@@ -255,8 +285,21 @@ async def response_formatter_node(state: AgentStateType) -> dict:
     final_response = state.get("final_response", "")
 
     if intent == "sql" and not final_response:
+        writer = get_stream_writer()
+
+        # Emit chart_config event
+        chart_config_data = state.get("chart_config")
+        if chart_config_data:
+            writer([{"chart_config": chart_config_data}])
+
         sql = state.get("generated_sql")
+        if sql:
+            writer([{"sql": sql}])
+
         query_result = state.get("query_result")
+        if query_result:
+            writer([{"result": query_result}])
+
         validation_errors = state.get("validation_errors", [])
         exec_error = state.get("execution_error")
 
@@ -279,13 +322,21 @@ async def response_formatter_node(state: AgentStateType) -> dict:
     return {"final_response": final_response}
 
 
+async def ask_user_clarification_node(state: AgentStateType) -> dict:
+    """Ask user to clarify when confidence is too low or schema validation fails."""
+    clarification = state.get("needs_clarification", "无法理解您的问题，请提供更多信息。")
+    return {"final_response": clarification}
+
+
 # ── 图构建 ──
 
 def build_graph() -> StateGraph:
     builder = StateGraph(AgentStateType)
 
     builder.add_node("orchestrator", orchestrator_node)
-    builder.add_node("schema_grounding", schema_grounding_node)
+    builder.add_node("semantic_mapper", semantic_mapper_node)
+    builder.add_node("supervisor_check", supervisor_check_node)
+    builder.add_node("ask_user_clarification", ask_user_clarification_node)
     builder.add_node("sql_specialist", sql_specialist_node)
     builder.add_node("sql_verifier", sql_verifier_node)
     builder.add_node("sql_executor", sql_executor_node)
@@ -294,13 +345,29 @@ def build_graph() -> StateGraph:
     builder.add_node("response_formatter", response_formatter_node)
 
     builder.add_edge(START, "orchestrator")
+
+    # Route based on intent
     builder.add_conditional_edges(
         "orchestrator", route_after_intent,
-        {"schema_grounding": "schema_grounding", "knowledge_specialist": "knowledge_specialist",
+        {"semantic_mapper": "semantic_mapper", "knowledge_specialist": "knowledge_specialist",
          "general_specialist": "general_specialist", "response_formatter": "response_formatter"},
     )
 
-    builder.add_edge("schema_grounding", "sql_specialist")
+    # SQL path: semantic_mapper → supervisor_check → (sql_specialist | ask_user_clarification)
+    builder.add_edge("semantic_mapper", "supervisor_check")
+
+    def route_after_supervisor(state: AgentStateType) -> str:
+        if state.get("needs_clarification"):
+            return "ask_user_clarification"
+        return "sql_specialist"
+
+    builder.add_conditional_edges(
+        "supervisor_check", route_after_supervisor,
+        {"sql_specialist": "sql_specialist", "ask_user_clarification": "ask_user_clarification"},
+    )
+    builder.add_edge("ask_user_clarification", END)
+
+    # Existing SQL specialist → verifier → executor path
     builder.add_edge("sql_specialist", "sql_verifier")
 
     def route_verifier(state: AgentStateType) -> str:
@@ -350,9 +417,16 @@ async def run_agent_with_ag_ui(
         async for mode, events in graph.astream(initial_state, config=config, stream_mode=["custom", "updates"]):
             if mode == "custom":
                 for ev in events:
-                    if isinstance(ev, dict) and "delta" in ev:
-                        yield EventEncoder.text_delta(ev["delta"])
-                        streamed_text = True
+                    if isinstance(ev, dict):
+                        if "delta" in ev:
+                            yield EventEncoder.text_delta(ev["delta"])
+                            streamed_text = True
+                        elif "sql" in ev:
+                            yield EventEncoder.sql_event(ev["sql"])
+                        elif "chart_config" in ev:
+                            yield EventEncoder.chart_config(ev["chart_config"])
+                        elif "result" in ev:
+                            yield EventEncoder.result_event(ev["result"])
 
         # 获取最终状态
         final_state = await graph.aget_state(config)
