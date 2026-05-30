@@ -4,25 +4,6 @@ from __future__ import annotations
 
 from app.protocols import KnowledgeChunk, SQLExample, TableSchema
 
-# ── 意图分类 ────────────────────────────────────────────────────────────────────
-
-INTENT_SYSTEM = """你是一个意图分类器。根据用户输入，判断其意图并返回 JSON。
-
-意图类型：
-- "sql"：用户想查询数据、生成 SQL、分析数据（如"查询..."、"统计..."、"列出..."）
-- "qa"：用户在咨询 GBase 8a 数据库的知识、语法、特性、错误（如"支持...吗"、"怎么..."、"什么是..."）
-- "general"：其他（问候、闲聊、超出范围的问题）
-
-只返回 JSON，格式：{"intent": "sql"} 或 {"intent": "qa"} 或 {"intent": "general"}
-
-示例：
-用户："查询每个部门的员工数" → {"intent": "sql"}
-用户："GBase 8a 支持窗口函数吗" → {"intent": "qa"}
-用户："你好" → {"intent": "general"}
-用户："统计最近30天的订单" → {"intent": "sql"}
-用户："创建触发器会报错吗" → {"intent": "qa"}"""
-
-
 # ── SQL 生成 ────────────────────────────────────────────────────────────────────
 
 SQL_SYSTEM_BASE = """你是 GBase 8a MPP 分析数据库的 SQL 专家。根据用户的自然语言描述，生成正确的 GBase 8a SQL。
@@ -37,6 +18,19 @@ SQL_SYSTEM_BASE = """你是 GBase 8a MPP 分析数据库的 SQL 专家。根据�
 
 ### 函数兼容性
 {function_rules}
+
+### 系统监控查询（GBase 8a 系统表）
+当用户询问数据库运行状态时，可查询以下系统表：
+- information_schema.PROCESSLIST — 当前连接和正在执行的查询
+- information_schema.TABLES — 表元数据（行数、数据大小、创建时间）
+- information_schema.COLUMNS — 列元数据
+
+常用查询模板：
+- 当前连接数: SELECT COUNT(*) FROM information_schema.PROCESSLIST
+- 运行时间: SELECT DATEDIFF(NOW(), MIN(create_time)) AS running_days FROM information_schema.TABLES
+- 慢查询(>10s): SELECT id, user, host, db, time, info FROM information_schema.PROCESSLIST WHERE time > 10
+- 表大小排行: SELECT TABLE_NAME, TABLE_ROWS, ROUND(DATA_LENGTH/1024/1024,2) AS size_mb FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY DATA_LENGTH DESC
+- 数据分布: SELECT TABLE_NAME, TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY TABLE_ROWS DESC
 
 ## 输出格式要求
 1. 先输出 SQL，用 ```sql 代码块包裹
@@ -68,6 +62,8 @@ def build_sql_prompt(
     schemas: list[TableSchema],
     examples: list[SQLExample],
     history: list[dict] | None = None,
+    business_terms: dict | None = None,
+    chart_config: dict | None = None,
 ) -> list[dict]:
     """构建 SQL 生成的完整消息列表。"""
     unsupported = _format_unsupported(dialect_rules.get("unsupported", []))
@@ -80,23 +76,70 @@ def build_sql_prompt(
         function_rules=functions,
     )
 
-    # 追加 Schema 信息
+    # 🆕 追加 Schema 信息（含列元数据）
     if schemas:
         schema_section = "\n## 目标数据库 Schema\n"
         for s in schemas:
             schema_section += f"\n-- 表: {s.table_name}"
             if s.description:
                 schema_section += f" ({s.description})"
-            schema_section += f"\n{s.ddl}\n"
+            schema_section += "\n"
+            # 显示列角色、标签、枚举值（若可用）
+            if s.columns:
+                col_lines = []
+                for c in s.columns:
+                    if isinstance(c, str):
+                        col_line = f"--   {c}"
+                    else:
+                        col_line = f"--   {c.get('name', '?')} {c.get('type', '?')}"
+                        if c.get('role') and c['role'] != 'UNKNOWN':
+                            col_line += f" [{c['role']}]"
+                        if c.get('label'):
+                            col_line += f" -- {c['label']}"
+                        if c.get('enum_values'):
+                            ev = ", ".join(f"{k}={v}" for k, v in c['enum_values'].items())
+                            col_line += f" 枚举: {ev}"
+                    col_lines.append(col_line)
+                schema_section += "\n".join(col_lines) + "\n"
+            else:
+                # 回退到原始 DDL
+                schema_section += f"{s.ddl}\n"
         system_content += schema_section
     else:
         system_content += "\n\n## 注意\n当前未选择数据库，请基于用户描述推断表结构生成通用 SQL。"
+
+    # 🆕 注入业务术语映射
+    if business_terms:
+        bt_lines = ["\n## 业务术语映射（已知的语义对应关系）"]
+        for term, info in business_terms.items():
+            if isinstance(info, dict):
+                tbl = info.get("table", "")
+                col = info.get("column", "")
+                tmpl = info.get("sql_template", "")
+                line = f"- **{term}** -> {tbl}.{col}"
+                if tmpl:
+                    line += f" (表达式: {tmpl})"
+                bt_lines.append(line)
+        system_content += "\n".join(bt_lines)
 
     # Few-shot 示例
     if examples:
         system_content += "\n\n## 参考示例\n"
         for ex in examples:
             system_content += f"\n用户问题：{ex.question}\n```sql\n{ex.sql}\n```\n"
+
+    # 🆕 图表输出指令
+    chart_instruction = (
+        "\n\n## 图表输出要求\n"
+        "如果你的查询结果适合图表展示，请在 SQL 代码块之后输出一个 JSON 图表配置（用 ```chart_config 代码块包裹）。"
+        "格式: {\"type\": \"bar|line|pie|scatter\", \"title\": \"图表标题\", "
+        "\"x_axis\": {\"column\": \"列名\", \"label\": \"X轴标签\"}, "
+        "\"y_axis\": {\"column\": \"列名\", \"label\": \"Y轴标签\", \"aggregation\": \"SUM|COUNT|AVG\"}}\n"
+        "只在结果有明确的维度和度量时输出图表配置，纯列表查询不需要。\n"
+    )
+    if chart_config:
+        chart_instruction += f"\n用户期望的图表类型: {chart_config.get('type', 'bar')}"
+    system_content += chart_instruction
 
     messages: list[dict] = [{"role": "system", "content": system_content}]
 
@@ -170,9 +213,9 @@ def build_sql_correction_prompt(
 
 # ── General Chat ────────────────────────────────────────────────────────────────
 
-GENERAL_SYSTEM = """你是 GBase 8a 数据库助手。你的主要功能是帮助用户生成 SQL 和解答 GBase 8a 相关问题。
+GENERAL_SYSTEM = """你是 GBase 8a 数据库助手。你可以回答一般性问题、进行友好对话。
 
-如果用户的问题与数据库相关，引导他们描述具体需求；如果是问候或闲聊，简短友好地回应并引导回正题。"""
+如果用户的问题涉及数据库查询或技术问题，引导他们描述具体需求（如"我想查询销售额"或"GBase 8a 如何创建分区表"），以便为你提供更精准的帮助。"""
 
 
 def build_general_prompt(message: str, history: list[dict] | None = None) -> list[dict]:

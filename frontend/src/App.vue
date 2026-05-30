@@ -42,6 +42,7 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   initTheme()
   connStore.loadConnections()
+  connStore.startStatusStream()  // 全局启动 SSE 连接状态推送
   window.addEventListener('keydown', handleKeydown)
 })
 </script>

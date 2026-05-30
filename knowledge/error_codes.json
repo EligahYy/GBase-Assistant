@@ -1,0 +1,1991 @@
+[
+  {
+    "code": "GBA-03CR-0001",
+    "category": "gcware",
+    "description": "gcware内部错误，也可能是在集群不稳定的情况下发生",
+    "solution": "分析与建议 请检查集群的状态是否稳定，并检查gcware日志，了解具体原因。",
+    "keywords": [
+      "GBA-03CR-0001"
+    ]
+  },
+  {
+    "code": "GBA-03CR-0002",
+    "category": "gcware",
+    "description": "一般是gcware异常退出导致，也可能在集群网络不稳定的时候发生",
+    "solution": "1． 检查网络环境是否正常； 2． 执行 gcluster_servicegcwarestart 启动gcware",
+    "keywords": [
+      "GBA-03CR-0002"
+    ]
+  },
+  {
+    "code": "GBA-03CR-0003",
+    "category": "gcware",
+    "description": "由于gcware异常退出后重新被拉起，而gclusterd没有重启，那么原有gclusterd 申请的handle将全部失效，gclusterd仍然使用失效的handle就会造成该错误。",
+    "solution": "对于用户没有什么直接影响，只需要重试对应的sql即可，这样gclusterd将会 重新获得新的handle，gclusterd使用新的handle进行操作就会成功。",
+    "keywords": [
+      "GBA-03CR-0003"
+    ]
+  },
+  {
+    "code": "GBA-03CR-0004",
+    "category": "gcware",
+    "description": "gcware服务处于启动中，不能对外提供服务",
+    "solution": "等待重新启动",
+    "keywords": [
+      "GBA-03CR-0004"
+    ]
+  },
+  {
+    "code": "GBA-03CR-0006",
+    "category": "gcware",
+    "description": "没有配置该用户下$GCWARE_BASE/config/uidgid.d/gbase",
+    "solution": "配置$GCWARE_BASE/config/uidgid.d/gbase文件中参数信息 6.8.1.2 gcadmin 错误列表",
+    "keywords": [
+      "GBA-03CR-0006"
+    ]
+  },
+  {
+    "code": "GBA-03GA-0001",
+    "category": "gcware",
+    "description": "选项拼写错误",
+    "solution": "请使用gcadmin-help查看帮助内容，并参照进行拼写检查",
+    "keywords": [
+      "GBA-03GA-0001"
+    ]
+  },
+  {
+    "code": "GBA-03GA-0003",
+    "category": "gcware",
+    "description": "参数前后不对应的错误，是添加节点的时候，节点的IP个数和节点的命名个数 不相等或者指定的nodename列表、IP列表有重复值",
+    "solution": "nodename 和nodesip必须一一对应",
+    "keywords": [
+      "GBA-03GA-0003"
+    ]
+  },
+  {
+    "code": "GBA-03GA-0004",
+    "category": "gcware",
+    "description": "添加的节点IP，已经存在",
+    "solution": "检查添加节点的IP",
+    "keywords": [
+      "GBA-03GA-0004"
+    ]
+  },
+  {
+    "code": "GBA-03GA-0005",
+    "category": "gcware",
+    "description": "添加组时找不到指定的节点，节点可能offline",
+    "solution": "检查添加节点的IP，IP必须从候选的节点列表中选取，或启动offline状态节点 上的集群服务",
+    "keywords": [
+      "GBA-03GA-0005"
+    ]
+  },
+  {
+    "code": "GBA-03GA-0006",
+    "category": "gcware",
+    "description": "添加节点时，节点副本个数超过允许的最大值",
+    "solution": "节点副本数超过最大值，检查每个节点副本个数",
+    "keywords": [
+      "GBA-03GA-0006"
+    ]
+  },
+  {
+    "code": "GBA-03GA-0007",
+    "category": "gcware",
+    "description": "添加节点个数超过最大范围",
+    "solution": "超过集群最多支持的节点个数",
+    "keywords": [
+      "GBA-03GA-0007"
+    ]
+  },
+  {
+    "code": "GBA-03GA-0008",
+    "category": "gcware",
+    "description": "由于参数个数不足造成的错误",
+    "solution": "用户需注意参数个数以及参数之间的分割符是否正确 6.8.1.3 其他错误列表",
+    "keywords": [
+      "GBA-03GA-0008"
+    ]
+  },
+  {
+    "code": "GBA-03OT-0001",
+    "category": "gcware",
+    "description": "可能由于内存原因，网络原因，集群状态导致",
+    "solution": "根据具体错误信息检查内存，网络，集群状态",
+    "keywords": [
+      "GBA-03OT-0001"
+    ]
+  },
+  {
+    "code": "GBA-03OT-0002",
+    "category": "gcware",
+    "description": "获取某distribution信息失败",
+    "solution": "检查distribution相关状态",
+    "keywords": [
+      "GBA-03OT-0002"
+    ]
+  },
+  {
+    "code": "GBA-03OT-0003",
+    "category": "gcware",
+    "description": "与gcware通信失败，操作FEVENTLOG失败",
+    "solution": "检查gcware日志和工作状态",
+    "keywords": [
+      "GBA-03OT-0003"
+    ]
+  },
+  {
+    "code": "GBA-03OT-0004",
+    "category": "gcware",
+    "description": "某个数据分片全部节点损坏",
+    "solution": "查看集群状态，检查是否有节点离线 6.8.1.4 内部错误列表",
+    "keywords": [
+      "GBA-03OT-0004"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0001",
+    "category": "gcluster",
+    "description": "不支持此数据类型",
+    "solution": "比如目前不支持使用set，enum，geometry类型。",
+    "keywords": [
+      "GBA-02IS-0001"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0002",
+    "category": "gcluster",
+    "description": "获取columnhash信息错误",
+    "solution": "无法根据计算的hash值计算出数据应该放到哪个节点上，原因是nodedatamap 表查询有误。",
+    "keywords": [
+      "GBA-02IS-0002"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0003",
+    "category": "gcluster",
+    "description": "分配insert内存错误",
+    "solution": "可能的原因是：内存不足，可以利用top查看内存是否有剩余，可在释放足够内 存后重试一次",
+    "keywords": [
+      "GBA-02IS-0003"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0004",
+    "category": "gcluster",
+    "description": "从gcware获取scn错误",
+    "solution": "无法从gcware处申请到scn号，可能是gcware异常，重试一次或者利用gcadmin 查看一下是否正常",
+    "keywords": [
+      "GBA-02IS-0004"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0005",
+    "category": "gcluster",
+    "description": "Ctrl+C或网络中断导致此次操作被终止。",
+    "solution": "用户终止了此次操作，或者由于网络中断导致此次操作被终止。",
+    "keywords": [
+      "GBA-02IS-0005"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0006",
+    "category": "gcluster",
+    "description": "引用在gnode上执行语句返回的错误",
+    "solution": "需要针对错误信息进行分析",
+    "keywords": [
+      "GBA-02IS-0006"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0007",
+    "category": "gcluster",
+    "description": "不允许向视图中插入数据",
+    "solution": "目前集群不允许向视图中做插入、更新等更新数据的操作。",
+    "keywords": [
+      "GBA-02IS-0007"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0008",
+    "category": "gcluster",
+    "description": "执行insertstep错误",
+    "solution": "在执行insert时失败，需要针对错误信息进行分析。",
+    "keywords": [
+      "GBA-02IS-0008"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0009",
+    "category": "gcluster",
+    "description": "错误出现原因 某些节点offline或者不可用",
+    "solution": "检查集群及表状态并针对处理。",
+    "keywords": [
+      "GBA-02IS-0009"
+    ]
+  },
+  {
+    "code": "GBA-02IS-0010",
+    "category": "gcluster",
+    "description": "某个SG内没有目标表的可用分片。",
+    "solution": "等待数据同步完成后，再执行DML操作。 6.8.2.2 DELETE /UPDATE 错误列表",
+    "keywords": [
+      "GBA-02IS-0010"
+    ]
+  },
+  {
+    "code": "GBA-02DU-0001",
+    "category": "gcluster",
+    "description": "无法从系统表gbase.table_distribution中找到表'%s.%s'的信息",
+    "solution": "1. 请检查该表是否为express引擎表； 2. 请检查gbase.table_distribution表中是否记录该表信息，信息是否正确；若 无，向gbase.table_distribution表中插入该表信息；",
+    "keywords": [
+      "GBA-02DU-0001"
+    ]
+  },
+  {
+    "code": "GBA-02DU-0002",
+    "category": "gcluster",
+    "description": "无法得到正确的集群（节点）信息",
+    "solution": "参考本手册中6.8.1.1gcware错误列表章节的内容",
+    "keywords": [
+      "GBA-02DU-0002"
+    ]
+  },
+  {
+    "code": "GBA-02DU-0003",
+    "category": "gcluster",
+    "description": "引用在gnode上执行语句返回的错误",
+    "solution": "需要针对错误信息进行分析",
+    "keywords": [
+      "GBA-02DU-0003"
+    ]
+  },
+  {
+    "code": "GBA-02DU-0004",
+    "category": "gcluster",
+    "description": "无法得到scn的值",
+    "solution": "无法从gcware处申请到scn号，可能是gcware异常，重试一次或者利用gcadmin 查看一下是否正常",
+    "keywords": [
+      "GBA-02DU-0004"
+    ]
+  },
+  {
+    "code": "GBA-02DU-0005",
+    "category": "gcluster",
+    "description": "用户终止操作",
+    "solution": "用户终止了此次操作，或者由于网络中断导致终止此次操作。",
+    "keywords": [
+      "GBA-02DU-0005"
+    ]
+  },
+  {
+    "code": "GBA-02DU-0006",
+    "category": "gcluster",
+    "description": "不允许更新hash分布列的值",
+    "solution": "不支持对Hash分布列的更新操作，请采取其他方式实现。 6.8.2.3 DDL、DAL 错误列表",
+    "keywords": [
+      "GBA-02DU-0006"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0001",
+    "category": "gcluster",
+    "description": "建表时，指定的hash分布列必须是存在于列定义中的某一列。",
+    "solution": "指定的hash分布列不是CREATETABLE语句中定义的某一列，请检查建表语 句。",
+    "keywords": [
+      "GBA-02DD-0001"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0002",
+    "category": "gcluster",
+    "description": "复制表不允许建立hash分布列",
+    "solution": "检查建表语句，确认需要建立hash 分布列的表不是复制表",
+    "keywords": [
+      "GBA-02DD-0002"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0003",
+    "category": "gcluster",
+    "description": "hash分布列目前仅支持：int型，varchar型，decimal型",
+    "solution": "检查hash分布列的数据类型，如果可以，请更换hash分布列或其类型为支持的 类型",
+    "keywords": [
+      "GBA-02DD-0003"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0004",
+    "category": "gcluster",
+    "description": "建表时，建表语句中必须至少包含一个列的定义。比如createtablet;将被禁止",
+    "solution": "检查建表语句，建表语句中必须至少包含一个列的定义",
+    "keywords": [
+      "GBA-02DD-0004"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0005",
+    "category": "gcluster",
+    "description": "使用 create as select 时，不能从临时表创建。比如 create table t as select * from(select*fromt1)tt;将被禁止",
+    "solution": "检查建表语句，确认最外层select是否是非物理表，并在修正后重试。",
+    "keywords": [
+      "GBA-02DD-0005"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0006",
+    "category": "gcluster",
+    "description": "不允许在同一条SQL中同时删除多个表",
+    "solution": "检查删表语句，把一条SQL分成若干条单表删除SQL后重试。",
+    "keywords": [
+      "GBA-02DD-0006"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0007",
+    "category": "gcluster",
+    "description": "删除hash 分布列定义时，操作table_distribution表失败",
+    "solution": "可能是gbase.table_distribution出现问题，可以通过查询它进行验证。",
+    "keywords": [
+      "GBA-02DD-0007"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0008",
+    "category": "gcluster",
+    "description": "不允许使用除数字、英文字母、下划线以外的字符作为表名，列名，数据库名 等。",
+    "solution": "检查表名，库名，列名等是否包含了不允许出现的字符",
+    "keywords": [
+      "GBA-02DD-0008"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0009",
+    "category": "gcluster",
+    "description": "建表时，如果指定limitstoragesize，则不能超过当前用户的limit限制。",
+    "solution": "如果当前用户设定了limitstoragesize，则建表时指定的limitstoragesize不能超 过这个用户的限制",
+    "keywords": [
+      "GBA-02DD-0009"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0010",
+    "category": "gcluster",
+    "description": "操作table_distribution失败时产生的错误信息。",
+    "solution": "可能是gbase.table_distribution出现问题，可以通过查询它进行验证。",
+    "keywords": [
+      "GBA-02DD-0010"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0011",
+    "category": "gcluster",
+    "description": "引用在gnode上执行语句返回的错误",
+    "solution": "需要针对错误信息进行分析",
+    "keywords": [
+      "GBA-02DD-0011"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0012",
+    "category": "gcluster",
+    "description": "无法得到合适的或正确的集群（节点）信息",
+    "solution": "可参考error_gcware页",
+    "keywords": [
+      "GBA-02DD-0012"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0013",
+    "category": "gcluster",
+    "description": "无法拼写正确的SQL",
+    "solution": "内部错误，需要根据express.log进行排查",
+    "keywords": [
+      "GBA-02DD-0013"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0014",
+    "category": "gcluster",
+    "description": "创建的表已经存在时，将报告错误。",
+    "solution": "检查集群中（gcluster/gnode）上是否已经有了这张表，或者gbase.table_distribution 中有此表的信息。",
+    "keywords": [
+      "GBA-02DD-0014"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0015",
+    "category": "gcluster",
+    "description": "不允许利用altertable更改表的某些属性：如字符集等。",
+    "solution": "目前集群不允许利用altertable更改一些表的属性等",
+    "keywords": [
+      "GBA-02DD-0015"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0016",
+    "category": "gcluster",
+    "description": "不允许对普通分布表和nocopies属性的分布表进行分区交换",
+    "solution": "",
+    "keywords": [
+      "GBA-02DD-0016"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0017",
+    "category": "gcluster",
+    "description": "进行分区表交换时，表必须存在。",
+    "solution": "需要交换的表，必须真实存在。",
+    "keywords": [
+      "GBA-02DD-0017"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0018",
+    "category": "gcluster",
+    "description": "不允许在分布表和复制表之间进行分区交换。",
+    "solution": "检查两张表，是否是分布表和复制表之间要进行分区交换",
+    "keywords": [
+      "GBA-02DD-0018"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0019",
+    "category": "gcluster",
+    "description": "不允许在hash分布列不一致的分布表之间进行分区交换",
+    "solution": "检查两张分布表的hash列是否一致",
+    "keywords": [
+      "GBA-02DD-0019"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0020",
+    "category": "gcluster",
+    "description": "不允许在同一条SQL中同时重命名多个表。",
+    "solution": "把一条renametable根据表，拆分成若干条renametable后重试即可",
+    "keywords": [
+      "GBA-02DD-0020"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0021",
+    "category": "gcluster",
+    "description": "无法正确的进行tablespace相关操作",
+    "solution": "1、检查SQL是否有误； 分析与建议 2、需要根据错误信息做详细排查。",
+    "keywords": [
+      "GBA-02DD-0021"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0022",
+    "category": "gcluster",
+    "description": "当表中含有timestamp列时，如果没有设定好默认值等属性，则会产生这个错误。",
+    "solution": "当建表时包含两列timestamp，没有对这两列定义任何修饰，则都会默认以default now()onupdatenow()作为其属性的，但现在不允许超过1列都是用now()作为 默认值。",
+    "keywords": [
+      "GBA-02DD-0022"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0023",
+    "category": "gcluster",
+    "description": "当给用户授限时，如果表不存在，则必须同时授予create权限。",
+    "solution": "检查表是否存在，如果不存在则需要在授权时加入create权限。",
+    "keywords": [
+      "GBA-02DD-0023"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0024",
+    "category": "gcluster",
+    "description": "在同一条SQL中，同时仅允许create、drop、rename、grant一个用户。",
+    "solution": "检查SQL，看是否同时操作了多个用户，如果有，则拆成单独的SQL后重试即 可",
+    "keywords": [
+      "GBA-02DD-0024"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0025",
+    "category": "gcluster",
+    "description": "基于目前的设计，不允许对gbase用户进行更改【会在合适的时机去掉此限制】",
+    "solution": "gbase作为内建用户，暂时不允许对其进行操作，因此检查SQL是否正要对gbase 用户做更改。",
+    "keywords": [
+      "GBA-02DD-0025"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0026",
+    "category": "gcluster",
+    "description": "类似这种语句会被禁止：renameusercurrent_user()tocurrent_user()",
+    "solution": "检查SQL是否是renameusercurrent_user()tocurrent_user()",
+    "keywords": [
+      "GBA-02DD-0026"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0027",
+    "category": "gcluster",
+    "description": "针对grantoptions：REQUIRESSL，REQUIREX509等，将被禁止",
+    "solution": "检查SQL，看是否符合授权要求。",
+    "keywords": [
+      "GBA-02DD-0027"
+    ]
+  },
+  {
+    "code": "GBA-02DD-0028",
+    "category": "gcluster",
+    "description": "在同一条SQL中，不允许在更改用户密码的同时，去更改其他变量或设置。",
+    "solution": "检查SQL，在设置用户密码的同时是否在设置其他变量? 6.8.2.4 数据重分布错误列表",
+    "keywords": [
+      "GBA-02DD-0028"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0001",
+    "category": "gcluster",
+    "description": "运行脚本的用户不是gbase用户",
+    "solution": "分析与建议 切换到gbase用户执行脚本",
+    "keywords": [
+      "GBA-02DR-0001"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0002",
+    "category": "gcluster",
+    "description": "运行脚本输入参数错误",
+    "solution": "按照提示输入参数并检查输入的SafeGroup名字是否正确",
+    "keywords": [
+      "GBA-02DR-0002"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0003",
+    "category": "gcluster",
+    "description": "查询集群层gbase.table_distribution表出错",
+    "solution": "手动查看gbase.table_distribution表是否正常",
+    "keywords": [
+      "GBA-02DR-0003"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0004",
+    "category": "gcluster",
+    "description": "查询分布表的数据报错",
+    "solution": "分析与建议 手动确认该表是否正常",
+    "keywords": [
+      "GBA-02DR-0004"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0005",
+    "category": "gcluster",
+    "description": "查询描述表信息出错",
+    "solution": "手动确认该表是否正常",
+    "keywords": [
+      "GBA-02DR-0005"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0006",
+    "category": "gcluster",
+    "description": "gnode创建hashmap临时表出错",
+    "solution": "根据gnode日志查看被操作节点出错原因",
+    "keywords": [
+      "GBA-02DR-0006"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0007",
+    "category": "gcluster",
+    "description": "gnode向hashmap临时表插入数据出错",
+    "solution": "查看gnode日志，查看出错原因",
+    "keywords": [
+      "GBA-02DR-0007"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0008",
+    "category": "gcluster",
+    "description": "重分布过程中，表数据迁移出错",
+    "solution": "查看gnode日志，检查 SELECTINTOserver出错原因",
+    "keywords": [
+      "GBA-02DR-0008"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0009",
+    "category": "gcluster",
+    "description": "集群切换成readonly模式失败",
+    "solution": "查看集群gcware状态",
+    "keywords": [
+      "GBA-02DR-0009"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0011",
+    "category": "gcluster",
+    "description": "集群切换成normal模式失败",
+    "solution": "查看集群gcware状态",
+    "keywords": [
+      "GBA-02DR-0011"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0012",
+    "category": "gcluster",
+    "description": "向gcware获取新的scn号失败",
+    "solution": "手动查看gcwarepython接口genscn()是否可用",
+    "keywords": [
+      "GBA-02DR-0012"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0013",
+    "category": "gcluster",
+    "description": "切换新旧数据出错",
+    "solution": "查看重分布日志，找出出错语句，然后查看对应的gnode上的日志文件查看出 错信息。",
+    "keywords": [
+      "GBA-02DR-0013"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0014",
+    "category": "gcluster",
+    "description": "更新nodedatamap表出错",
+    "solution": "查看日志，查看更新sql语句报错信息",
+    "keywords": [
+      "GBA-02DR-0014"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0015",
+    "category": "gcluster",
+    "description": "更新备份表出错",
+    "solution": "同步工具报错，根据同步工具错误信息排除问题",
+    "keywords": [
+      "GBA-02DR-0015"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0017",
+    "category": "gcluster",
+    "description": "删除hashmap临时表报错",
+    "solution": "查看日志，看出错节点对应的sql语句报错信息",
+    "keywords": [
+      "GBA-02DR-0017"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0018",
+    "category": "gcluster",
+    "description": "删除数据接收表%s.%s出错",
+    "solution": "查看日志，看出错节点对应的sql语句报错信息",
+    "keywords": [
+      "GBA-02DR-0018"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0019",
+    "category": "gcluster",
+    "description": "程序收到信号，程序退出",
+    "solution": "查看是否发了Ctrl+c，kill信号",
+    "keywords": [
+      "GBA-02DR-0019"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0020",
+    "category": "gcluster",
+    "description": "gnode层调用refreshtablessql报错",
+    "solution": "查看日志，确认出错节点，手动排除gnode问题",
+    "keywords": [
+      "GBA-02DR-0020"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0023",
+    "category": "gcluster",
+    "description": "查询集群层gbase.nodedatamap出错",
+    "solution": "查看日志，找到出错节点，查看集群层gbase.nodedatamap是否正常",
+    "keywords": [
+      "GBA-02DR-0023"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0024",
+    "category": "gcluster",
+    "description": "查询集群层gclusterdb.nodedatamap出错",
+    "solution": "查看日志，找到出错节点，查看集群层gclusterdb.nodedatamap是否正常",
+    "keywords": [
+      "GBA-02DR-0024"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0025",
+    "category": "gcluster",
+    "description": "查询gnode层gclusterdb.nodedatamap出错",
+    "solution": "查看日志，找到出错节点，查看gnode层gclusterdb.nodedatamap是否正常",
+    "keywords": [
+      "GBA-02DR-0025"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0026",
+    "category": "gcluster",
+    "description": "nodedatamap表和实际数据分布节点不一致",
+    "solution": "某些误操作导致，如直接通过gnode进行insert或load操作",
+    "keywords": [
+      "GBA-02DR-0026"
+    ]
+  },
+  {
+    "code": "GBA-02DR-0027",
+    "category": "gcluster",
+    "description": "从集群层获取nodedatamap中节点数出错",
+    "solution": "查看日志，查看查询sql报错原因 6.8.2.5 备份恢复工具（gcrcman）错误列表",
+    "keywords": [
+      "GBA-02DR-0027"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0001",
+    "category": "gcluster",
+    "description": "备份所需磁盘空间不足",
+    "solution": "清理磁盘空间再进行备份",
+    "keywords": [
+      "GBA-02BR-0001"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0002",
+    "category": "gcluster",
+    "description": "恢复所需磁盘空间不足",
+    "solution": "清理磁盘空间再进行恢复",
+    "keywords": [
+      "GBA-02BR-0002"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0003",
+    "category": "gcluster",
+    "description": "执行系统命令失败",
+    "solution": "检查系统命令的正确性",
+    "keywords": [
+      "GBA-02BR-0003"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0004",
+    "category": "gcluster",
+    "description": "参数错误",
+    "solution": "检查运行参数的正确性",
+    "keywords": [
+      "GBA-02BR-0004"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0005",
+    "category": "gcluster",
+    "description": "已备份数据错误",
+    "solution": "检查备份数据的正确性",
+    "keywords": [
+      "GBA-02BR-0005"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0006",
+    "category": "gcluster",
+    "description": "备份点不存在",
+    "solution": "查询合法备份点",
+    "keywords": [
+      "GBA-02BR-0006"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0007",
+    "category": "gcluster",
+    "description": "备份路径不存在",
+    "solution": "创建备份路径",
+    "keywords": [
+      "GBA-02BR-0007"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0008",
+    "category": "gcluster",
+    "description": "针对恢复操作，磁盘剩余空间不足",
+    "solution": "检查磁盘剩余空间",
+    "keywords": [
+      "GBA-02BR-0008"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0009",
+    "category": "gcluster",
+    "description": "网络连接错误",
+    "solution": "检查网络连接",
+    "keywords": [
+      "GBA-02BR-0009"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0012",
+    "category": "gcluster",
+    "description": "备份路径无相应权限进行读写",
+    "solution": "检查文件系统权限",
+    "keywords": [
+      "GBA-02BR-0012"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0013",
+    "category": "gcluster",
+    "description": "数据库配置文件中，未能获取集群数据目录",
+    "solution": "检查数据库配置文件",
+    "keywords": [
+      "GBA-02BR-0013"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0014",
+    "category": "gcluster",
+    "description": "数据库配置文件中，未能获取gnode数据目录",
+    "solution": "检查数据库配置文件",
+    "keywords": [
+      "GBA-02BR-0014"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0015",
+    "category": "gcluster",
+    "description": "备份单机数据失败",
+    "solution": "查看rcman日志",
+    "keywords": [
+      "GBA-02BR-0015"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0016",
+    "category": "gcluster",
+    "description": "恢复所使用的备份目录中，不存在数据",
+    "solution": "检查恢复所使用备份目录",
+    "keywords": [
+      "GBA-02BR-0016"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0017",
+    "category": "gcluster",
+    "description": "缺乏对数据库数据目录的权限",
+    "solution": "检查gcrcman当前用户对数据库数据目录的权限",
+    "keywords": [
+      "GBA-02BR-0017"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0033",
+    "category": "gcluster",
+    "description": "已经有一个备份恢复的工具在运行",
+    "solution": "等待正在执行的备份恢复工具结束",
+    "keywords": [
+      "GBA-02BR-0033"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0036",
+    "category": "gcluster",
+    "description": "没有全量备份的基础，直接进行增量备份",
+    "solution": "进行全量备份",
+    "keywords": [
+      "GBA-02BR-0036"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0037",
+    "category": "gcluster",
+    "description": "备份数据在节点间有冲突",
+    "solution": "执行cleanup，清除垃圾数据，然后再进行操作",
+    "keywords": [
+      "GBA-02BR-0037"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0040",
+    "category": "gcluster",
+    "description": "捕获进程抛出异常",
+    "solution": "检查日志，进一步确定进程错误",
+    "keywords": [
+      "GBA-02BR-0040"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0041",
+    "category": "gcluster",
+    "description": "I/O出现错误",
+    "solution": "检查日志，进一步确定进程错误",
+    "keywords": [
+      "GBA-02BR-0041"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0045",
+    "category": "gcluster",
+    "description": "备份信息文件损坏",
+    "solution": "检查备份信息文件，并寻求技术支持",
+    "keywords": [
+      "GBA-02BR-0045"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0046",
+    "category": "gcluster",
+    "description": "执行SQL失败",
+    "solution": "1、检查数据库状态 2、检查所执行SQL的正确性",
+    "keywords": [
+      "GBA-02BR-0046"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0047",
+    "category": "gcluster",
+    "description": "不能获得集群节点信息",
+    "solution": "检查集群状态",
+    "keywords": [
+      "GBA-02BR-0047"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0058",
+    "category": "gcluster",
+    "description": "当前用户错误",
+    "solution": "使用gbase用户",
+    "keywords": [
+      "GBA-02BR-0058"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0061",
+    "category": "gcluster",
+    "description": "数据目录不存在",
+    "solution": "检查数据库数据目录",
+    "keywords": [
+      "GBA-02BR-0061"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0065",
+    "category": "gcluster",
+    "description": "备份时，集群状态不对应",
+    "solution": "将集群置为readonly状态",
+    "keywords": [
+      "GBA-02BR-0065"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0066",
+    "category": "gcluster",
+    "description": "恢复时，集群状态不对应",
+    "solution": "将集群置为recovery状态",
+    "keywords": [
+      "GBA-02BR-0066"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0068",
+    "category": "gcluster",
+    "description": "节点状态不是online",
+    "solution": "检查集群状态",
+    "keywords": [
+      "GBA-02BR-0068"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0069",
+    "category": "gcluster",
+    "description": "节点gcluster状态不正常",
+    "solution": "检查节点集群状态",
+    "keywords": [
+      "GBA-02BR-0069"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0070",
+    "category": "gcluster",
+    "description": "节点gnode状态不正常",
+    "solution": "检查节点集群状态",
+    "keywords": [
+      "GBA-02BR-0070"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0071",
+    "category": "gcluster",
+    "description": "节点datastate不正常",
+    "solution": "检查节点集群状态",
+    "keywords": [
+      "GBA-02BR-0071"
+    ]
+  },
+  {
+    "code": "GBA-02BR-0078",
+    "category": "gcluster",
+    "description": "nocopy表不支持备份",
+    "solution": "表级备份不支持nocopy表 6.8.2.6 general 错误列表",
+    "keywords": [
+      "GBA-02BR-0078"
+    ]
+  },
+  {
+    "code": "GBA-02CO-0001",
+    "category": "gcluster",
+    "description": "当集群处于locked状态时，不允许执行DDL或DML操作",
+    "solution": "利用gcadmin查看集群是否处于locked状态。",
+    "keywords": [
+      "GBA-02CO-0001"
+    ]
+  },
+  {
+    "code": "GBA-02CO-0002",
+    "category": "gcluster",
+    "description": "当集群处于恢复模式时，不允许执行任何操作（部分express引擎数据无关的操 作被允许）",
+    "solution": "当前集群处于数据恢复状态，请等待恢复程序结束后再执行相应的SQL。",
+    "keywords": [
+      "GBA-02CO-0002"
+    ]
+  },
+  {
+    "code": "GBA-02CO-0003",
+    "category": "gcluster",
+    "description": "当未进行initnodedatamap时，DDL，DML等操作将被禁止。",
+    "solution": "在执行SQL前，执行initnodedatamap命令，初始化hashmap",
+    "keywords": [
+      "GBA-02CO-0003"
+    ]
+  },
+  {
+    "code": "GBA-02CO-0004",
+    "category": "gcluster",
+    "description": "错误出现原因 当已经初始化了一致性hash，则不允许重复初始化。",
+    "solution": "集群禁止重复执行initnodedatamap命令，避免破坏已有数据的分布性。 6.8.2.7 lock 错误列表",
+    "keywords": [
+      "GBA-02CO-0004"
+    ]
+  },
+  {
+    "code": "GBA-02LO-0001",
+    "category": "gcluster",
+    "description": "无法初始化锁对象",
+    "solution": "需要根据返回的错误信息查看gcware的错误手册。",
+    "keywords": [
+      "GBA-02LO-0001"
+    ]
+  },
+  {
+    "code": "GBA-02LO-0002",
+    "category": "gcluster",
+    "description": "无法获取到锁",
+    "solution": "需要根据返回的错误信息查看gcware的错误手册。 6.8.2.8 查询执行错误列表",
+    "keywords": [
+      "GBA-02LO-0002"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0001",
+    "category": "gcluster",
+    "description": "如：从连接池中取连接失败，不能创建与gnode的连接；",
+    "solution": "检查指定 IP 的机器是否网络有问题？gnode 进程是否存在？查看 gnode 的 system.log中是否有重启信息。",
+    "keywords": [
+      "GBA-02EX-0001"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0002",
+    "category": "gcluster",
+    "description": "创建临时表时产生错误，单机语法不支持",
+    "solution": "1、检查创建语句是否有问题； 2、gnode是否已重启过； 3、查看相同名临时表是否已存在； 4、磁盘空间不足；",
+    "keywords": [
+      "GBA-02EX-0002"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0003",
+    "category": "gcluster",
+    "description": "newObject失败，此种情况多是内存不足，或构造函数执行有误",
+    "solution": "分析与建议 检查内存是否用光。或系统内存碎片过多，需要重启。",
+    "keywords": [
+      "GBA-02EX-0003"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0004",
+    "category": "gcluster",
+    "description": "调用gcware接口返回的错误",
+    "solution": "检查gcware是否正常；查看集群节点状态是否正常",
+    "keywords": [
+      "GBA-02EX-0004"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0005",
+    "category": "gcluster",
+    "description": "在gnode端执行的SQL返回的错误",
+    "solution": "查看集群节点状态是否正常，查看集群发起节点的express.log",
+    "keywords": [
+      "GBA-02EX-0005"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0007",
+    "category": "gcluster",
+    "description": "创建子进程失败",
+    "solution": "创建子进程失败",
+    "keywords": [
+      "GBA-02EX-0007"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0008",
+    "category": "gcluster",
+    "description": "子进程异常退出",
+    "solution": "子进程异常退出，查看系统状态",
+    "keywords": [
+      "GBA-02EX-0008"
+    ]
+  },
+  {
+    "code": "GBA-02EX-0010",
+    "category": "gcluster",
+    "description": "系统调用失败",
+    "solution": "系统调用失败，查看系统状态",
+    "keywords": [
+      "GBA-02EX-0010"
+    ]
+  },
+  {
+    "code": "GBA-02EX-1004",
+    "category": "gcluster",
+    "description": "获取元数据失败",
+    "solution": "获取元数据失败，查看元数据状态",
+    "keywords": [
+      "GBA-02EX-1004"
+    ]
+  },
+  {
+    "code": "GBA-02EX-1010",
+    "category": "gcluster",
+    "description": "发送数据失败",
+    "solution": "发送数据失败，查看SQL和数据类型是否有问题 6.8.2.9 查询编译及优化错误列表",
+    "keywords": [
+      "GBA-02EX-1010"
+    ]
+  },
+  {
+    "code": "GBA-02SC-0001",
+    "category": "gcluster",
+    "description": "1. 查询语句不符合gbase语法规则，请参考SQL语法中相关说明进行修正。 2. 查询语句包含gcluster限制的语法，请根据报错信息的提示重写查询语句， 使其符合要求。",
+    "solution": "参考SQL语法章节，或根据报错信息提示，重写查询语句，使其符合gcluster 语法要求。",
+    "keywords": [
+      "GBA-02SC-0001"
+    ]
+  },
+  {
+    "code": "GBA-02SC-1001",
+    "category": "gcluster",
+    "description": "1. 查询语句不符合gbase语法规则，请参考SQL语法中相关说明进行修正。 2. 查询语句包含gcluster限制的语法，请根据报错信息的提示重写查询语句， 使其符合要求。",
+    "solution": "参考SQL语法，或根据报错信息提示，重写查询语句，使其符合gcluster语法 要求。 6.8.2.10 内部错误列表",
+    "keywords": [
+      "GBA-02SC-1001"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0001",
+    "category": "gnode",
+    "description": "备份所需磁盘空间不足",
+    "solution": "清理磁盘空间再进行备份",
+    "keywords": [
+      "GBA-01BR-0001"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0002",
+    "category": "gnode",
+    "description": "恢复所需磁盘空间不足",
+    "solution": "清理磁盘空间再进行恢复",
+    "keywords": [
+      "GBA-01BR-0002"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0003",
+    "category": "gnode",
+    "description": "执行gbasesql失败",
+    "solution": "检查网络连接，server状态",
+    "keywords": [
+      "GBA-01BR-0003"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0004",
+    "category": "gnode",
+    "description": "打开gbase配置文件失败",
+    "solution": "检查文件是否存在",
+    "keywords": [
+      "GBA-01BR-0004"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0005",
+    "category": "gnode",
+    "description": "连接gbase库失败",
+    "solution": "检查网络连接，server状态",
+    "keywords": [
+      "GBA-01BR-0005"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0006",
+    "category": "gnode",
+    "description": "crc32验证失败",
+    "solution": "数据块损坏或文件损坏",
+    "keywords": [
+      "GBA-01BR-0006"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0007",
+    "category": "gnode",
+    "description": "备份前锁表失败",
+    "solution": "检查gbaseserver状态，查询gnode报错信息",
+    "keywords": [
+      "GBA-01BR-0007"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0008",
+    "category": "gnode",
+    "description": "恢复前gbase仍在运行",
+    "solution": "关闭gbaseserver",
+    "keywords": [
+      "GBA-01BR-0008"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0009",
+    "category": "gnode",
+    "description": "备份点不存在",
+    "solution": "通过工具，查询合法备份点",
+    "keywords": [
+      "GBA-01BR-0009"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0011",
+    "category": "gnode",
+    "description": "备份目录不能是gbase的数据目录",
+    "solution": "更换备份目录",
+    "keywords": [
+      "GBA-01BR-0011"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0012",
+    "category": "gnode",
+    "description": "备份目录不存在",
+    "solution": "创建备份目录",
+    "keywords": [
+      "GBA-01BR-0012"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0013",
+    "category": "gnode",
+    "description": "备份程序level参数值输入不合法",
+    "solution": "level参数输入0或1",
+    "keywords": [
+      "GBA-01BR-0013"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0014",
+    "category": "gnode",
+    "description": "备份失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0014"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0015",
+    "category": "gnode",
+    "description": "命令不合法",
+    "solution": "输入help，查看合法命令",
+    "keywords": [
+      "GBA-01BR-0015"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0016",
+    "category": "gnode",
+    "description": "恢复失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0016"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0018",
+    "category": "gnode",
+    "description": "删除实例级备份点失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0018"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0019",
+    "category": "gnode",
+    "description": "回滚失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0019"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0021",
+    "category": "gnode",
+    "description": "工具初始化失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0021"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0022",
+    "category": "gnode",
+    "description": "初始化日志文件失败",
+    "solution": "查看备份目录权限状态，磁盘空间",
+    "keywords": [
+      "GBA-01BR-0022"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0023",
+    "category": "gnode",
+    "description": "未知异常",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0023"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0024",
+    "category": "gnode",
+    "description": "获取目录信息失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0024"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0025",
+    "category": "gnode",
+    "description": "删除文件失败",
+    "solution": "检查文件权限，状态",
+    "keywords": [
+      "GBA-01BR-0025"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0026",
+    "category": "gnode",
+    "description": "删除文件夹失败",
+    "solution": "检查文件夹权限，状态",
+    "keywords": [
+      "GBA-01BR-0026"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0027",
+    "category": "gnode",
+    "description": "创建文件夹失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0027"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0028",
+    "category": "gnode",
+    "description": "拷贝文件夹失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0028"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0029",
+    "category": "gnode",
+    "description": "内存分配失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0029"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0030",
+    "category": "gnode",
+    "description": "创建线程失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0030"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0031",
+    "category": "gnode",
+    "description": "打开文件失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0031"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0032",
+    "category": "gnode",
+    "description": "打开文件夹失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0032"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0033",
+    "category": "gnode",
+    "description": "文件夹不存在",
+    "solution": "检查文件夹状态、权限",
+    "keywords": [
+      "GBA-01BR-0033"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0034",
+    "category": "gnode",
+    "description": "参数错误",
+    "solution": "日志级别输入不合法",
+    "keywords": [
+      "GBA-01BR-0034"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0035",
+    "category": "gnode",
+    "description": "打开日志文件失败",
+    "solution": "检查文件权限，状态",
+    "keywords": [
+      "GBA-01BR-0035"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0037",
+    "category": "gnode",
+    "description": "获取挂载点备份失败",
+    "solution": "检查备份点目录下db_mount_path文件",
+    "keywords": [
+      "GBA-01BR-0037"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0038",
+    "category": "gnode",
+    "description": "挂载点不存在",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0038"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0039",
+    "category": "gnode",
+    "description": "创建挂载点失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0039"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0040",
+    "category": "gnode",
+    "description": "恢复挂载点失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0040"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0041",
+    "category": "gnode",
+    "description": "写文件失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0041"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0042",
+    "category": "gnode",
+    "description": "没有全量备份点",
+    "solution": "1，如备份时，则进行全量备份 2，如恢复时，则检查备份数据是否有损坏",
+    "keywords": [
+      "GBA-01BR-0042"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0043",
+    "category": "gnode",
+    "description": "从gbase配置文件中读取数据目录失败",
+    "solution": "检查gbase配置文件",
+    "keywords": [
+      "GBA-01BR-0043"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0044",
+    "category": "gnode",
+    "description": "读文件失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0044"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0045",
+    "category": "gnode",
+    "description": "表挂载点映射文件错误",
+    "solution": "检查表mount.map.A文件的正确性",
+    "keywords": [
+      "GBA-01BR-0045"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0046",
+    "category": "gnode",
+    "description": "备份表数据块失败",
+    "solution": "检查表数据块的正确性",
+    "keywords": [
+      "GBA-01BR-0046"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0047",
+    "category": "gnode",
+    "description": "备份表local哈希数据失败",
+    "solution": "检查表local哈希文件的正确性",
+    "keywords": [
+      "GBA-01BR-0047"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0048",
+    "category": "gnode",
+    "description": "备份表global级哈希索引文件失败",
+    "solution": "检查表global级哈希索引文件的正确性",
+    "keywords": [
+      "GBA-01BR-0048"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0049",
+    "category": "gnode",
+    "description": "备份表全文索引失败",
+    "solution": "检查表全文索引数据的正确性",
+    "keywords": [
+      "GBA-01BR-0049"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0050",
+    "category": "gnode",
+    "description": "获取表分区信息失败",
+    "solution": "检查表.par文件的状态，权限和内容",
+    "keywords": [
+      "GBA-01BR-0050"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0051",
+    "category": "gnode",
+    "description": "备份表创建DDL失败",
+    "solution": "检查表创建的DDL",
+    "keywords": [
+      "GBA-01BR-0051"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0052",
+    "category": "gnode",
+    "description": "错误出现原因 备份仅支持express引擎",
+    "solution": "备份express引擎创建的表",
+    "keywords": [
+      "GBA-01BR-0052"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0053",
+    "category": "gnode",
+    "description": "初始化表信息失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0053"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0054",
+    "category": "gnode",
+    "description": "表备份列失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0054"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0055",
+    "category": "gnode",
+    "description": "备份表.par文件失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0055"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0056",
+    "category": "gnode",
+    "description": "拷贝文件失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0056"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0057",
+    "category": "gnode",
+    "description": "备份表失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0057"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0058",
+    "category": "gnode",
+    "description": "备份express.seq文件失败",
+    "solution": "检查数据库express.seq文件",
+    "keywords": [
+      "GBA-01BR-0058"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0059",
+    "category": "gnode",
+    "description": "备份挂载点错误",
+    "solution": "1，检查gbaseserver状态 2，检查文件系统权限及状态",
+    "keywords": [
+      "GBA-01BR-0059"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0060",
+    "category": "gnode",
+    "description": "获取全文索引ftd路径错误",
+    "solution": "检查全文索引路径是否正确",
+    "keywords": [
+      "GBA-01BR-0060"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0061",
+    "category": "gnode",
+    "description": "获取表备份bsi错误",
+    "solution": "分析与建议 检查表备份数据bsi文件",
+    "keywords": [
+      "GBA-01BR-0061"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0062",
+    "category": "gnode",
+    "description": "打开数据文件错误",
+    "solution": "检查数据文件的权限及状态",
+    "keywords": [
+      "GBA-01BR-0062"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0063",
+    "category": "gnode",
+    "description": "读取数据文件错误",
+    "solution": "检查数据文件的权限及状态",
+    "keywords": [
+      "GBA-01BR-0063"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0064",
+    "category": "gnode",
+    "description": "读取数据文件错误",
+    "solution": "写入数据文件错误",
+    "keywords": [
+      "GBA-01BR-0064"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0065",
+    "category": "gnode",
+    "description": "更新列挂载点映射文件错误",
+    "solution": "检查mount.map.A文件的正确性及文件系统的权限、状态",
+    "keywords": [
+      "GBA-01BR-0065"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0066",
+    "category": "gnode",
+    "description": "恢复数据块本地哈希索引文件失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0066"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0067",
+    "category": "gnode",
+    "description": "恢复列全局哈希索引文件失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0067"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0068",
+    "category": "gnode",
+    "description": "处理本地哈希索引列的错误",
+    "solution": "检查文件系统状态及权限",
+    "keywords": [
+      "GBA-01BR-0068"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0069",
+    "category": "gnode",
+    "description": "处理全局哈希索引列的错误",
+    "solution": "检查文件系统状态及权限",
+    "keywords": [
+      "GBA-01BR-0069"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0070",
+    "category": "gnode",
+    "description": "恢复列全文索引数据失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0070"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0071",
+    "category": "gnode",
+    "description": "表恢复时，删除旧数据文件失败",
+    "solution": "查看当前数据库数据文件夹状态及权限",
+    "keywords": [
+      "GBA-01BR-0071"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0072",
+    "category": "gnode",
+    "description": "备份列失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0072"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0073",
+    "category": "gnode",
+    "description": "表恢复时，拷贝挂载点映射文件失败",
+    "solution": "检查备份数据目录下.mount.map.A文件",
+    "keywords": [
+      "GBA-01BR-0073"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0074",
+    "category": "gnode",
+    "description": "重命名文件夹失败",
+    "solution": "检查文件系统权限，状态",
+    "keywords": [
+      "GBA-01BR-0074"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0075",
+    "category": "gnode",
+    "description": "表恢复过程中，初始化表元数据信息失败",
+    "solution": "检查表恢复中的元数据文件夹的内容",
+    "keywords": [
+      "GBA-01BR-0075"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0076",
+    "category": "gnode",
+    "description": "表的建表DDL存在格式错误",
+    "solution": "检查表的建表DDL的正确性",
+    "keywords": [
+      "GBA-01BR-0076"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0077",
+    "category": "gnode",
+    "description": "获取表建表DDL错误",
+    "solution": "确定server状态，是否能够执行showcreatetable",
+    "keywords": [
+      "GBA-01BR-0077"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0078",
+    "category": "gnode",
+    "description": "恢复表元数据文件失败",
+    "solution": "1，检查表备份数据中元数据的正确性 2，检查文件系统权限及状态",
+    "keywords": [
+      "GBA-01BR-0078"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0079",
+    "category": "gnode",
+    "description": "对某个备份点做crc32失败",
+    "solution": "备份数据损坏。 1，寻找其他备份数据进行恢复 2，恢复其他可替代备份点",
+    "keywords": [
+      "GBA-01BR-0079"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0080",
+    "category": "gnode",
+    "description": "恢复gbase系统数据库失败",
+    "solution": "检查gbase系统数据库备份数据",
+    "keywords": [
+      "GBA-01BR-0080"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0082",
+    "category": "gnode",
+    "description": "实例级恢复元数据时失败",
+    "solution": "1，检查实例级备份数据中备份的元数据是否正确 2，检查文件系统状态及权限",
+    "keywords": [
+      "GBA-01BR-0082"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0083",
+    "category": "gnode",
+    "description": "从数据库中删除表旧数据失败",
+    "solution": "检查数据库结构的完整性及文件系统的状态和权限",
+    "keywords": [
+      "GBA-01BR-0083"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0084",
+    "category": "gnode",
+    "description": "恢复时拷贝元数据失败",
+    "solution": "检查数据库结构的完整性及文件系统的状态和权限",
+    "keywords": [
+      "GBA-01BR-0084"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0085",
+    "category": "gnode",
+    "description": "恢复数据库中的表失败",
+    "solution": "查看具体错误码或日志，进一步定位错误",
+    "keywords": [
+      "GBA-01BR-0085"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0086",
+    "category": "gnode",
+    "description": "删除数据库失败",
+    "solution": "检查数据库结构的完整性及文件系统的状态和权限",
+    "keywords": [
+      "GBA-01BR-0086"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0087",
+    "category": "gnode",
+    "description": "express.seq",
+    "solution": "检查是否有express.seq文件的备份",
+    "keywords": [
+      "GBA-01BR-0087"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0089",
+    "category": "gnode",
+    "description": "获取tableid 失败",
+    "solution": "检查目前数据库是否正常",
+    "keywords": [
+      "GBA-01BR-0089"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0091",
+    "category": "gnode",
+    "description": "备份数据的表结构与数据库中的表结构不一致",
+    "solution": "将数据库中的表删除掉",
+    "keywords": [
+      "GBA-01BR-0091"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0092",
+    "category": "gnode",
+    "description": "恢复表元数据文件失败",
+    "solution": "1，检查表备份数据中元数据的正确性 2，检查文件系统权限及状态",
+    "keywords": [
+      "GBA-01BR-0092"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0093",
+    "category": "gnode",
+    "description": "修改表scn错误",
+    "solution": "1,检查数据库表元数据文件是否正确并完整 2，检查文件系统权限及状态",
+    "keywords": [
+      "GBA-01BR-0093"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0095",
+    "category": "gnode",
+    "description": "由于仅剩一个全量备份点，备份点不能删除",
+    "solution": "由于必须保留一个全量备份点，因此用户此时不能删除最后一个的全量备份点。",
+    "keywords": [
+      "GBA-01BR-0095"
+    ]
+  },
+  {
+    "code": "GBA-01BR-0096",
+    "category": "gnode",
+    "description": "更新备份点信息文件失败",
+    "solution": "",
+    "keywords": [
+      "GBA-01BR-0096"
+    ]
+  }
+]

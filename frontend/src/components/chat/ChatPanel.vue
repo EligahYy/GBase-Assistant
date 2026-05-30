@@ -12,7 +12,6 @@ import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useSSE } from '@/composables/useSSE'
 import { createStreamUrl } from '@/api/chat'
-import { getConnectionsStatus } from '@/api/connections'
 import { useTheme } from '@/composables/useTheme'
 
 const chatStore = useChatStore()
@@ -35,65 +34,21 @@ const activeConn = computed(() =>
   connStore.connections.find(c => c.id === connStore.activeConnectionId)
 )
 
-// ── 连接状态实时检测 ──
-const connStatusMap = ref<Record<string, 'ok' | 'error' | 'testing'>>({})
-const connStatusLoading = ref(false)
-const POLL_INTERVAL = 5000
-
-async function checkConnectionStatus() {
-  connStatusLoading.value = true
-  try {
-    const resp = await getConnectionsStatus()
-    for (const item of resp.connections) {
-      if (item.status === 'ok') {
-        connStatusMap.value[item.id] = 'ok'
-      } else if (item.status === 'testing') {
-        connStatusMap.value[item.id] = 'testing'
-      } else {
-        connStatusMap.value[item.id] = 'error'
-      }
-    }
-  } catch {
-    // ignore
-  } finally {
-    connStatusLoading.value = false
-  }
-}
-
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-function startPolling() {
-  checkConnectionStatus()
-  if (pollTimer) clearInterval(pollTimer)
-  pollTimer = setInterval(checkConnectionStatus, POLL_INTERVAL)
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-function handleVisibilityChange() {
-  if (document.visibilityState === 'visible') {
-    checkConnectionStatus()
-  }
-}
-
 onMounted(() => {
   connStore.loadConnections().catch(() => {})
-  startPolling()
-  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+// 切换对话时停止当前流，防止旧流继续更新已替换的消息列表
+watch(() => chatStore.currentConversationId, (newId, oldId) => {
+  if (oldId && newId !== oldId && isStreaming.value) {
+    stopStream()
+  }
 })
 
 onBeforeUnmount(() => {
-  stopPolling()
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-})
-
-watch(() => connStore.activeConnectionId, () => {
-  startPolling()
+  if (isStreaming.value) {
+    stopStream()
+  }
 })
 
 watch(() => chatStore.messages.length, async () => {
@@ -128,9 +83,12 @@ async function sendMessage() {
     conversation_id: conversationId,
     db_connection_id: connStore.activeConnectionId,
     model: selectedModel.value,
+    folder_id: chatStore.activeFolderId,
   })
   const serverConversationId = await streamPost(url, body, (chunk) => {
-    if (chunk.type === 'text') {
+    if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
+      chatStore.appendStreamToken(streamingId, (chunk.delta as string) || '')
+    } else if (chunk.type === 'text') {
       chatStore.appendStreamToken(streamingId, chunk.content)
     } else if (chunk.type === 'sql') {
       chatStore.setStreamSql(streamingId, chunk.content)
@@ -147,12 +105,30 @@ async function sendMessage() {
       naiveMsg.error(chunk.content)
     } else if (chunk.type === 'result_error') {
       naiveMsg.warning(chunk.content)
+    } else if (chunk.type === 'chart_config') {
+      try {
+        const config = JSON.parse(chunk.content || '{}')
+        chatStore.setStreamChartConfig(streamingId, config)
+      } catch {
+        // ignore
+      }
     } else if (chunk.type === 'message_ids') {
       try {
         const ids = JSON.parse(chunk.content)
         chatStore.syncMessageIdsFromStream(streamingId, ids)
       } catch {
         // ignore parse errors
+      }
+    } else if (chunk.type === 'STATE_DELTA') {
+      const path = (chunk as any).path
+      const value = (chunk as any).value
+      if (path === 'sql') {
+        const sql = typeof value === 'string' ? value : value?.sql || ''
+        chatStore.setStreamSql(streamingId, sql)
+      } else if (path === 'result') {
+        chatStore.setStreamQueryResult(streamingId, value)
+      } else if (path === 'chart_config') {
+        chatStore.setStreamChartConfig(streamingId, value)
       }
     }
   })
@@ -165,6 +141,7 @@ async function sendMessage() {
   }
 
   chatStore.finalizeStreamMessage(finalAsstId, serverConversationId ?? conversationId ?? crypto.randomUUID())
+  chatStore.activeFolderId = null
   await chatStore.loadConversations()
 }
 
@@ -197,15 +174,15 @@ const hints = [
           v-if="activeConn"
           class="conn-badge"
           :class="{
-            'status-ok': connStatusMap[activeConn.id] === 'ok',
-            'status-error': connStatusMap[activeConn.id] === 'error',
-            'status-testing': connStatusMap[activeConn.id] === 'testing',
+            'status-ok': connStore.connStatusMap[activeConn.id] === 'ok',
+            'status-error': connStore.connStatusMap[activeConn.id] === 'error',
+            'status-testing': connStore.connStatusMap[activeConn.id] === 'testing',
           }"
         >
-          <div class="dot" :class="{ pulsing: connStatusMap[activeConn.id] !== 'error' }" />
+          <div class="dot" :class="{ pulsing: connStore.connStatusMap[activeConn.id] !== 'error' }" />
           <n-icon :component="ServerOutline" size="12" />
           <span>{{ activeConn.name }}</span>
-          <span v-if="connStatusMap[activeConn.id] === 'testing'" class="status-checking">检测中</span>
+          <span v-if="connStore.connStatusMap[activeConn.id] === 'testing'" class="status-checking">检测中</span>
         </div>
         <div v-else class="conn-badge muted">
           <div class="dot" />

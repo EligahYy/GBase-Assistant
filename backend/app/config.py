@@ -37,6 +37,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
     debug: bool = False
+    secret_key: str = ""  # GBase 连接密码 AES-GCM 加密密钥
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",

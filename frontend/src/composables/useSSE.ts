@@ -1,8 +1,11 @@
 import { ref } from 'vue'
 
 export interface SSEChunk {
-  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error' | 'result' | 'result_error' | 'message_ids'
-  content: string
+  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error' | 'result' | 'result_error' | 'message_ids' | 'TEXT_MESSAGE_CONTENT' | 'chart_config' | 'STATE_DELTA'
+  content?: string
+  delta?: string
+  path?: string
+  value?: any
   token_usage?: Record<string, unknown>
 }
 
@@ -73,8 +76,11 @@ export function useSSE() {
             if (!data || data === '[DONE]') continue
             try {
               const chunk = JSON.parse(data) as SSEChunk
-              if (chunk.type === 'text') {
-                textBuffer += chunk.content
+              if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
+                textBuffer += chunk.delta || ''
+                scheduleFlush()
+              } else if (chunk.type === 'text') {
+                textBuffer += chunk.content || ''
                 scheduleFlush()
               } else {
                 flushTextBuffer() // 非 text chunk 前立即刷新缓冲区

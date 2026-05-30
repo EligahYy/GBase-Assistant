@@ -1,0 +1,31 @@
+# Semantic Mapper 离线评估用例
+# 每个用例包含: question (自然语言问题), expected (期望的映射结果)
+
+test_cases:
+  - question: "查询最近一个月销售额"
+    description: "基本业务术语映射 — 销售额"
+    expected:
+      tables: [product_sale]
+      columns:
+        product_sale: [pay_amount, created_at]
+      business_terms:
+        销售额: product_sale.pay_amount
+
+  - question: "统计本月各产品线的订单量"
+    description: "多维度 + JOIN — 产品线映射到 product.category"
+    expected:
+      tables: [product_sale, product]
+      columns:
+        product_sale: [created_at]
+        product: [category]
+      business_terms:
+        产品线: product.category
+
+  - question: "查询客户数量按注册日期统计"
+    description: "聚合 + 时间维度"
+    expected:
+      tables: [customer]
+      columns:
+        customer: [created_at]
+      business_terms:
+        注册日期: customer.created_at

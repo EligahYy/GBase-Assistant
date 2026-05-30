@@ -153,6 +153,7 @@ def serialize_conversation(conv: Conversation, include_messages: bool = True) ->
         db_connection_id=conv.db_connection_id,
         model_used=conv.model_used,
         archived=conv.archived,
+        folder_id=conv.folder_id,
         tags=parse_tags(conv.tags),
         created_at=conv.created_at,
         messages=[MessageResponse.from_orm_model(m) for m in conv.messages] if include_messages else [],

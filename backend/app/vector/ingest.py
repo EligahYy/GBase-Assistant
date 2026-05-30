@@ -311,12 +311,17 @@ async def ingest_ops_docs(embedder: Embedder, force: bool = False) -> int:
 
 
 async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
-    """一键同步所有知识库到 Qdrant。返回各 collection 入库条数。"""
+    """一键同步所有知识库到 Qdrant（使用旧 JSON 文件，不含 PDF）。
+
+    PDF 手册体积大（1795 页），通过 Admin API /api/admin/reindex-web 手动触发。
+    """
     await get_qdrant_manager().ensure_collections(dimension=embedder.dimension)
     results = {}
+
     results["faq"] = await ingest_faq(embedder, force=force)
     results["sql_examples"] = await ingest_sql_examples(embedder, force=force)
     results["error_codes"] = await ingest_error_codes(embedder, force=force)
     results["ops_docs"] = await ingest_ops_docs(embedder, force=force)
+
     logger.info("全量索引完成: %s", results)
     return results

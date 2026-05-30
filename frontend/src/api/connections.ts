@@ -109,3 +109,64 @@ export async function executeQuery(connectionId: string, sql: string, maxRows?: 
   })
   return data
 }
+
+export interface StatusStreamEvent {
+  type: 'status' | 'heartbeat' | 'closed'
+  connection_id?: string
+  status?: string
+}
+
+export function connectStatusStream(
+  baseUrl: string,
+  onEvent: (event: StatusStreamEvent) => void,
+  onError?: (err: Error) => void,
+): AbortController {
+  const controller = new AbortController()
+  const url = `${baseUrl}/connections/status/stream`
+
+  void (async () => {
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: 'text/event-stream' },
+      })
+
+      if (!response.ok) {
+        throw new Error(`SSE connect failed: HTTP ${response.status}`)
+      }
+
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim()
+            if (!data) continue
+            try {
+              const event = JSON.parse(data) as StatusStreamEvent
+              onEvent(event)
+            } catch { /* ignore malformed */ }
+          }
+          // ": keepalive" lines are ignored
+        }
+      }
+      // Stream ended normally (server closed connection)
+      onError?.(new Error('SSE stream ended'))
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        onError?.(e instanceof Error ? e : new Error(String(e)))
+      }
+    }
+  })()
+
+  return controller
+}

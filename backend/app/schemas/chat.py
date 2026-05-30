@@ -11,6 +11,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     db_connection_id: str | None = None
     model: str | None = None  # 用户覆盖模型
+    folder_id: str | None = None  # 新建对话时放入该文件夹
 
 
 class MessageResponse(BaseModel):
@@ -20,6 +21,8 @@ class MessageResponse(BaseModel):
     message_type: str | None
     sql_generated: str | None
     sql_validated: bool | None
+    query_result: dict | None
+    chart_config: dict | None
     token_usage: dict | None
     created_at: datetime
 
@@ -28,7 +31,26 @@ class MessageResponse(BaseModel):
     @field_validator("token_usage", mode="before")
     @classmethod
     def parse_token_usage(cls, v: object) -> dict | None:
-        """token_usage 在 ORM 中以 JSON 字符串存储，反序列化为 dict。"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        return v  # type: ignore[return-value]
+
+    @field_validator("query_result", mode="before")
+    @classmethod
+    def parse_query_result(cls, v: object) -> dict | None:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        return v  # type: ignore[return-value]
+
+    @field_validator("chart_config", mode="before")
+    @classmethod
+    def parse_chart_config(cls, v: object) -> dict | None:
         if isinstance(v, str):
             try:
                 return json.loads(v)
@@ -45,6 +67,8 @@ class MessageResponse(BaseModel):
             message_type=obj.message_type,
             sql_generated=obj.sql_generated,
             sql_validated=obj.sql_validated,
+            query_result=obj.query_result,
+            chart_config=obj.chart_config,
             token_usage=obj.get_token_usage(),
             created_at=obj.created_at,
         )
@@ -57,6 +81,7 @@ class ConversationResponse(BaseModel):
     model_used: str | None
     archived: bool = False
     tags: list[str] = []
+    folder_id: str | None = None
     created_at: datetime
     messages: list[MessageResponse] = []
 
@@ -66,3 +91,19 @@ class ConversationResponse(BaseModel):
 class ChatResponse(BaseModel):
     conversation_id: str
     message: MessageResponse
+
+
+class FolderResponse(BaseModel):
+    id: str
+    name: str
+    conversation_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BatchRequest(BaseModel):
+    ids: list[str]
+    action: str  # "archive" | "delete" | "move"
+    folder_id: str | None = None

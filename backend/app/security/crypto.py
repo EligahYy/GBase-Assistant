@@ -35,8 +35,9 @@ def _get_encryption_key() -> bytes:
         except Exception:
             logger.warning("DB_PASSWORD_KEY 不是有效的 base64，将使用派生密钥")
 
-    # 降级：从 SECRET_KEY 派生
-    secret = os.getenv("SECRET_KEY", "")
+    # 降级：从 Settings.secret_key 派生
+    from app.config import get_settings
+    secret = get_settings().secret_key
     if secret:
         return hashlib.sha256(secret.encode()).digest()
 

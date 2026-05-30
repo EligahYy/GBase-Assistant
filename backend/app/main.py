@@ -18,10 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 async def _background_sync_all_to_qdrant(embedder) -> None:
-    """后台任务：同步所有知识库到 Qdrant。不阻塞应用启动。"""
+    """后台任务：同步 JSON 知识库（FAQ/错误码/运维文档）到 Qdrant。
+
+    Markdown 知识库通过 Admin API /api/admin/reindex-web 手动触发。
+    官方文档需先运行 web_crawler 爬取到 knowledge/official/。
+    """
     try:
         from app.vector.ingest import sync_all_to_qdrant
 
+        logger.info("后台知识库同步开始（JSON: FAQ/错误码/运维文档）...")
         results = await sync_all_to_qdrant(embedder)
         logger.info("后台知识库同步完成: %s", results)
     except Exception as e:
@@ -67,9 +72,27 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Qdrant 初始化失败，回退到文件模式: %s", e)
 
+    # 启动连接健康检查器（后台主动探测 GBase 连接状态）
+    try:
+        from app.services.connection_health_checker import get_health_checker
+
+        await get_health_checker().start()
+        logger.info("ConnectionHealthChecker 已启动")
+    except Exception as e:
+        logger.warning("ConnectionHealthChecker 启动失败: %s", e)
+
     logger.info("应用启动完成，API 文档: http://localhost:8000/docs")
     yield
     logger.info("应用关闭")
+
+    # 停止连接健康检查器
+    try:
+        from app.services.connection_health_checker import get_health_checker
+
+        await get_health_checker().stop()
+    except Exception:
+        pass
+
     try:
         from app.vector.client import get_qdrant_manager
 

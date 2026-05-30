@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { NInput, NButton, NSelect, NEmpty, NTag, useMessage, useDialog } from 'naive-ui'
 import { useConnectionStore } from '@/stores/connection'
-import { listConnections, createConnection, updateConnection, deleteConnection, getSchemaTables, testConnection, syncSchema, getConnectionsStatus, type ConnectionCreate, type TableSchemaItem } from '@/api/connections'
+import { listConnections, createConnection, updateConnection, deleteConnection, getSchemaTables, testConnection, syncSchema, type ConnectionCreate, type TableSchemaItem } from '@/api/connections'
 import { listModels, type ModelInfo } from '@/api/models'
 import {
   ArrowBackOutline, ServerOutline, TrashOutline, CreateOutline, RefreshOutline,
@@ -50,18 +50,6 @@ const enrichLoading = ref(false)
 // ── Connection actions ──
 const testingConn = ref<Set<string>>(new Set())
 const syncingConn = ref<Set<string>>(new Set())
-const connLiveStatus = ref<Record<string, 'ok' | 'error' | 'unknown'>>({})
-
-let statusPollTimer: ReturnType<typeof setInterval> | null = null
-
-async function loadConnLiveStatus() {
-  try {
-    const resp = await getConnectionsStatus()
-    for (const item of resp.connections) {
-      connLiveStatus.value[item.id] = item.status === 'ok' ? 'ok' : item.status === 'testing' ? 'unknown' : 'error'
-    }
-  } catch { /* ignore */ }
-}
 
 onMounted(async () => {
   connections.value = await listConnections()
@@ -76,13 +64,9 @@ onMounted(async () => {
     ]
   }
   await loadHealth()
-  await loadConnLiveStatus()
-  statusPollTimer = setInterval(loadConnLiveStatus, 5000)
+  connStore.startStatusStream()
 })
 
-onBeforeUnmount(() => {
-  if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null }
-})
 
 const expandedSchemas = ref<Set<string>>(new Set())
 const schemaCache = ref<Map<string, TableSchemaItem[]>>(new Map())
@@ -166,7 +150,7 @@ async function handleTestConnection(connId: string) {
     const resp = await testConnection(connId)
     naiveMsg[resp.status === 'ok' ? 'success' : 'error'](resp.message)
     connections.value = await listConnections()
-    await loadConnLiveStatus()
+    connStore.setLocalStatus(connId, resp.status === 'ok' ? 'ok' : 'error')
   } catch (e: any) { naiveMsg.error(e.message || '测试失败') } finally { testingConn.value.delete(connId) }
 }
 
@@ -404,8 +388,8 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
                   <div class="conn-meta">
                     <span :class="['conn-badge', c.has_schema ? 'ok' : 'muted']">{{ c.has_schema ? '已配置 Schema' : '无 Schema' }}</span>
                     <span class="conn-badge">{{ c.driver_type === 'manual' ? '手动' : '原生驱动' }}</span>
-                    <span v-if="c.driver_type !== 'manual'" :class="['conn-badge', connLiveStatus[c.id] === 'ok' ? 'ok' : connLiveStatus[c.id] === 'error' ? 'warn' : 'muted']">
-                      {{ connLiveStatus[c.id] === 'ok' ? '已连通' : connLiveStatus[c.id] === 'error' ? '已断开' : '待检测' }}
+                    <span v-if="c.driver_type !== 'manual'" :class="['conn-badge', connStore.connStatusMap[c.id] === 'ok' ? 'ok' : connStore.connStatusMap[c.id] === 'error' ? 'warn' : 'muted']">
+                      {{ connStore.connStatusMap[c.id] === 'ok' ? '已连通' : connStore.connStatusMap[c.id] === 'error' ? '已断开' : '待检测' }}
                     </span>
                     <span class="conn-date">{{ new Date(c.created_at).toLocaleDateString() }}</span>
                   </div>

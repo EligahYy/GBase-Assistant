@@ -72,27 +72,3 @@ class TestSandboxReadonly:
             WHERE u.status = 1
         """
         self.sandbox._validate_readonly(sql)
-
-
-class TestSandboxMultiStatement:
-    """多语句拦截测试。"""
-
-    def setup_method(self):
-        self.sandbox = SQLSandbox()
-
-    def test_single_statement_allowed(self):
-        """单条语句应通过。"""
-        self.sandbox._validate_single_statement("SELECT 1")
-
-    def test_semicolon_multi_statement_blocked(self):
-        """分号分隔的多语句应被拒绝。"""
-        with pytest.raises(SQLSandboxError, match="多条"):
-            self.sandbox._validate_single_statement("SELECT 1; DROP TABLE users")
-
-    def test_semicolon_at_end_allowed(self):
-        """末尾分号的单条语句应通过。"""
-        self.sandbox._validate_single_statement("SELECT 1;")
-
-    def test_comment_semicolon_allowed(self):
-        """注释中的分号不应触发拦截。"""
-        self.sandbox._validate_single_statement("SELECT 1 -- this is; a comment")

@@ -24,6 +24,8 @@ class Message(Base):
     message_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "sql" | "qa" | "general"
     sql_generated: Mapped[str | None] = mapped_column(Text, nullable=True)
     sql_validated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    query_result: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string
+    chart_config: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string
     token_usage: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON string
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
