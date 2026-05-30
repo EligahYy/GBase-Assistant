@@ -38,6 +38,13 @@ onMounted(() => {
   connStore.loadConnections().catch(() => {})
 })
 
+// 切换对话时停止当前流，防止旧流继续更新已替换的消息列表
+watch(() => chatStore.currentConversationId, (newId, oldId) => {
+  if (oldId && newId !== oldId && isStreaming.value) {
+    stopStream()
+  }
+})
+
 onBeforeUnmount(() => {
   if (isStreaming.value) {
     stopStream()

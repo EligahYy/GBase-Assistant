@@ -220,6 +220,8 @@ def _make_get_database_status_tool(db_connection_id: str):
 
     async def get_database_status() -> str:
         """Query database runtime status: connection count, active queries, uptime, table summary. Uses pre-defined system table queries — no SQL generation needed."""
+        import asyncio
+
         if not db_connection_id:
             return json.dumps({"error": "未选择数据库连接"}, ensure_ascii=False)
 
@@ -231,7 +233,6 @@ def _make_get_database_status_tool(db_connection_id: str):
 
         connector = get_connector(conn.driver_type)
         config = _to_connection_config(conn)
-        sandbox = SQLSandbox()
 
         queries = {
             "连接数": "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
@@ -240,13 +241,19 @@ def _make_get_database_status_tool(db_connection_id: str):
             "表概况": "SELECT TABLE_NAME, TABLE_ROWS, ROUND(DATA_LENGTH/1024/1024,2) AS size_mb FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY DATA_LENGTH DESC LIMIT 20",
         }
 
-        results = {}
-        for label, sql in queries.items():
+        async def _run_one(label: str, sql: str) -> dict:
             try:
+                sandbox = SQLSandbox()
                 qr = await sandbox.execute_readonly(connector, config, sql, max_rows=100, timeout_seconds=10)
-                results[label] = {"columns": qr.columns, "rows": qr.rows, "row_count": qr.row_count}
+                return label, {"columns": qr.columns, "rows": qr.rows, "row_count": qr.row_count}
             except Exception as e:
-                results[label] = {"error": str(e)}
+                return label, {"error": str(e)}
+
+        results = {}
+        tasks = [_run_one(label, sql) for label, sql in queries.items()]
+        gathered = await asyncio.gather(*tasks)
+        for label, data in gathered:
+            results[label] = data
 
         return json.dumps(results, ensure_ascii=False, default=str)
 
@@ -374,28 +381,8 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
 
     db_id = state.get("db_connection_id") or ""
 
-    glossary = load_glossary()
-    glossary_hits = _match_glossary_term(user_msg, glossary)
-
-    from app.agents.schema_graph import get_schema_graph
-    graph_inst = get_schema_graph(db_id)
-    schema_text = ""
-    if graph_inst._built:
-        schema_text = _build_schema_context(graph_inst.tables)
-
-    # Pre-fetch vector search results (also used by sql_specialist)
-    retrieved_schemas = None
-    if db_id:
-        try:
-            from app.dependencies import get_schema_retriever
-            from app.database import async_session_factory
-            async with async_session_factory() as session:
-                retriever = get_schema_retriever(session)
-                retrieved_schemas = await retriever.retrieve(user_msg, db_id)
-        except Exception:
-            pass
-
     # 🆕 Quick path: monitoring questions bypass NL2SQL pipeline
+    # Must run BEFORE any expensive operations (glossary, schema graph, vector search)
     _MONITORING_PATTERNS = [
         "连接状态", "连接数", "多少条", "sql在跑", "运行了多久",
         "数据库状态", "慢查询", "连接信息", "数据库连接",
@@ -439,9 +426,30 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
             "grounding": {"tables": [], "columns": {}, "join_paths": [], "confidence": 1.0, "matches": 0},
             "business_terms": {},
             "chart_config": None,
-            "retrieved_schemas": retrieved_schemas,
+            "retrieved_schemas": None,
             "final_response": formatted,
         }
+
+    glossary = load_glossary()
+    glossary_hits = _match_glossary_term(user_msg, glossary)
+
+    from app.agents.schema_graph import get_schema_graph
+    graph_inst = get_schema_graph(db_id)
+    schema_text = ""
+    if graph_inst._built:
+        schema_text = _build_schema_context(graph_inst.tables)
+
+    # Pre-fetch vector search results (also used by sql_specialist)
+    retrieved_schemas = None
+    if db_id:
+        try:
+            from app.dependencies import get_schema_retriever
+            from app.database import async_session_factory
+            async with async_session_factory() as session:
+                retriever = get_schema_retriever(session)
+                retrieved_schemas = await retriever.retrieve(user_msg, db_id)
+        except Exception:
+            pass
 
     try:
         llm_client = get_llm_client(task_type="sql")

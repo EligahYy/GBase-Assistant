@@ -58,8 +58,8 @@ class TestGlossaryMatching:
 class TestToolBuilder:
     def test_build_tools_returns_list(self):
         tools = build_semantic_mapper_tools({"test": {"table": "t", "column": "c", "synonyms": []}}, "test_db")
-        assert len(tools) == 4
+        assert len(tools) == 6
 
     def test_build_tools_with_empty_glossary(self):
         tools = build_semantic_mapper_tools({}, "test_db")
-        assert len(tools) == 4
+        assert len(tools) == 6
