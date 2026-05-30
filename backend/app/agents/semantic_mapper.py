@@ -402,15 +402,45 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
     ]
     is_monitoring = any(p in user_msg.lower() for p in _MONITORING_PATTERNS)
 
-    if is_monitoring and db_id:
+    if is_monitoring:
+        if not db_id:
+            return {
+                "grounding": {"tables": [], "columns": {}, "join_paths": [], "confidence": 0.0, "matches": 0},
+                "business_terms": {},
+                "chart_config": None,
+                "retrieved_schemas": None,
+                "final_response": "当前未选择数据库连接。请先在左侧设置中添加并选择一个 GBase 8a 数据库连接，然后再查询数据库状态。",
+            }
         status_tool = _make_get_database_status_tool(db_id)
-        status_json = await status_tool()
+        raw_json = await status_tool()
+        try:
+            status_data = json.loads(raw_json)
+            lines = ["**数据库状态概览**\n"]
+            for label, data in status_data.items():
+                if isinstance(data, dict) and "error" in data:
+                    lines.append(f"### {label}\n> 错误: {data['error']}")
+                elif isinstance(data, dict) and data.get("rows") and data["rows"]:
+                    cols = data["columns"]
+                    line = f"### {label}"
+                    if len(cols) == 1 and data["row_count"] == 1:
+                        line += f"\n{cols[0]}: **{data['rows'][0][0]}**"
+                    else:
+                        line += f"\n| {' | '.join(cols)} |"
+                        line += f"\n|{'|'.join(['---' for _ in cols])}|"
+                        for row in data["rows"][:20]:
+                            line += f"\n| {' | '.join(str(c) for c in row)} |"
+                    lines.append(line)
+                else:
+                    lines.append(f"### {label}\n> 无数据")
+            formatted = "\n\n".join(lines)
+        except (json.JSONDecodeError, TypeError):
+            formatted = f"数据库状态查询结果:\n{raw_json}"
         return {
             "grounding": {"tables": [], "columns": {}, "join_paths": [], "confidence": 1.0, "matches": 0},
             "business_terms": {},
             "chart_config": None,
             "retrieved_schemas": retrieved_schemas,
-            "final_response": f"数据库状态查询结果:\n{status_json}",
+            "final_response": formatted,
         }
 
     try:
