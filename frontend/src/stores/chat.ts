@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ConversationResponse } from '@/api/chat'
-import { listConversations, getConversation, updateConversation, deleteConversation, getConversationSummary, type ConversationSummary } from '@/api/chat'
+import { listConversations, getConversation, updateConversation, deleteConversation, getConversationSummary, type ConversationSummary, listFolders, createFolder, updateFolder, deleteFolder, batchOperateConversations, type FolderResponse } from '@/api/chat'
 
 export interface ChartConfig {
   type: 'bar' | 'line' | 'pie' | 'scatter'
@@ -49,6 +49,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([])
   const isLoading = ref(false)
   const conversationSummary = ref<ConversationSummary | null>(null)
+  const folders = ref<FolderResponse[]>([])
 
   function addUserMessage(content: string): string {
     const id = crypto.randomUUID()
@@ -123,9 +124,13 @@ export const useChatStore = defineStore('chat', () => {
     currentConversationId.value = conversationId
   }
 
-  async function loadConversations() {
+  async function loadConversations(folderId?: string | null) {
     try {
-      conversations.value = await listConversations()
+      const params: Record<string, string> = {}
+      if (folderId !== undefined) {
+        params.folder_id = folderId ?? ''
+      }
+      conversations.value = await listConversations(Object.keys(params).length ? params : undefined)
     } catch {
       // ignore
     }
@@ -226,12 +231,51 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // ── 文件夹操作 ──
+
+  async function loadFolders() {
+    try {
+      folders.value = await listFolders()
+    } catch {
+      // ignore
+    }
+  }
+
+  async function addFolder(name: string) {
+    const folder = await createFolder(name)
+    folders.value.unshift(folder)
+    return folder
+  }
+
+  async function renameFolder(id: string, name: string) {
+    await updateFolder(id, name)
+    const f = folders.value.find(f => f.id === id)
+    if (f) f.name = name
+  }
+
+  async function removeFolder(id: string) {
+    await deleteFolder(id)
+    folders.value = folders.value.filter(f => f.id !== id)
+    await loadConversations()
+  }
+
+  // ── 批量操作 ──
+
+  async function batchOperate(ids: string[], action: 'archive' | 'delete' | 'move', folderId?: string) {
+    await batchOperateConversations(ids, action, folderId)
+    await Promise.all([loadConversations(), loadFolders()])
+    if (action === 'delete' && currentConversationId.value && ids.includes(currentConversationId.value)) {
+      newConversation()
+    }
+  }
+
   return {
     conversations,
     currentConversationId,
     messages,
     isLoading,
     conversationSummary,
+    folders,
     addUserMessage,
     addStreamingMessage,
     appendStreamToken,
@@ -249,5 +293,10 @@ export const useChatStore = defineStore('chat', () => {
     archiveConv,
     setConvTags,
     deleteConv,
+    loadFolders,
+    addFolder,
+    renameFolder,
+    removeFolder,
+    batchOperate,
   }
 })

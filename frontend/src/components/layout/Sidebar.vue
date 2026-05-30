@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, nextTick } from 'vue'
+import { onMounted, ref, nextTick, computed } from 'vue'
 import type { DropdownOption } from 'naive-ui'
 import {
   AddOutline,
@@ -36,7 +36,127 @@ const showTagModal = ref(false)
 const tagEditingId = ref<string | null>(null)
 const tagEditingValue = ref('')
 
-onMounted(() => { chatStore.loadConversations() })
+// ── 批量管理模式 ──
+const batchMode = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) selectedIds.value.clear()
+}
+
+function toggleSelect(id: string) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+// ── 文件夹状态 ──
+const expandedFolders = ref<Set<string>>(new Set())
+
+function toggleFolder(id: string) {
+  const next = new Set(expandedFolders.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedFolders.value = next
+}
+
+const newFolderName = ref('')
+const isAddingFolder = ref(false)
+
+function startAddFolder() {
+  isAddingFolder.value = true
+  newFolderName.value = ''
+  nextTick(() => {
+    const input = document.querySelector('.folder-name-input') as HTMLInputElement
+    input?.focus()
+  })
+}
+
+async function confirmAddFolder() {
+  const name = newFolderName.value.trim()
+  if (!name) { isAddingFolder.value = false; return }
+  await chatStore.addFolder(name)
+  isAddingFolder.value = false
+}
+
+function cancelAddFolder() { isAddingFolder.value = false }
+
+const editingFolderId = ref<string | null>(null)
+const editingFolderName = ref('')
+
+function startRenameFolder(id: string, name: string) {
+  editingFolderId.value = id
+  editingFolderName.value = name
+  nextTick(() => {
+    const input = document.querySelector('.folder-rename-input') as HTMLInputElement
+    input?.focus()
+  })
+}
+
+async function confirmRenameFolder() {
+  if (!editingFolderId.value) return
+  const name = editingFolderName.value.trim()
+  if (!name) { editingFolderId.value = null; return }
+  await chatStore.renameFolder(editingFolderId.value, name)
+  editingFolderId.value = null
+}
+
+function cancelRenameFolder() { editingFolderId.value = null }
+
+async function confirmDeleteFolder(id: string) {
+  dialog.warning({
+    title: '删除文件夹',
+    content: '文件夹中的所有对话也会被删除，确定继续？',
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await chatStore.removeFolder(id)
+      naiveMsg.success('已删除')
+    },
+  })
+}
+
+// Computed: conversations NOT in any folder
+const unclassifiedConversations = computed(() =>
+  chatStore.conversations.filter(c => !c.folder_id)
+)
+
+// Folder children for rendering
+function conversationsInFolder(folderId: string) {
+  return chatStore.conversations.filter(c => c.folder_id === folderId)
+}
+
+// ── 批量操作 ──
+const showMoveMenu = ref(false)
+
+async function batchArchive() {
+  await chatStore.batchOperate([...selectedIds.value], 'archive')
+  selectedIds.value.clear()
+  batchMode.value = false
+  naiveMsg.success('已归档')
+}
+
+async function batchDelete() {
+  await chatStore.batchOperate([...selectedIds.value], 'delete')
+  selectedIds.value.clear()
+  batchMode.value = false
+  naiveMsg.success('已删除')
+}
+
+async function batchMove(folderId: string) {
+  await chatStore.batchOperate([...selectedIds.value], 'move', folderId)
+  selectedIds.value.clear()
+  batchMode.value = false
+  showMoveMenu.value = false
+  naiveMsg.success('已移动')
+}
+
+onMounted(() => {
+  chatStore.loadConversations()
+  chatStore.loadFolders()
+})
 
 function toggleCollapse() {
   emit('update:collapsed', !props.collapsed)
@@ -59,8 +179,9 @@ async function handleMenuSelect(key: string, conv: any) {
     showTagModal.value = true
   }
   else if (key === 'archive') {
-    await chatStore.archiveConv(conv.id, !conv.archived)
-    naiveMsg.success(conv.archived ? '已取消归档' : '已归档')
+    const wasArchived = conv.archived
+    await chatStore.archiveConv(conv.id, !wasArchived)
+    naiveMsg.success(wasArchived ? '已取消归档' : '已归档')
   }
   else if (key === 'delete') confirmDelete(conv)
 }
@@ -190,11 +311,97 @@ const navItems = [
           <span>新建会话</span>
         </button>
 
-        <!-- Conversation List -->
-        <div class="section-label">最近对话</div>
+        <!-- 项目文件夹 -->
+        <div class="section-label-row">
+          <span class="section-label">项目</span>
+          <button class="add-folder-btn" @click="startAddFolder" title="新建文件夹">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+
+        <!-- 新建文件夹输入框 -->
+        <div v-if="isAddingFolder" class="folder-input-row">
+          <input
+            v-model="newFolderName"
+            class="folder-name-input"
+            placeholder="文件夹名称"
+            maxlength="100"
+            @keydown.enter="confirmAddFolder"
+            @keydown.escape="cancelAddFolder"
+            @blur="confirmAddFolder"
+          />
+        </div>
+
+        <!-- 文件夹列表 -->
+        <nav class="folder-list">
+          <div v-for="folder in chatStore.folders" :key="folder.id" class="folder-group">
+            <div class="folder-item" @click="toggleFolder(folder.id)">
+              <svg
+                :class="['folder-chevron', { expanded: expandedFolders.has(folder.id) }]"
+                width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              ><path d="M9 18l6-6-6-6"/></svg>
+
+              <template v-if="editingFolderId === folder.id">
+                <input
+                  v-model="editingFolderName"
+                  class="folder-rename-input"
+                  maxlength="100"
+                  @keydown.enter="confirmRenameFolder"
+                  @keydown.escape="cancelRenameFolder"
+                  @blur="confirmRenameFolder"
+                  @click.stop
+                />
+              </template>
+              <template v-else>
+                <span class="folder-name">{{ folder.name }}</span>
+                <span class="folder-count">{{ folder.conversation_count }}</span>
+              </template>
+
+              <n-dropdown trigger="click" :options="[
+                { label: '重命名', key: 'rename' },
+                { label: '删除文件夹', key: 'delete' },
+              ]" @select="(key: string) => {
+                if (key === 'rename') startRenameFolder(folder.id, folder.name)
+                else if (key === 'delete') confirmDeleteFolder(folder.id)
+              }">
+                <button class="folder-more-btn" @click.stop>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                </button>
+              </n-dropdown>
+            </div>
+
+            <!-- 展开的对话子列表 -->
+            <div v-if="expandedFolders.has(folder.id)" class="folder-children">
+              <div
+                v-for="conv in conversationsInFolder(folder.id)"
+                :key="conv.id"
+                :class="['conv-item', 'conv-child', { active: conv.id === chatStore.currentConversationId && route.path === '/' }]"
+              >
+                <button class="conv-main" @click="chatStore.loadConversation(conv.id); navigateTo('/')">
+                  <span class="conv-title">{{ conv.title || '新对话' }}</span>
+                </button>
+                <n-dropdown v-if="!batchMode" trigger="click" :options="menuOptions(conv)" @select="(key: string) => handleMenuSelect(key, conv)">
+                  <button class="action-btn more-btn" @click.stop>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                  </button>
+                </n-dropdown>
+              </div>
+              <div v-if="conversationsInFolder(folder.id).length === 0" class="empty-folder">
+                暂无对话
+              </div>
+            </div>
+          </div>
+        </nav>
+
+        <!-- 未分类 -->
+        <div class="section-label-row">
+          <span class="section-label">未分类</span>
+          <button v-if="!batchMode" class="manage-toggle-btn" @click="toggleBatchMode">管理</button>
+          <button v-else class="manage-toggle-btn active" @click="toggleBatchMode">完成</button>
+        </div>
         <nav class="conv-list">
           <div
-            v-for="(conv, idx) in chatStore.conversations"
+            v-for="(conv, idx) in unclassifiedConversations"
             :key="conv.id"
             :class="['conv-item', { active: conv.id === chatStore.currentConversationId && route.path === '/' }]"
             :style="{ animationDelay: `${idx * 30}ms` }"
@@ -215,9 +422,13 @@ const navItems = [
               </button>
             </template>
             <template v-else>
+              <div v-if="batchMode" class="conv-checkbox" @click="toggleSelect(conv.id)">
+                <svg v-if="selectedIds.has(conv.id)" width="18" height="18" viewBox="0 0 24 24" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="2"><path d="M9 12l2 2 4-4M4 4h16v16H4z"/></svg>
+                <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+              </div>
               <button
                 class="conv-main"
-                @click="chatStore.loadConversation(conv.id); navigateTo('/')"
+                @click="!batchMode && (chatStore.loadConversation(conv.id), navigateTo('/'))"
               >
                 <n-icon :component="ChatbubbleEllipsesOutline" size="14" class="conv-icon" />
                 <div class="conv-text">
@@ -227,7 +438,7 @@ const navItems = [
                   </div>
                 </div>
               </button>
-              <n-dropdown trigger="click" :options="menuOptions(conv)" @select="(key) => handleMenuSelect(key as string, conv)">
+              <n-dropdown v-if="!batchMode" trigger="click" :options="menuOptions(conv)" @select="(key) => handleMenuSelect(key as string, conv)">
                 <button class="action-btn more-btn" title="更多" @click.stop>
                   <n-icon :component="EllipsisHorizontalOutline" size="14" />
                 </button>
@@ -236,6 +447,16 @@ const navItems = [
           </div>
           <div v-if="chatStore.conversations.length === 0" class="no-conv">暂无对话历史</div>
         </nav>
+
+        <!-- 批量操作栏 -->
+        <div v-if="batchMode && selectedIds.size > 0" class="batch-bar">
+          <span class="batch-count">已选 <strong>{{ selectedIds.size }}</strong> 项</span>
+          <n-dropdown v-if="chatStore.folders.length" trigger="click" :options="chatStore.folders.map(f => ({ label: f.name, key: f.id }))" @select="(key: string) => batchMove(key)">
+            <button class="batch-btn">移到文件夹</button>
+          </n-dropdown>
+          <button class="batch-btn" @click="batchArchive">归档</button>
+          <button class="batch-btn danger" @click="batchDelete">删除</button>
+        </div>
 
         <!-- Bottom Nav -->
         <div class="bottom-nav">
@@ -675,6 +896,173 @@ const navItems = [
   color: var(--text-0);
   font-weight: 600;
 }
+
+/* ── Section Label Row ── */
+.section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 6px;
+}
+
+.add-folder-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-4);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+.add-folder-btn:hover { color: var(--text-1); background: var(--bg-hover); }
+
+/* ── Folder Input ── */
+.folder-input-row { padding: 4px 8px 8px; }
+
+.folder-name-input,
+.folder-rename-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--seam-2);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg-surface);
+  color: var(--text-0);
+  font-family: var(--font-sans);
+}
+
+/* ── Folder List ── */
+.folder-list { padding: 0 2px; }
+
+.folder-group { margin-bottom: 1px; }
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+  transition: all var(--duration-fast);
+}
+.folder-item:hover { background: var(--bg-hover); color: var(--text-1); }
+
+.folder-chevron {
+  flex-shrink: 0;
+  transition: transform var(--duration-fast);
+  opacity: 0.5;
+}
+.folder-chevron.expanded { transform: rotate(90deg); }
+
+.folder-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.folder-count {
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.folder-more-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-4);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.folder-item:hover .folder-more-btn { display: flex; }
+.folder-more-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+
+/* ── Folder Children ── */
+.folder-children { padding-left: 18px; }
+
+.conv-child { padding: 4px 8px; }
+.conv-child .conv-title { font-size: 12px; }
+
+.empty-folder {
+  font-size: 11px;
+  color: var(--text-4);
+  padding: 6px 10px;
+  text-align: center;
+}
+
+/* ── Batch Mode ── */
+.manage-toggle-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid var(--seam-1);
+  border-radius: 4px;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  font-family: var(--font-sans);
+}
+.manage-toggle-btn:hover { border-color: var(--seam-2); color: var(--text-1); }
+.manage-toggle-btn.active { background: var(--bg-hover); color: var(--text-0); border-color: var(--seam-2); }
+
+.conv-checkbox {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.batch-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--seam-1);
+  margin-top: 8px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  z-index: 5;
+}
+
+.batch-count {
+  font-size: 12px;
+  color: var(--text-3);
+  flex: 1;
+}
+.batch-count strong { color: var(--text-0); }
+
+.batch-btn {
+  font-size: 12px;
+  padding: 5px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: all var(--duration-fast);
+}
+.batch-btn:hover { border-color: var(--seam-2); color: var(--text-0); }
+.batch-btn.danger { color: var(--error); border-color: var(--error); }
+.batch-btn.danger:hover { background: var(--error); color: #fff; }
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
