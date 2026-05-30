@@ -51,6 +51,10 @@ class AgentState(TypedDict, total=False):
     retrieved_docs: list[dict]
     knowledge_sources: list[str]
 
+    # ── Semantic Mapper 专属（🆕） ──
+    business_terms: dict | None
+    chart_config: dict | None
+
     # ── 输出 ──
     final_response: str | None
     confidence_score: int

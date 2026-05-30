@@ -600,6 +600,38 @@ class SchemaGraph:
 
         return None
 
+    def validate_mapping(self, tables: list[str], columns: dict[str, list[str]]) -> dict:
+        """验证 Semantic Mapper 输出的表/列映射是否真实存在。
+
+        Returns:
+            {"valid": bool, "errors": [str], "warnings": [str]}
+        """
+        errors = []
+        warnings = []
+
+        for table_name in tables:
+            if table_name not in self.tables:
+                errors.append(f"表 '{table_name}' 不存在于 Schema 中")
+                continue
+
+            table = self.tables[table_name]
+            table_cols = {c.name for c in table.columns}
+            mapped_cols = columns.get(table_name, [])
+
+            for col_name in mapped_cols:
+                if col_name not in table_cols:
+                    errors.append(f"列 '{table_name}.{col_name}' 不存在")
+
+            # 检查是否有被映射但未指定任何列的情况
+            if not mapped_cols:
+                warnings.append(f"表 '{table_name}' 被映射但未指定任何列")
+
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+        }
+
     def get_context_for_tables(self, table_names: list[str]) -> dict:
         """获取指定表的完整上下文（列、关系、分布键）。"""
         context = {"tables": {}, "relationships": []}

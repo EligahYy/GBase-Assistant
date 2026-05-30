@@ -69,3 +69,24 @@ class EventEncoder:
     @staticmethod
     def run_error(message: str) -> str:
         return EventEncoder._encode(EventType.RUN_ERROR, message=message)
+
+    @staticmethod
+    def chart_config(config: dict) -> str:
+        """发送图表配置给前端。"""
+        return EventEncoder._encode(
+            EventType.STATE_DELTA, path="chart_config", value=config
+        )
+
+    @staticmethod
+    def sql_event(sql: str) -> str:
+        """发送生成的 SQL 给前端。"""
+        return EventEncoder._encode(
+            EventType.STATE_DELTA, path="sql", value={"sql": sql}
+        )
+
+    @staticmethod
+    def result_event(result: dict) -> str:
+        """发送查询结果给前端。"""
+        return EventEncoder._encode(
+            EventType.STATE_DELTA, path="result", value=result
+        )
