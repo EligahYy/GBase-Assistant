@@ -21,6 +21,9 @@ class Conversation(Base):
     )
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    folder_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("folders.id", ondelete="SET NULL"), nullable=True
+    )
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
@@ -30,3 +33,5 @@ class Conversation(Base):
     messages: Mapped[list[Message]] = relationship(  # noqa: F821
         "Message", back_populates="conversation", cascade="all, delete-orphan", lazy="selectin"
     )
+
+    folder: Mapped["Folder | None"] = relationship("Folder", back_populates="conversations")  # noqa: F821
