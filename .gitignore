@@ -66,12 +66,14 @@ htmlcov/
 # ── Claude Code workspace ──────────────────────────────────────────────────────
 .claude/
 
+# ── Agent 开发过程文件 ──────────────────────────────────────────────────────────
+.agents/
+.superpowers/
+docs/
+
 # ── Misc ───────────────────────────────────────────────────────────────────────
 *.log
 knowledge/GBase 8a MPP Cluster产品手册_V953.pdf
 knowledge/official_toc.json
 *.pages.json
 knowledge/uploads/
-.agents/
-/docs/
-/.superpowers/
