@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 import SqlBlock from './SqlBlock.vue'
+import ChartRenderer from './ChartRenderer.vue'
 import { parseContent } from '@/composables/useContentParser'
-import type { Message } from '@/stores/chat'
+import type { ChartConfig, Message } from '@/stores/chat'
 
 const props = defineProps<{ message: Message }>()
 const isUser = computed(() => props.message.role === 'user')
@@ -21,6 +22,21 @@ const isTyping = computed(() =>
 
 const queryResult = computed(() => props.message.queryResult)
 const hasQueryResult = computed(() => !!queryResult.value && queryResult.value.row_count > 0)
+
+const viewMode = ref<'chart' | 'table' | 'raw'>('table')
+const hasChart = computed(() => {
+  if (props.message.chartConfig) return true
+  if (!hasQueryResult.value) return false
+  return queryResult.value!.columns.length >= 2
+})
+
+watchEffect(() => {
+  if (props.message.chartConfig && hasQueryResult.value) {
+    viewMode.value = 'chart'
+  } else if (hasQueryResult.value) {
+    viewMode.value = 'table'
+  }
+})
 
 function formatCell(val: unknown): string {
   if (val === null || val === undefined) return 'NULL'
@@ -149,13 +165,25 @@ function renderInline(text: string): string {
           <span v-if="message.isStreaming && (segments[segments.length - 1] as any).type !== 'text'" class="stream-cursor"></span>
         </template>
 
-        <!-- Query Result Table -->
+        <!-- Query Result with Chart + Table Toggle -->
         <div v-if="!isUser && !isTyping && hasQueryResult" class="result-block">
           <div class="result-header">
             <span class="result-label">查询结果</span>
-            <span class="result-meta">{{ queryResult!.row_count }} 行 | {{ queryResult!.execution_time_ms }}ms</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="result-meta">{{ queryResult!.row_count }} 行 | {{ queryResult!.execution_time_ms }}ms</span>
+              <div v-if="hasChart" class="view-toggles">
+                <button :class="['toggle-btn', { active: viewMode === 'chart' }]" @click="viewMode = 'chart'">图表</button>
+                <button :class="['toggle-btn', { active: viewMode === 'table' }]" @click="viewMode = 'table'">表格</button>
+                <button :class="['toggle-btn', { active: viewMode === 'raw' }]" @click="viewMode = 'raw'">原始</button>
+              </div>
+            </div>
           </div>
-          <div class="result-table-wrap">
+          <ChartRenderer
+            v-if="viewMode === 'chart' && hasChart"
+            :result="queryResult!"
+            :chart-config="message.chartConfig ?? null"
+          />
+          <div v-if="viewMode === 'table'" class="result-table-wrap">
             <table class="result-table">
               <thead>
                 <tr>
@@ -169,6 +197,7 @@ function renderInline(text: string): string {
               </tbody>
             </table>
           </div>
+          <pre v-if="viewMode === 'raw'" class="raw-data">{{ JSON.stringify(queryResult, null, 2) }}</pre>
           <div v-if="queryResult!.truncated" class="result-truncated">结果已截断，最多展示 100 行</div>
         </div>
 
@@ -460,6 +489,39 @@ function renderInline(text: string): string {
   text-align: center;
   border-top: 1px solid var(--seam-1);
   background: var(--bg-deep);
+}
+
+.view-toggles {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.toggle-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  font-family: var(--font-mono);
+}
+.toggle-btn.active {
+  background: var(--bg-deep);
+  color: var(--text-0);
+  font-weight: 600;
+}
+.raw-data {
+  padding: 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 
 /* RAG sources */

@@ -3,6 +3,14 @@ import { ref } from 'vue'
 import type { ConversationResponse } from '@/api/chat'
 import { listConversations, getConversation, updateConversation, deleteConversation, getConversationSummary, type ConversationSummary } from '@/api/chat'
 
+export interface ChartConfig {
+  type: 'bar' | 'line' | 'pie' | 'scatter'
+  title?: string
+  x_axis?: { column: string; label: string }
+  y_axis?: { column: string; label: string; aggregation?: string }
+  group_by?: string | null
+}
+
 export interface QueryResult {
   columns: string[]
   rows: unknown[][]
@@ -19,6 +27,7 @@ export interface Message {
   messageType?: string | null
   sources?: string | null
   queryResult?: QueryResult | null
+  chartConfig?: ChartConfig | null
   isStreaming?: boolean
   streamContent?: string
   streamSql?: string
@@ -96,6 +105,13 @@ export const useChatStore = defineStore('chat', () => {
     const msg = messages.value.find((m) => m.id === id)
     if (msg) {
       msg.queryResult = result
+    }
+  }
+
+  function setStreamChartConfig(id: string, config: ChartConfig) {
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg) {
+      msg.chartConfig = config
     }
   }
 
@@ -220,6 +236,7 @@ export const useChatStore = defineStore('chat', () => {
     setStreamSql,
     setStreamSources,
     setStreamQueryResult,
+    setStreamChartConfig,
     syncMessageIdsFromStream,
     finalizeStreamMessage,
     loadConversations,
