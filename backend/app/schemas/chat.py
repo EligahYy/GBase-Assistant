@@ -11,6 +11,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     db_connection_id: str | None = None
     model: str | None = None  # 用户覆盖模型
+    folder_id: str | None = None  # 新建对话时放入该文件夹
 
 
 class MessageResponse(BaseModel):

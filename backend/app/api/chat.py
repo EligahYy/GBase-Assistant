@@ -47,6 +47,7 @@ async def chat_stream(
                 title=request.message[:50],
                 db_connection_id=request.db_connection_id,
                 model_used=request.model,
+                folder_id=request.folder_id,
                 created_at=datetime.now(UTC),
             )
             db.add(conv)

@@ -83,6 +83,7 @@ async function sendMessage() {
     conversation_id: conversationId,
     db_connection_id: connStore.activeConnectionId,
     model: selectedModel.value,
+    folder_id: chatStore.activeFolderId,
   })
   const serverConversationId = await streamPost(url, body, (chunk) => {
     if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
@@ -129,6 +130,7 @@ async function sendMessage() {
   }
 
   chatStore.finalizeStreamMessage(finalAsstId, serverConversationId ?? conversationId ?? crypto.randomUUID())
+  chatStore.activeFolderId = null
   await chatStore.loadConversations()
 }
 

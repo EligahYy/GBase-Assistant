@@ -52,6 +52,12 @@ function toggleSelect(id: string) {
   selectedIds.value = next
 }
 
+function selectAllUnclassified() {
+  unclassifiedConversations.value.forEach(c => selectedIds.value.add(c.id))
+  // trigger reactivity
+  selectedIds.value = new Set(selectedIds.value)
+}
+
 // ── 文件夹状态 ──
 const expandedFolders = ref<Set<string>>(new Set())
 
@@ -163,20 +169,29 @@ function toggleCollapse() {
 }
 
 function menuOptions(conv: { archived: boolean }): DropdownOption[] {
-  return [
+  const options: DropdownOption[] = [
     { label: '重命名', key: 'rename' },
-    { label: '编辑标签', key: 'tags' },
+  ]
+  if (chatStore.folders.length > 0) {
+    options.push({
+      label: '移动到文件夹',
+      key: 'move-to-folder',
+      children: chatStore.folders.map(f => ({ label: f.name, key: `move-${f.id}` })),
+    })
+  }
+  options.push(
     { label: conv.archived ? '取消归档' : '归档', key: 'archive' },
     { label: '删除', key: 'delete' },
-  ]
+  )
+  return options
 }
 
 async function handleMenuSelect(key: string, conv: any) {
   if (key === 'rename') startRename(conv)
-  else if (key === 'tags') {
-    tagEditingId.value = conv.id
-    tagEditingValue.value = (conv.tags || []).join(', ')
-    showTagModal.value = true
+  else if (key.startsWith('move-')) {
+    const folderId = key.slice(5)
+    await chatStore.moveConvToFolder(conv.id, folderId)
+    naiveMsg.success('已移动')
   }
   else if (key === 'archive') {
     const wasArchived = conv.archived
@@ -355,6 +370,9 @@ const navItems = [
               <template v-else>
                 <span class="folder-name">{{ folder.name }}</span>
                 <span class="folder-count">{{ folder.conversation_count }}</span>
+                <button class="folder-new-chat-btn" @click.stop="chatStore.activeFolderId = folder.id; chatStore.newConversation(); navigateTo('/')" title="在此文件夹新建对话">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                </button>
               </template>
 
               <n-dropdown trigger="click" :options="[
@@ -396,8 +414,11 @@ const navItems = [
         <!-- 未分类 -->
         <div class="section-label-row">
           <span class="section-label">未分类</span>
-          <button v-if="!batchMode" class="manage-toggle-btn" @click="toggleBatchMode">管理</button>
-          <button v-else class="manage-toggle-btn active" @click="toggleBatchMode">完成</button>
+          <div style="display:flex;gap:4px;">
+            <button v-if="batchMode" class="manage-toggle-btn" @click="selectAllUnclassified">全选</button>
+            <button v-if="!batchMode" class="manage-toggle-btn" @click="toggleBatchMode">管理</button>
+            <button v-else class="manage-toggle-btn active" @click="toggleBatchMode">完成</button>
+          </div>
         </div>
         <nav class="conv-list">
           <div
@@ -451,9 +472,10 @@ const navItems = [
         <!-- 批量操作栏 -->
         <div v-if="batchMode && selectedIds.size > 0" class="batch-bar">
           <span class="batch-count">已选 <strong>{{ selectedIds.size }}</strong> 项</span>
-          <n-dropdown v-if="chatStore.folders.length" trigger="click" :options="chatStore.folders.map(f => ({ label: f.name, key: f.id }))" @select="(key: string) => batchMove(key)">
+          <n-dropdown v-if="chatStore.folders.length > 0" trigger="click" :options="chatStore.folders.map(f => ({ label: f.name, key: f.id }))" @select="(key: string) => batchMove(key)">
             <button class="batch-btn">移到文件夹</button>
           </n-dropdown>
+          <button v-else class="batch-btn" disabled style="opacity:0.4;cursor:not-allowed;" title="暂无可用的文件夹">移到文件夹</button>
           <button class="batch-btn" @click="batchArchive">归档</button>
           <button class="batch-btn danger" @click="batchDelete">删除</button>
         </div>
@@ -974,6 +996,23 @@ const navItems = [
   font-size: 11px;
   color: var(--text-4);
 }
+
+.folder-new-chat-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-4);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.folder-item:hover .folder-new-chat-btn { display: flex; }
+.folder-new-chat-btn:hover { background: var(--bg-hover); color: var(--text-1); }
 
 .folder-more-btn {
   display: none;

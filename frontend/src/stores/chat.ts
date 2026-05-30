@@ -49,6 +49,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<Message[]>([])
   const isLoading = ref(false)
   const conversationSummary = ref<ConversationSummary | null>(null)
+  const activeFolderId = ref<string | null>(null)
   const folders = ref<FolderResponse[]>([])
 
   function addUserMessage(content: string): string {
@@ -214,6 +215,14 @@ export const useChatStore = defineStore('chat', () => {
     const conv = conversations.value.find((c) => c.id === id)
     if (conv) conv.archived = archived
     await loadConversations()
+    if (currentConversationId.value === id && archived) {
+      newConversation()
+    }
+  }
+
+  async function moveConvToFolder(convId: string, folderId: string | null) {
+    await updateConversation(convId, { folder_id: folderId })
+    await loadConversations()
   }
 
   async function setConvTags(id: string, tags: string[]) {
@@ -275,6 +284,7 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     isLoading,
     conversationSummary,
+    activeFolderId,
     folders,
     addUserMessage,
     addStreamingMessage,
@@ -291,6 +301,7 @@ export const useChatStore = defineStore('chat', () => {
     newConversation,
     renameConv,
     archiveConv,
+    moveConvToFolder,
     setConvTags,
     deleteConv,
     loadFolders,

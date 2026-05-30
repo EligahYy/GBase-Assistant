@@ -5,6 +5,7 @@ export interface ChatRequest {
   conversation_id?: string | null
   db_connection_id?: string | null
   model?: string | null
+  folder_id?: string | null
 }
 
 export interface MessageResponse {
