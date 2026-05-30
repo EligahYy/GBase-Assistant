@@ -68,6 +68,8 @@ def build_sql_prompt(
     schemas: list[TableSchema],
     examples: list[SQLExample],
     history: list[dict] | None = None,
+    business_terms: dict | None = None,
+    chart_config: dict | None = None,
 ) -> list[dict]:
     """构建 SQL 生成的完整消息列表。"""
     unsupported = _format_unsupported(dialect_rules.get("unsupported", []))
@@ -80,23 +82,67 @@ def build_sql_prompt(
         function_rules=functions,
     )
 
-    # 追加 Schema 信息
+    # 🆕 追加 Schema 信息（含列元数据）
     if schemas:
         schema_section = "\n## 目标数据库 Schema\n"
         for s in schemas:
             schema_section += f"\n-- 表: {s.table_name}"
             if s.description:
                 schema_section += f" ({s.description})"
-            schema_section += f"\n{s.ddl}\n"
+            schema_section += "\n"
+            # 显示列角色、标签、枚举值（若可用）
+            if s.columns:
+                col_lines = []
+                for c in s.columns:
+                    col_line = f"--   {c.get('name', '?')} {c.get('type', '?')}"
+                    if c.get('role') and c['role'] != 'UNKNOWN':
+                        col_line += f" [{c['role']}]"
+                    if c.get('label'):
+                        col_line += f" -- {c['label']}"
+                    if c.get('enum_values'):
+                        ev = ", ".join(f"{k}={v}" for k, v in c['enum_values'].items())
+                        col_line += f" 枚举: {ev}"
+                    col_lines.append(col_line)
+                schema_section += "\n".join(col_lines) + "\n"
+            else:
+                # 回退到原始 DDL
+                schema_section += f"{s.ddl}\n"
         system_content += schema_section
     else:
         system_content += "\n\n## 注意\n当前未选择数据库，请基于用户描述推断表结构生成通用 SQL。"
+
+    # 🆕 注入业务术语映射
+    if business_terms:
+        bt_lines = ["\n## 业务术语映射（已知的语义对应关系）"]
+        for term, info in business_terms.items():
+            if isinstance(info, dict):
+                tbl = info.get("table", "")
+                col = info.get("column", "")
+                tmpl = info.get("sql_template", "")
+                line = f"- **{term}** -> {tbl}.{col}"
+                if tmpl:
+                    line += f" (表达式: {tmpl})"
+                bt_lines.append(line)
+        system_content += "\n".join(bt_lines)
 
     # Few-shot 示例
     if examples:
         system_content += "\n\n## 参考示例\n"
         for ex in examples:
             system_content += f"\n用户问题：{ex.question}\n```sql\n{ex.sql}\n```\n"
+
+    # 🆕 图表输出指令
+    chart_instruction = (
+        "\n\n## 图表输出要求\n"
+        "如果你的查询结果适合图表展示，请在 SQL 代码块之后输出一个 JSON 图表配置（用 ```chart_config 代码块包裹）。"
+        "格式: {\"type\": \"bar|line|pie|scatter\", \"title\": \"图表标题\", "
+        "\"x_axis\": {\"column\": \"列名\", \"label\": \"X轴标签\"}, "
+        "\"y_axis\": {\"column\": \"列名\", \"label\": \"Y轴标签\", \"aggregation\": \"SUM|COUNT|AVG\"}}\n"
+        "只在结果有明确的维度和度量时输出图表配置，纯列表查询不需要。\n"
+    )
+    if chart_config:
+        chart_instruction += f"\n用户期望的图表类型: {chart_config.get('type', 'bar')}"
+    system_content += chart_instruction
 
     messages: list[dict] = [{"role": "system", "content": system_content}]
 
