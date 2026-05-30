@@ -209,14 +209,105 @@ def _make_find_join_path_tool(db_id: str):
     return find_join_path
 
 
+# 🆕 Tool 5: Database Status
+def _make_get_database_status_tool(db_connection_id: str):
+    from app.database import async_session_factory
+    from sqlalchemy import select
+    from app.models.connection import DbConnection
+    from app.db_connectors.connector_factory import get_connector
+    from app.api.connections import _to_connection_config
+    from app.sql.sandbox import SQLSandbox
+
+    async def get_database_status() -> str:
+        """Query database runtime status: connection count, active queries, uptime, table summary. Uses pre-defined system table queries — no SQL generation needed."""
+        if not db_connection_id:
+            return json.dumps({"error": "未选择数据库连接"}, ensure_ascii=False)
+
+        async with async_session_factory() as session:
+            result = await session.execute(select(DbConnection).where(DbConnection.id == db_connection_id))
+            conn = result.scalar_one_or_none()
+        if not conn:
+            return json.dumps({"error": "连接不存在"}, ensure_ascii=False)
+
+        connector = get_connector(conn.driver_type)
+        config = _to_connection_config(conn)
+        sandbox = SQLSandbox()
+
+        queries = {
+            "连接数": "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
+            "活跃SQL": "SELECT id, user, host, db, time, state, LEFT(info,200) AS info FROM information_schema.PROCESSLIST WHERE time > 0",
+            "运行时间": "SELECT DATEDIFF(NOW(), MIN(create_time)) AS running_days FROM information_schema.TABLES",
+            "表概况": "SELECT TABLE_NAME, TABLE_ROWS, ROUND(DATA_LENGTH/1024/1024,2) AS size_mb FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY DATA_LENGTH DESC LIMIT 20",
+        }
+
+        results = {}
+        for label, sql in queries.items():
+            try:
+                qr = await sandbox.execute_readonly(connector, config, sql, max_rows=100, timeout_seconds=10)
+                results[label] = {"columns": qr.columns, "rows": qr.rows, "row_count": qr.row_count}
+            except Exception as e:
+                results[label] = {"error": str(e)}
+
+        return json.dumps(results, ensure_ascii=False, default=str)
+
+    return get_database_status
+
+
+# 🆕 Tool 6: Error Code Lookup
+def _make_query_error_code_tool():
+    from app.config import get_settings
+    from app.vector.client import get_qdrant_manager
+    from app.vector.embedder import get_embedder
+
+    async def query_error_code(query: str, top_k: int = 5) -> str:
+        """Search GBase 8a error codes by semantic similarity. Returns error code, description, and solution."""
+        try:
+            embedder = get_embedder()
+            qdrant = get_qdrant_manager().client
+            collection = get_settings().models_config.get("collections", {}).get("error_codes", "error_codes")
+
+            embeddings = await embedder.embed([query])
+            results = await qdrant.query_points(
+                collection_name=collection,
+                query=embeddings[0],
+                limit=top_k,
+            )
+            results = results.points if results else []
+
+            if not results:
+                return "未找到匹配的错误码。建议查阅 GBase 8a 官方手册。"
+
+            lines = [f"错误码检索结果 (top-{top_k}):"]
+            for i, r in enumerate(results):
+                payload = r.payload or {}
+                score = float(r.score) if r.score is not None else 0.0
+                code = payload.get("code", "?")
+                desc = payload.get("description", "")
+                solution = payload.get("solution", "")
+                line = f"\n{i+1}. [{code}] (相似度: {score:.2f})\n   描述: {desc}"
+                if solution:
+                    line += f"\n   解决方案: {solution[:200]}"
+                lines.append(line)
+            return "\n".join(lines)
+        except Exception as e:
+            logger.warning("Error code search failed: %s", e)
+            return f"错误码检索失败: {e}"
+
+    return query_error_code
+
+
 def build_semantic_mapper_tools(glossary: dict, db_id: str):
-    """Build the 4-tool set for the Semantic Mapper Agent."""
-    return [
+    """Build the 6-tool set for the Semantic Mapper Agent."""
+    tools = [
         _make_query_glossary_tool(glossary),
         _make_search_schema_semantic_tool(db_id),
         _make_get_table_profile_tool(db_id),
         _make_find_join_path_tool(db_id),
     ]
+    if db_id:
+        tools.append(_make_get_database_status_tool(db_id))
+    tools.append(_make_query_error_code_tool())
+    return tools
 
 
 # ── System Prompt ─────────────────────────────────────────────────────────────────
@@ -303,6 +394,24 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
                 retrieved_schemas = await retriever.retrieve(user_msg, db_id)
         except Exception:
             pass
+
+    # 🆕 Quick path: monitoring questions bypass NL2SQL pipeline
+    _MONITORING_PATTERNS = [
+        "连接状态", "连接数", "多少条", "sql在跑", "运行了多久",
+        "数据库状态", "慢查询", "连接信息", "数据库连接",
+    ]
+    is_monitoring = any(p in user_msg.lower() for p in _MONITORING_PATTERNS)
+
+    if is_monitoring and db_id:
+        status_tool = _make_get_database_status_tool(db_id)
+        status_json = await status_tool()
+        return {
+            "grounding": {"tables": [], "columns": {}, "join_paths": [], "confidence": 1.0, "matches": 0},
+            "business_terms": {},
+            "chart_config": None,
+            "retrieved_schemas": retrieved_schemas,
+            "final_response": f"数据库状态查询结果:\n{status_json}",
+        }
 
     try:
         llm_client = get_llm_client(task_type="sql")

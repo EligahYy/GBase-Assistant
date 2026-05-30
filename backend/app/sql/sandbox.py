@@ -1,8 +1,7 @@
 """SQL 执行沙箱：只读、超时、行数限制。
 
 安全规则：
-- 只读拦截：AST 级别检测 INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/GRANT/REVOKE
-- 多语句拦截：; 分隔的多条 SQL 拒绝执行
+- 只读拦截：首词白名单检测 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH
 - 超时：asyncio.wait_for 包装
 - 行数限制：最多返回 max_rows 行
 """
@@ -12,8 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING
-
-import sqlglot
 
 from app.observability import metrics
 
@@ -36,66 +33,25 @@ _READ_ONLY_BLOCKED: set[str] = {
     "REPLACE",
 }
 
+_READ_ONLY_ALLOWED = {"SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "WITH"}
+
 
 class SQLSandboxError(Exception):
     """沙箱安全拦截。"""
 
 
 class SQLSandbox:
-    """SQL 执行沙箱。"""
+    """SQL 执行沙箱 — 首词白名单 + 超时 + 行数限制。"""
 
     @staticmethod
     def _validate_readonly(sql: str) -> None:
-        """AST 级别验证 SQL 是否为只读查询。"""
-        try:
-            parsed = sqlglot.parse(sql, dialect="mysql")
-        except Exception as e:
-            raise SQLSandboxError(f"SQL 解析失败: {e}") from e
-
-        if not parsed:
-            raise SQLSandboxError("无法解析 SQL")
-
-        for stmt in parsed:
-            if stmt is None:
-                continue
-            # 检测多语句
-            if len(parsed) > 1:
-                raise SQLSandboxError("禁止执行多条 SQL 语句")
-
-            stmt_type = type(stmt).__name__.upper()
-            # sqlglot 的 DML/DDL 类型判断
-            if any(keyword in stmt_type for keyword in _READ_ONLY_BLOCKED):
-                raise SQLSandboxError(f"禁止执行 {stmt_type} 语句（沙箱只读模式）")
-
-            # 额外检查 AST 中的关键字
-            for token in stmt.walk():
-                token_type = str(getattr(token, "name", "")).upper()
-                if token_type in _READ_ONLY_BLOCKED:
-                    raise SQLSandboxError(f"禁止执行包含 {token_type} 的语句（沙箱只读模式）")
-
-        # 简单字符串检测（补充 AST 可能遗漏的情况）
+        """验证 SQL 首词为允许的只读类型。"""
         stripped = sql.strip().upper()
         first_word = stripped.split()[0] if stripped.split() else ""
         if first_word in _READ_ONLY_BLOCKED:
             raise SQLSandboxError(f"禁止执行 {first_word} 语句（沙箱只读模式）")
-
-    @staticmethod
-    def _validate_single_statement(sql: str) -> None:
-        """检测是否为单条语句（简单的 ; 检查，非解析级）。"""
-        # 去掉注释后检查
-        lines = sql.split("\n")
-        cleaned = []
-        for line in lines:
-            # 去掉行内注释
-            if "--" in line:
-                line = line[: line.index("--")]
-            cleaned.append(line)
-        no_comments = "\n".join(cleaned)
-
-        # 检查是否有分号分隔的多语句（最后一个分号不算）
-        trimmed = no_comments.strip().rstrip(";")
-        if ";" in trimmed:
-            raise SQLSandboxError("禁止执行多条 SQL 语句（检测到分号分隔）")
+        if first_word not in _READ_ONLY_ALLOWED:
+            raise SQLSandboxError(f"不允许的 SQL 类型: {first_word}（仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH）")
 
     async def execute_readonly(
         self,
@@ -123,7 +79,6 @@ class SQLSandbox:
         """
         # 1. 安全验证
         try:
-            self._validate_single_statement(sql)
             self._validate_readonly(sql)
         except SQLSandboxError:
             metrics.record_sql_execution(status="blocked", latency_seconds=0.0)

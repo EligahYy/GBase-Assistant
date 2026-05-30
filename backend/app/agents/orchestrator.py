@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # ── 关键词分类规则 ──
 _SQL_KEYWORDS = (
     "查询", "统计", "列出", "分析", "计算", "汇总",
+    "检查", "查看", "显示", "多少", "运行", "状态",
     "SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY",
     "select", "from", "where",
 )

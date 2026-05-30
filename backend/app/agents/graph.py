@@ -305,13 +305,15 @@ def build_graph() -> StateGraph:
     builder.add_edge("semantic_mapper", "supervisor_check")
 
     def route_after_supervisor(state: AgentStateType) -> str:
+        if state.get("final_response"):
+            return "response_formatter"
         if state.get("needs_clarification"):
             return "ask_user_clarification"
         return "sql_specialist"
 
     builder.add_conditional_edges(
         "supervisor_check", route_after_supervisor,
-        {"sql_specialist": "sql_specialist", "ask_user_clarification": "ask_user_clarification"},
+        {"sql_specialist": "sql_specialist", "ask_user_clarification": "ask_user_clarification", "response_formatter": "response_formatter"},
     )
     builder.add_edge("ask_user_clarification", END)
 
