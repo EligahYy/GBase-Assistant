@@ -4,25 +4,6 @@ from __future__ import annotations
 
 from app.protocols import KnowledgeChunk, SQLExample, TableSchema
 
-# ── 意图分类 ────────────────────────────────────────────────────────────────────
-
-INTENT_SYSTEM = """你是一个意图分类器。根据用户输入，判断其意图并返回 JSON。
-
-意图类型：
-- "sql"：用户想查询数据、生成 SQL、分析数据（如"查询..."、"统计..."、"列出..."）
-- "qa"：用户在咨询 GBase 8a 数据库的知识、语法、特性、错误（如"支持...吗"、"怎么..."、"什么是..."）
-- "general"：其他（问候、闲聊、超出范围的问题）
-
-只返回 JSON，格式：{"intent": "sql"} 或 {"intent": "qa"} 或 {"intent": "general"}
-
-示例：
-用户："查询每个部门的员工数" → {"intent": "sql"}
-用户："GBase 8a 支持窗口函数吗" → {"intent": "qa"}
-用户："你好" → {"intent": "general"}
-用户："统计最近30天的订单" → {"intent": "sql"}
-用户："创建触发器会报错吗" → {"intent": "qa"}"""
-
-
 # ── SQL 生成 ────────────────────────────────────────────────────────────────────
 
 SQL_SYSTEM_BASE = """你是 GBase 8a MPP 分析数据库的 SQL 专家。根据用户的自然语言描述，生成正确的 GBase 8a SQL。
@@ -229,9 +210,9 @@ def build_sql_correction_prompt(
 
 # ── General Chat ────────────────────────────────────────────────────────────────
 
-GENERAL_SYSTEM = """你是 GBase 8a 数据库助手。你的主要功能是帮助用户生成 SQL 和解答 GBase 8a 相关问题。
+GENERAL_SYSTEM = """你是 GBase 8a 数据库助手。你可以回答一般性问题、进行友好对话。
 
-如果用户的问题与数据库相关，引导他们描述具体需求；如果是问候或闲聊，简短友好地回应并引导回正题。"""
+如果用户的问题涉及数据库查询或技术问题，引导他们描述具体需求（如"我想查询销售额"或"GBase 8a 如何创建分区表"），以便为你提供更精准的帮助。"""
 
 
 def build_general_prompt(message: str, history: list[dict] | None = None) -> list[dict]:

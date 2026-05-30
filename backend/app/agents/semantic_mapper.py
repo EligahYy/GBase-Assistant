@@ -279,7 +279,7 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
         elif isinstance(last, dict):
             user_msg = last.get("content", "")
     if not user_msg:
-        return {"business_terms": None, "chart_config": None}
+        return {"business_terms": None, "chart_config": None, "retrieved_schemas": None}
 
     db_id = state.get("db_connection_id") or ""
 
@@ -291,6 +291,18 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
     schema_text = ""
     if graph_inst._built:
         schema_text = _build_schema_context(graph_inst.tables)
+
+    # Pre-fetch vector search results (also used by sql_specialist)
+    retrieved_schemas = None
+    if db_id:
+        try:
+            from app.dependencies import get_schema_retriever
+            from app.database import async_session_factory
+            async with async_session_factory() as session:
+                retriever = get_schema_retriever(session)
+                retrieved_schemas = await retriever.retrieve(user_msg, db_id)
+        except Exception:
+            pass
 
     try:
         llm_client = get_llm_client(task_type="sql")
@@ -363,6 +375,7 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
             },
             "business_terms": mapping.get("business_terms", {}),
             "chart_config": mapping.get("chart_hint"),
+            "retrieved_schemas": retrieved_schemas,
         }
     except Exception as e:
         logger.error("Semantic Mapper failed: %s", e)
@@ -370,4 +383,5 @@ async def semantic_mapper_node(state: AgentStateType) -> dict:
             "grounding": {"tables": [], "columns": {}, "join_paths": [], "confidence": 0.0},
             "business_terms": None,
             "chart_config": None,
+            "retrieved_schemas": None,
         }

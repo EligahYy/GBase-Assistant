@@ -13,13 +13,13 @@ class AgentState(TypedDict, total=False):
     """多 Agent 共享状态。
 
     字段所有权：
-    - Orchestrator: intent, task_dag, current_task
-    - Schema Grounding: grounding, needs_clarification, grounding_retry_count
+    - Orchestrator: intent
+    - Schema Grounding: grounding, needs_clarification
     - SQL Specialist: generated_sql, sql_retry_count
     - SQL Verifier: validation_errors, validation_passed
     - SQL Executor: query_result, execution_error
     - Knowledge Specialist: retrieved_docs, knowledge_sources
-    - Output: final_response, confidence_score, assumptions
+    - Output: final_response, confidence_score
     """
 
     # ── 消息历史（跨 Agent 共享，只增不减） ──
@@ -27,13 +27,10 @@ class AgentState(TypedDict, total=False):
 
     # ── Orchestrator 专属 ──
     intent: Literal["sql", "qa", "general", "clarify"]
-    task_dag: list[dict]
-    current_task: str
 
     # ── Schema Grounding 专属（Phase 3 使用） ──
     grounding: dict | None
     needs_clarification: str | None
-    grounding_retry_count: int
 
     # ── SQL Specialist 专属（Phase 3 使用） ──
     generated_sql: str | None
@@ -51,14 +48,14 @@ class AgentState(TypedDict, total=False):
     retrieved_docs: list[dict]
     knowledge_sources: list[str]
 
-    # ── Semantic Mapper 专属（🆕） ──
+    # ── Semantic Mapper 专属 ──
     business_terms: dict | None
     chart_config: dict | None
+    retrieved_schemas: list | None
 
     # ── 输出 ──
     final_response: str | None
     confidence_score: int
-    assumptions: list[str]
 
     # ── 元数据 ──
     conversation_id: str
