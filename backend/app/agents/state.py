@@ -62,6 +62,9 @@ class AgentState(TypedDict, total=False):
     db_connection_id: str | None
     model: str
 
+    # ── 对话历史（多轮上下文） ──
+    history: list[dict]
+
 
 # 类型别名供其他模块使用
 AgentStateType = AgentState

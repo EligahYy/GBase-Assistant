@@ -89,7 +89,7 @@ async def sql_specialist_node(state: AgentStateType) -> dict:
 
         messages = build_sql_prompt(
             message=user_msg, dialect_rules=dialect_rules,
-            schemas=schemas, examples=examples_list, history=[],
+            schemas=schemas, examples=examples_list, history=state.get("history", []),
             business_terms=business_terms,
             chart_config=chart_config_hint,
         )
@@ -190,7 +190,7 @@ async def knowledge_specialist_node(state: AgentStateType) -> dict:
         llm_client = get_llm_client(task_type="qa")
         retriever = get_knowledge_retriever()
         chunks = await retriever.retrieve(user_msg)
-        messages = build_qa_prompt(message=user_msg, knowledge_chunks=chunks, history=[])
+        messages = build_qa_prompt(message=user_msg, knowledge_chunks=chunks, history=state.get("history", []))
 
         response_text = ""
         async for token in llm_client.stream(messages):
@@ -215,7 +215,7 @@ async def general_specialist_node(state: AgentStateType) -> dict:
 
     try:
         llm_client = get_llm_client(task_type="general")
-        messages = build_general_prompt(message=user_msg, history=[])
+        messages = build_general_prompt(message=user_msg, history=state.get("history", []))
 
         response_text = ""
         async for token in llm_client.stream(messages):
@@ -351,11 +351,30 @@ async def run_agent_with_ag_ui(
     """运行 LangGraph Agent 并以 AG-UI token 级流式 SSE 输出。"""
     graph = build_graph()
 
+    # Load conversation history for multi-turn context
+    history = []
+    if conversation_id:
+        try:
+            from app.database import async_session_factory
+            from app.models.conversation import Conversation
+            from app.services.conversation_service import build_context
+            from sqlalchemy import select
+
+            async with async_session_factory() as session:
+                result = await session.execute(select(Conversation).where(Conversation.id == conversation_id))
+                conv = result.scalar_one_or_none()
+                if conv:
+                    ctx = await build_context(session, conv)
+                    history = ctx.history or []
+        except Exception:
+            pass
+
     initial_state: AgentStateType = {
         "messages": [{"role": "user", "content": user_message}],
         "conversation_id": conversation_id,
         "model": model,
         "db_connection_id": db_connection_id,
+        "history": history,
     }
 
     yield EventEncoder.run_started(conversation_id)

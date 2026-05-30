@@ -119,6 +119,17 @@ async function sendMessage() {
       } catch {
         // ignore parse errors
       }
+    } else if (chunk.type === 'STATE_DELTA') {
+      const path = (chunk as any).path
+      const value = (chunk as any).value
+      if (path === 'sql') {
+        const sql = typeof value === 'string' ? value : value?.sql || ''
+        chatStore.setStreamSql(streamingId, sql)
+      } else if (path === 'result') {
+        chatStore.setStreamQueryResult(streamingId, value)
+      } else if (path === 'chart_config') {
+        chatStore.setStreamChartConfig(streamingId, value)
+      }
     }
   })
 

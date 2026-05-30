@@ -88,14 +88,17 @@ def build_sql_prompt(
             if s.columns:
                 col_lines = []
                 for c in s.columns:
-                    col_line = f"--   {c.get('name', '?')} {c.get('type', '?')}"
-                    if c.get('role') and c['role'] != 'UNKNOWN':
-                        col_line += f" [{c['role']}]"
-                    if c.get('label'):
-                        col_line += f" -- {c['label']}"
-                    if c.get('enum_values'):
-                        ev = ", ".join(f"{k}={v}" for k, v in c['enum_values'].items())
-                        col_line += f" 枚举: {ev}"
+                    if isinstance(c, str):
+                        col_line = f"--   {c}"
+                    else:
+                        col_line = f"--   {c.get('name', '?')} {c.get('type', '?')}"
+                        if c.get('role') and c['role'] != 'UNKNOWN':
+                            col_line += f" [{c['role']}]"
+                        if c.get('label'):
+                            col_line += f" -- {c['label']}"
+                        if c.get('enum_values'):
+                            ev = ", ".join(f"{k}={v}" for k, v in c['enum_values'].items())
+                            col_line += f" 枚举: {ev}"
                     col_lines.append(col_line)
                 schema_section += "\n".join(col_lines) + "\n"
             else:

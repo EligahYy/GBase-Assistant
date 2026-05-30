@@ -1,9 +1,11 @@
 import { ref } from 'vue'
 
 export interface SSEChunk {
-  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error' | 'result' | 'result_error' | 'message_ids' | 'TEXT_MESSAGE_CONTENT' | 'chart_config'
+  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error' | 'result' | 'result_error' | 'message_ids' | 'TEXT_MESSAGE_CONTENT' | 'chart_config' | 'STATE_DELTA'
   content?: string
   delta?: string
+  path?: string
+  value?: any
   token_usage?: Record<string, unknown>
 }
 
