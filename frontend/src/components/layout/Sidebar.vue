@@ -80,11 +80,16 @@ function startAddFolder() {
   })
 }
 
+let _confirmingFolder = false
 async function confirmAddFolder() {
+  if (_confirmingFolder) return
   const name = newFolderName.value.trim()
   if (!name) { isAddingFolder.value = false; return }
-  await chatStore.addFolder(name)
+  _confirmingFolder = true
+  newFolderName.value = ''
   isAddingFolder.value = false
+  await chatStore.addFolder(name)
+  _confirmingFolder = false
 }
 
 function cancelAddFolder() { isAddingFolder.value = false }
