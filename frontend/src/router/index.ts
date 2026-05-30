@@ -3,8 +3,6 @@ import HomeView from '../views/HomeView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import ErrorCodeView from '../views/ErrorCodeView.vue'
 import SqlEditorView from '../views/SqlEditorView.vue'
-import DataBrowserView from '../views/DataBrowserView.vue'
-import InsightsView from '../views/InsightsView.vue'
 import KnowledgeView from '../views/KnowledgeView.vue'
 
 const router = createRouter({
@@ -12,8 +10,6 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: HomeView },
     { path: '/sql-editor', name: 'sql-editor', component: SqlEditorView },
-    { path: '/data-browser', name: 'data-browser', component: DataBrowserView },
-    { path: '/insights', name: 'insights', component: InsightsView },
     { path: '/knowledge', name: 'knowledge', component: KnowledgeView },
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/tools/error-code', name: 'error-code', component: ErrorCodeView },

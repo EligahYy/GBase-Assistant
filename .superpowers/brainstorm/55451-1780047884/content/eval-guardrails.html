@@ -1,0 +1,157 @@
+<h2>Semantic Mapper Agent — 准确度保证 & 评估体系</h2>
+<p class="subtitle">三层约束 + 自动评估 + Orchestrator 监管</p>
+
+<div class="section">
+  <h3>一层：Agent 自身的约束机制</h3>
+  <div class="mockup">
+    <div class="mockup-header">Agent 系统提示词内置的硬约束</div>
+    <div class="mockup-body" style="font-size:12px;line-height:1.8;font-family:monospace;padding:16px">
+<pre style="margin:0;font-size:12px">
+SYSTEM PROMPT (Semantic Mapper):
+
+1. <b>Schema-First 原则</b>: 所有映射必须引用真实存在的表/列，
+   禁止凭空猜测列名。不确定时调用 get_table_profile() 确认。
+
+2. <b>置信度自评</b>: 每次输出必须包含 confidence 评分(0-1)：
+   - >=0.9: Glossary 精确命中 + Schema 交叉验证通过
+   - 0.7-0.9: 通过列名+COMMENT 推理，语义高度匹配
+   - 0.5-0.7: 仅向量语义相似，需人工确认
+   - &lt;0.5: 放弃映射，标记为 unknown
+
+3. <b>逐步验证</b>: 每步 Action 后必须验证 Observe 结果，
+   不跳过任何验证步骤。
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>二层：Orchestrator 监管</h3>
+  <div class="mockup">
+    <div class="mockup-header">Orchestrator 作为 Semantic Mapper 的"管理者"</div>
+    <div class="mockup-body" style="font-size:12px;line-height:1.8;font-family:monospace;padding:16px">
+<pre style="margin:0;font-size:12px">
+Orchestrator 调用 Semantic Mapper 后执行监管检查：
+
+┌─────────────────────────────────────────────────┐
+│ <b>Orchestrator Supervisor Check:</b>               │
+│                                                  │
+│ ① <b>Schema 校验</b>: 映射的表/列是否真实存在？          │
+│    → 调用 SchemaGraph.validate_mapping()         │
+│                                                  │
+│ ② <b>置信度门控</b>:                                   │
+│    confidence >= 0.7 → 直接传给 SQL Specialist     │
+│    confidence 0.5-0.7 → 传给 SQL Spec + 标记低置信度│
+│    confidence &lt; 0.5 → <b>反问用户确认</b>              │
+│    "您说的'销售额'是指 product_sale.pay_amount 吗？"│
+│                                                  │
+│ ③ <b>完整性检查</b>: 映射是否覆盖了问题中的所有关键术语？  │
+│    缺失的术语 → 标记为 unresolved_terms            │
+└─────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>三层：SQL 执行后的验证闭环</h3>
+  <div class="mockup">
+    <div class="mockup-header">SQL 执行结果反向验证语义映射是否正确</div>
+    <div class="mockup-body" style="font-size:12px;line-height:1.8;font-family:monospace;padding:16px">
+<pre style="margin:0;font-size:12px">
+SQL 执行后自动检查：
+
+<b>结果合理性检查 (Result Sanity Check):</b>
+  ✗ 空结果 → 可能是语义映射错误(选了错的表/列)
+  ✗ 全是 NULL → 列映射可能不对
+  ✗ 数值异常(如金额负数、数量极大) → 可能是度量选错
+  ✓ 有正常数据 → 映射大概率正确
+
+<b>用户隐式反馈收集:</b>
+  • 用户复制了结果 → +1 正向信号
+  • 用户追问/纠正("不是这个") → 负向信号，记录为 bad case
+  • 用户点赞/点踩 → 直接反馈
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>评估体系</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="card">
+      <div class="card-body">
+        <h4>离线评估 (Test Suite)</h4>
+        <pre style="margin:0;font-size:12px;line-height:1.8">
+<b>测试集:</b> tests/semantic_mapper/
+  test_cases.yaml:
+    - question: "查询最近一个月销售额"
+      expected:
+        tables: [product_sale]
+        columns: {product_sale: [pay_amount, created_at]}
+        business_terms:
+          销售额: product_sale.pay_amount
+
+    - question: "各产品线的订单量"
+      expected:
+        tables: [product_sale, product]
+        ...
+
+<b>指标:</b>
+  • Table Recall: 命中率 (期望表 ∩ 映射表)
+  • Column Precision: 列精确率
+  • Term Mapping Accuracy: 业务术语映射正确率
+  • End-to-End: SQL 执行成功率
+
+<b>运行:</b> pytest tests/semantic_mapper/ (CI 集成)
+</pre>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <h4>在线监控 (Logging + Analytics)</h4>
+        <pre style="margin:0;font-size:12px;line-height:1.8">
+<b>记录每次语义映射:</b>
+  {
+    "question": "查询最近一个月销售额",
+    "mapping": {...},
+    "confidence": 0.92,
+    "sql_executed": "SELECT ...",
+    "result": "success|empty|error",
+    "user_feedback": null|"thumbs_up"|"thumbs_down",
+    "latency_ms": 3200,
+    "llm_calls": 3
+  }
+
+<b>Dashboard 监控:</b>
+  • 置信度分布直方图
+  • 低置信度(&lt;0.5) 比例趋势
+  • SQL 执行空结果率
+  • Semantic Mapper 平均延迟
+  • Bad case 列表 (用于持续改进)
+</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>持续改进回路</h3>
+  <div class="mockup">
+    <div class="mockup-header">Bad Case → Glossary 补充 → 测试用例 → 模型优化</div>
+    <div class="mockup-body" style="font-size:12px;line-height:1.8;font-family:monospace;padding:16px">
+<pre style="margin:0;font-size:12px">
+① 发现 bad case (低置信度映射 / 用户纠正 / 空结果)
+       │
+       ▼
+② 人工审核 → 补充到 Business Glossary YAML (作为 Agent 工具的知识源)
+       │
+       ▼
+③ 添加为回归测试用例 (tests/semantic_mapper/test_cases.yaml)
+       │
+       ▼
+④ Agent 下次遇到同类术语 → Glossary 工具返回精确映射 → confidence >= 0.9
+</pre>
+    </div>
+  </div>
+</div>

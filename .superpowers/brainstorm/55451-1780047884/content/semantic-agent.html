@@ -1,0 +1,125 @@
+<h2>语义映射：静态词汇表 vs 子 Agent</h2>
+<p class="subtitle">利用现有 LangGraph 架构，将语义映射作为一个智能体而非配置文件</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+  <div class="card" style="opacity:0.5">
+    <div class="card-body">
+      <h3>方案 B 原版：静态 Glossary</h3>
+      <pre style="margin:0;font-size:12px;line-height:1.8">
+用户问题
+  │
+  ▼
+YAML Glossary 精确匹配
+  │
+  ▼
+RRF 融合 Grounding
+  │
+  ▼
+LLM 生成 SQL
+      </pre>
+      <div class="pros-cons">
+        <div class="cons"><ul>
+          <li>需要人工维护 YAML</li>
+          <li>无法处理未录入的业务术语</li>
+          <li>与现有 Agent 架构割裂</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <h3>🆕 方案 B+：Semantic Mapper Agent</h3>
+      <pre style="margin:0;font-size:12px;line-height:1.8">
+用户问题
+  │
+  ▼
+<b>Semantic Mapper Agent</b>
+  ├─ Tool: query_glossary()
+  ├─ Tool: search_schema_semantic()
+  ├─ Tool: get_table_profile()
+  └─ LLM ReAct 推理
+  │
+  ▼
+grounded schema (高置信度)
+  │
+  ▼
+SQL Specialist → 执行
+      </pre>
+      <div class="pros-cons">
+        <div class="pros"><ul>
+          <li>LLM 理解中文业务术语，无需穷举</li>
+          <li>可利用 COMMENT/枚举值/数据分布推理</li>
+          <li>天然融入 LangGraph Agent 编排</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Semantic Mapper Agent 工作流程</h3>
+  <div class="mockup">
+    <div class="mockup-header">ReAct 循环：理解用户意图 → 探索 Schema → 输出精确映射</div>
+    <div class="mockup-body" style="font-size:11px;line-height:1.8;font-family:monospace;padding:16px">
+<pre style="margin:0;font-size:11px">
+用户: "查询最近一个月各产品线的销售额，用柱状图展示"
+
+<b>Semantic Mapper Agent (ReAct 循环):</b>
+
+Step 1: <b>Thought:</b> 用户想查销售额，需要找到销售相关表和金额列
+        <b>Act:</b> search_schema_semantic("销售额 产品线 月份")
+        <b>Observe:</b> 返回 top-10 相关表: [product_sale(0.92), product(0.88),
+                sale_order(0.85), customer(0.72)...]
+
+Step 2: <b>Thought:</b> product_sale 最相关，需要看它的列结构和 COMMENT
+        <b>Act:</b> get_table_profile("product_sale")
+        <b>Observe:</b> DDL + 列信息:
+          - id INT PRIMARY_KEY "主键"
+          - product_id INT FOREIGN_KEY→product.id "产品ID"
+          - <b>pay_amount DECIMAL(12,2) MEASURE "实际支付金额(元)"</b>
+          - created_at DATETIME TIME_DIMENSION "订单创建时间"
+          - status TINYINT ENUM{0:待支付,1:已支付,2:已退款} "订单状态"
+
+Step 3: <b>Thought:</b> pay_amount 是"销售额"对应的列，product 表需要 JOIN
+          获取产品线名称。需要确认 JOIN 路径。
+        <b>Act:</b> find_join_path("product_sale", "product")
+        <b>Observe:</b> product_sale.product_id = product.id
+
+Step 4: <b>Thought:</b> 语义映射完成。"产品线"对应 product.name 或 product.category，
+          需要查看 product 表确认。
+        <b>Act:</b> get_table_profile("product")
+        <b>Observe:</b> product.category VARCHAR "产品线" ← COMMENT 精确命中！
+
+Step 5: <b>Final Output:</b>
+        {
+          "tables": ["product_sale", "product"],
+          "columns": {
+            "product_sale": ["pay_amount", "created_at"],
+            "product": ["category", "name"]
+          },
+          "business_terms": {
+            "销售额": "product_sale.pay_amount",
+            "产品线": "product.category",
+            "最近一个月": "product_sale.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)"
+          },
+          "join_paths": ["product_sale.product_id = product.id"],
+          "chart_hint": "柱状图, X=产品线, Y=销售额",
+          "confidence": 0.92
+        }
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>与原方案 B 的对比</h3>
+  <table style="width:100%;font-size:13px;border-collapse:collapse">
+    <tr style="border-bottom:1px solid #333"><th style="text-align:left;padding:8px">维度</th><th style="text-align:left;padding:8px">方案 B (静态 YAML)</th><th style="text-align:left;padding:8px">方案 B+ (Agent)</th></tr>
+    <tr style="border-bottom:1px solid #333"><td style="padding:8px">维护成本</td><td style="padding:8px">需人工维护</td><td style="padding:8px;color:#4caf50">自动理解，YAML 仅作补充</td></tr>
+    <tr style="border-bottom:1px solid #333"><td style="padding:8px">新术语覆盖</td><td style="padding:8px">未录入则命中不了</td><td style="padding:8px;color:#4caf50">LLM 推理理解</td></tr>
+    <tr style="border-bottom:1px solid #333"><td style="padding:8px">与现有架构融合</td><td style="padding:8px">独立模块，需改造 Grounding</td><td style="padding:8px;color:#4caf50">作为 LangGraph 节点/Agent</td></tr>
+    <tr style="border-bottom:1px solid #333"><td style="padding:8px">LLM 调用成本</td><td style="padding:8px;color:#4caf50">无额外 LLM 调用</td><td style="padding:8px">多 1-3 次 LLM 调用</td></tr>
+    <tr style="border-bottom:1px solid #333"><td style="padding:8px">延迟</td><td style="padding:8px;color:#4caf50">毫秒级</td><td style="padding:8px">增加 2-5 秒</td></tr>
+    <tr style="border-bottom:1px solid #333"><td style="padding:8px">精确度</td><td style="padding:8px">取决于配置质量</td><td style="padding:8px;color:#4caf50">LLM 推理 + 工具验证</td></tr>
+  </table>
+</div>

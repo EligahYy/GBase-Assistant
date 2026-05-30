@@ -38,6 +38,19 @@ SQL_SYSTEM_BASE = """你是 GBase 8a MPP 分析数据库的 SQL 专家。根据�
 ### 函数兼容性
 {function_rules}
 
+### 系统监控查询（GBase 8a 系统表）
+当用户询问数据库运行状态时，可查询以下系统表：
+- information_schema.PROCESSLIST — 当前连接和正在执行的查询
+- information_schema.TABLES — 表元数据（行数、数据大小、创建时间）
+- information_schema.COLUMNS — 列元数据
+
+常用查询模板：
+- 当前连接数: SELECT COUNT(*) FROM information_schema.PROCESSLIST
+- 运行时间: SELECT DATEDIFF(NOW(), MIN(create_time)) AS running_days FROM information_schema.TABLES
+- 慢查询(>10s): SELECT id, user, host, db, time, info FROM information_schema.PROCESSLIST WHERE time > 10
+- 表大小排行: SELECT TABLE_NAME, TABLE_ROWS, ROUND(DATA_LENGTH/1024/1024,2) AS size_mb FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY DATA_LENGTH DESC
+- 数据分布: SELECT TABLE_NAME, TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() ORDER BY TABLE_ROWS DESC
+
 ## 输出格式要求
 1. 先输出 SQL，用 ```sql 代码块包裹
 2. 再用简洁的中文解释 SQL 逻辑（2-5句话）

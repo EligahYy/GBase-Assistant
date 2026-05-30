@@ -1,0 +1,39 @@
+<h2>智能问数的交互范围</h2>
+<p class="subtitle">你希望在哪些场景下使用智能问数能力？</p>
+
+<div class="options" data-multiselect>
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Chat 对话增强</h3>
+      <p>在现有聊天界面中，SQL 执行结果除了表格，自动推荐/生成图表（柱状图、折线图、饼图等），用户可在对话流中自然查看可视化</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>独立问数模块</h3>
+      <p>一个专门的"问数"页面，用户输入自然语言问题 → 直接返回"图表+解读+数据"的完整结果卡片，类似 AI BI 工具（如 DataWind、Tableau AI）的体验</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>两者都要</h3>
+      <p>Chat 中增强可视化 + 独立问数入口，两者共享底层的语义映射和 SQL 生成能力</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>参考：当前系统的 NL2SQL 链路</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="font-size:12px;line-height:1.8;font-family:monospace;padding:16px">
+      <span class="label">当前流程</span><br>
+      用户输入 → Orchestrator(意图分类) → Schema Grounding(关键词匹配)<br>
+      → SQL Specialist(LLM 生成) → Verifier → Executor(沙箱)<br>
+      → <b>结果以纯文本表格返回 Chat 面板</b><br>
+      <span style="color:#f0a020">❌ 无可视化</span> &nbsp; <span style="color:#f0a020">❌ 无业务语义映射层</span> &nbsp; <span style="color:#f0a020">❌ Few-shot 未启用</span>
+    </div>
+  </div>
+</div>

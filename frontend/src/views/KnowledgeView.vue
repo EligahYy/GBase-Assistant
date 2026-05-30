@@ -385,7 +385,12 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
         :columns="columns"
         :data="documents"
         :loading="loading"
-        :pagination="{ pageSize: 20 }"
+        :pagination="{
+          pageSize: 20,
+          showSizePicker: false,
+          showQuickJumper: false,
+          prefix: () => `共 ${documents.length} 条`,
+        }"
         striped
         size="small"
         :bordered="false"
@@ -413,8 +418,6 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   display: flex;
   flex-direction: column;
   gap: 20px;
-  height: 100%;
-  overflow-y: auto;
 }
 
 /* ── Header ── */
@@ -550,11 +553,12 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 
 /* ── Table ── */
 .table-wrapper {
-  flex: 1;
-  min-height: 0;
   background: var(--bg-panel);
   border: 1px solid var(--seam-1);
   border-radius: var(--radius-lg);
   overflow: hidden;
+}
+.table-wrapper :deep(.n-data-table__pagination) {
+  justify-content: center;
 }
 </style>
