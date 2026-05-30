@@ -145,6 +145,8 @@ export const useChatStore = defineStore('chat', () => {
         content: m.content,
         sql: m.sql_generated,
         messageType: m.message_type,
+        queryResult: m.query_result as QueryResult | null,
+        chartConfig: m.chart_config as ChartConfig | null,
       }))
       conversationSummary.value = summary
     } finally {

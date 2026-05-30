@@ -97,6 +97,13 @@ async function sendMessage() {
       naiveMsg.error(chunk.content)
     } else if (chunk.type === 'result_error') {
       naiveMsg.warning(chunk.content)
+    } else if (chunk.type === 'chart_config') {
+      try {
+        const config = JSON.parse(chunk.content || '{}')
+        chatStore.setStreamChartConfig(streamingId, config)
+      } catch {
+        // ignore
+      }
     } else if (chunk.type === 'message_ids') {
       try {
         const ids = JSON.parse(chunk.content)

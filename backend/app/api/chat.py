@@ -42,8 +42,34 @@ async def chat_stream(
     )
 
     async def persistent_stream():
+        full_text = ""
+        sql_generated = None
+        query_result = None
+        chart_config = None
         async for event in event_stream:
+            # Collect response content from SSE events for persistence
+            if event.startswith("data: "):
+                data_str = event[6:].strip()
+                if data_str and data_str != "[DONE]":
+                    try:
+                        data = json.loads(data_str)
+                        event_type = data.get("type", "")
+                        if event_type == "TEXT_MESSAGE_CONTENT":
+                            full_text += data.get("delta", "")
+                        elif event_type == "STATE_DELTA":
+                            path = data.get("path", "")
+                            value = data.get("value", {})
+                            if path == "sql":
+                                sql_generated = value.get("sql", "") if isinstance(value, dict) else str(value)
+                            elif path == "result" and isinstance(value, dict):
+                                query_result = value
+                            elif path == "chart_config" and isinstance(value, dict):
+                                chart_config = value
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        pass
             yield event
+
+        # Persist user message + assistant message
         if conversation_id:
             try:
                 from app.models.conversation import Conversation
@@ -73,6 +99,21 @@ async def chat_stream(
                     created_at=datetime.now(UTC),
                 )
                 db.add(user_msg)
+
+                if full_text.strip():
+                    assistant_msg = Message(
+                        id=str(uuid.uuid4()),
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=full_text.strip(),
+                        message_type="sql" if sql_generated else "general",
+                        sql_generated=sql_generated,
+                        query_result=json.dumps(query_result) if query_result else None,
+                        chart_config=json.dumps(chart_config) if chart_config else None,
+                        created_at=datetime.now(UTC),
+                    )
+                    db.add(assistant_msg)
+
                 await db.commit()
             except Exception as e:
                 logger.warning("Failed to persist conversation: %s", e)

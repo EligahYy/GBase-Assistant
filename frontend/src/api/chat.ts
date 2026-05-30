@@ -14,6 +14,8 @@ export interface MessageResponse {
   message_type: string | null
   sql_generated: string | null
   sql_validated: boolean | null
+  query_result: Record<string, unknown> | null
+  chart_config: Record<string, unknown> | null
   token_usage: Record<string, unknown> | null
   created_at: string
 }
