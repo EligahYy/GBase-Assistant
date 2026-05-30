@@ -42,20 +42,27 @@ Vue 3 Chat UI ←── AG-UI SSE ──→ FastAPI Gateway
 
 **7 个 Agent：** Orchestrator（Think→Plan→Act→Observe→Decide）+ 6 个 Specialist。上下文通过 `AgentState` TypedDict 字段所有权隔离。
 
+**v2 核心特性：**
+- **监控快速路径**：数据库状态查询直接短路，绕过 NL2SQL pipeline
+- **项目文件夹**：对话分组管理 + 批量操作（归档/删除/移动）
+- **多轮对话**：`build_context()` 加载历史消息，支持上下文连贯问答
+- **AG-UI STATE_DELTA**：SQL/结果/图表配置通过标准 SSE 事件实时推送前端
+- **LiteLLM Chat Adapter**：`_LiteLLMChatAdapter` 将 `LiteLLMClientImpl` 封装为 LangChain `BaseChatModel`
+
 ## 项目结构
 
 ```
 gbase8a-assistant/
 ├── backend/app/
 │   ├── agents/             # LangGraph 多智能体（v2 核心）
-│   │   ├── state.py        # AgentState TypedDict（23 字段）
+│   │   ├── state.py        # AgentState TypedDict（24 字段，新增 history）
 │   │   ├── orchestrator.py # 关键词意图分类 + 路由
 │   │   ├── schema_graph.py # Schema Knowledge Graph（DDL解析+角色+关系+检索）
 │   │   └── graph.py        # LangGraph 8 节点图 + AG-UI Runner
 │   ├── gateway/
 │   │   └── ag_ui_encoder.py # AG-UI 8 种标准 SSE 事件编码
 │   ├── api/
-│   │   ├── chat.py         # /api/chat/stream（AG-UI 多智能体）+ 对话 CRUD
+│   │   ├── chat.py         # /api/chat/stream（AG-UI 多智能体）+ 对话 CRUD + 文件夹 CRUD + 批量操作
 │   │   ├── connections.py  # 连接管理 + SSE 状态流
 │   │   ├── admin.py        # reindex / reindex-pdf / reindex-web
 │   │   └── ...
@@ -63,7 +70,7 @@ gbase8a-assistant/
 │   │   ├── document_chunker.py  # PDF 缓存 + MD 切片 + Qdrant 索引
 │   │   ├── web_crawler.py       # Playwright gbase.cn 爬虫
 │   │   └── loader.py            # 方言规则加载
-│   ├── llm/                # LiteLLM 客户端 + Prompt 模板
+│   ├── llm/                # LiteLLM 客户端 + LangChain 适配器 + Prompt 模板
 │   ├── sql/                # validator + sandbox
 │   ├── vector/             # Qdrant 客户端 + 检索 + 索引
 │   ├── services/           # conversation_service, connection_health_checker 等
