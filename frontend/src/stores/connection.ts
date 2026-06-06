@@ -17,9 +17,21 @@ export const useConnectionStore = defineStore('connection', () => {
 
   async function loadConnections() {
     connections.value = await listConnections()
+    // Auto-select first connection if none selected
     if (!activeConnectionId.value && connections.value.length > 0) {
       activeConnectionId.value = connections.value[0]?.id ?? null
     }
+    // Clear selection if the active connection no longer exists
+    if (activeConnectionId.value && !connections.value.find(c => c.id === activeConnectionId.value)) {
+      activeConnectionId.value = connections.value.length > 0 ? connections.value[0].id : null
+    }
+    // Clean up stale status entries for deleted connections
+    const validIds = new Set(connections.value.map(c => c.id))
+    const newMap: Record<string, ConnStatus> = {}
+    for (const [id, status] of Object.entries(connStatusMap.value)) {
+      if (validIds.has(id)) newMap[id] = status
+    }
+    connStatusMap.value = newMap
   }
 
   function setActiveConnection(id: string | null) {

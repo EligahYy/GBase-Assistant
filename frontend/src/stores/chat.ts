@@ -29,6 +29,14 @@ export interface ToolCallEntry {
   agentName: string
 }
 
+export interface StreamEvent {
+  type: 'thinking' | 'tool_call' | 'text'
+  timestamp: number
+  thinking?: string        // for thinking events
+  toolCall?: ToolCallEntry  // for tool_call events
+  text?: string             // for text events
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -44,6 +52,7 @@ export interface Message {
   thinking?: string
   isThinking?: boolean
   toolCalls?: ToolCallEntry[]
+  streamEvents?: StreamEvent[]  // chronological event timeline for interleaved display
   activeAgent?: string | null
 }
 
@@ -89,6 +98,15 @@ export const useChatStore = defineStore('chat', () => {
     if (msg) {
       msg.streamContent = (msg.streamContent ?? '') + token
       msg.content = msg.streamContent
+      // Append text to streamEvents timeline (interleaved display)
+      const events = msg.streamEvents ?? []
+      const last = events[events.length - 1]
+      if (last && last.type === 'text' && last.text !== undefined) {
+        last.text += token  // Append to existing text block
+      } else {
+        events.push({ type: 'text', timestamp: Date.now(), text: token })
+      }
+      msg.streamEvents = events
     }
   }
 
@@ -306,13 +324,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function appendThinkingToken(id: string, token: string) {
-    // Per-message thinking (for MessageBubble rendering)
     const msg = messages.value.find((m) => m.id === id)
     if (msg) {
       msg.thinking = (msg.thinking ?? '') + token
       msg.isThinking = true
+      // Append to streamEvents timeline
+      const events = msg.streamEvents ?? []
+      const last = events[events.length - 1]
+      if (last && last.type === 'thinking' && last.thinking !== undefined) {
+        last.thinking += token  // Append to existing thinking block
+      } else {
+        events.push({ type: 'thinking', timestamp: Date.now(), thinking: token })
+      }
+      msg.streamEvents = events
     }
-    // Also update global (backward compat)
     thinkingText.value += token
     isThinking.value = true
   }
@@ -328,6 +353,10 @@ export const useChatStore = defineStore('chat', () => {
     const msg = messages.value.find((m) => m.id === id)
     if (msg) {
       msg.toolCalls = [...(msg.toolCalls ?? []), tc]
+      // Append to streamEvents timeline
+      const events = msg.streamEvents ?? []
+      events.push({ type: 'tool_call', timestamp: Date.now(), toolCall: tc })
+      msg.streamEvents = events
     }
     toolCalls.value = [...toolCalls.value, tc]
   }

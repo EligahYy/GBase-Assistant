@@ -164,18 +164,32 @@ function renderInline(text: string): string {
           <span class="agent-status">处理中...</span>
         </div>
 
-        <!-- Thinking Section -->
-        <ThinkingSection
-          :thinking="message.thinking || ''"
-          :is-thinking="message.isThinking || false"
-        />
-
-        <!-- Tool Call Cards -->
-        <ToolCallCard
-          v-for="tc in message.toolCalls || []"
-          :key="tc.id"
-          :tool-call="tc"
-        />
+        <!-- Stream Events Timeline (interleaved thinking + tool calls + text) -->
+        <template v-if="message.streamEvents && message.streamEvents.length > 0">
+          <template v-for="(evt, i) in message.streamEvents" :key="i">
+            <ThinkingSection
+              v-if="evt.type === 'thinking'"
+              :thinking="evt.thinking || ''"
+              :is-thinking="false"
+            />
+            <ToolCallCard
+              v-else-if="evt.type === 'tool_call' && evt.toolCall"
+              :tool-call="evt.toolCall"
+            />
+          </template>
+        </template>
+        <!-- Fallback: old-style display for messages without streamEvents -->
+        <template v-else>
+          <ThinkingSection
+            :thinking="message.thinking || ''"
+            :is-thinking="message.isThinking || false"
+          />
+          <ToolCallCard
+            v-for="tc in message.toolCalls || []"
+            :key="tc.id"
+            :tool-call="tc"
+          />
+        </template>
 
         <div v-if="isTyping" class="thinking">
           <div class="thinking-inner">
