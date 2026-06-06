@@ -59,6 +59,7 @@ class AgentState(TypedDict, total=False):
     sql: SQLAgentState
     knowledge: KnowledgeAgentState
     final_response: str | None
+    delegation_count: int  # Guard against infinite delegation loops
     conversation_id: str
     db_connection_id: str | None
     model: str

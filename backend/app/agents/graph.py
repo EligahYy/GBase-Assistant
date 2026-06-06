@@ -69,11 +69,18 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
 
     builder.add_edge(START, "supervisor")
 
+    MAX_DELEGATIONS = 3
+
     def route_supervisor(state):
+        # Guard: limit total delegations to prevent infinite loops
+        count = state.get("delegation_count", 0)
+        if count >= MAX_DELEGATIONS:
+            return "response_formatter"
+
         msgs = state.get("messages", [])
         if not msgs:
             return "response_formatter"
-        # Search all messages in reverse for the most recent tool call
+        # Search all messages in reverse for the most recent delegate tool call
         for msg in reversed(msgs):
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for tc in msg.tool_calls:
@@ -87,15 +94,22 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
                 break
         return "response_formatter"
 
+    async def _inc_delegation(state: V3AgentState) -> dict:
+        """Increment delegation counter after each specialist run."""
+        return {"delegation_count": state.get("delegation_count", 0) + 1}
+
+    builder.add_node("_inc_counter", _inc_delegation)
+
     builder.add_conditional_edges("supervisor", route_supervisor, {
         "sql_agent": "sql_agent",
         "knowledge_agent": "knowledge_agent",
         "response_formatter": "response_formatter",
     })
 
-    # Sub-agents return to supervisor for possible re-delegation
-    builder.add_edge("sql_agent", "supervisor")
-    builder.add_edge("knowledge_agent", "supervisor")
+    # Sub-agents → counter → supervisor (prevents infinite delegation loop)
+    builder.add_edge("sql_agent", "_inc_counter")
+    builder.add_edge("knowledge_agent", "_inc_counter")
+    builder.add_edge("_inc_counter", "supervisor")
     builder.add_edge("response_formatter", END)
 
     return builder.compile(checkpointer=MemorySaver())
@@ -158,6 +172,7 @@ async def _run_agent(
         "model": model,
         "db_connection_id": db_connection_id,
         "history": history,
+        "delegation_count": 0,
         "supervisor": {},
         "sql": {},
         "knowledge": {},
