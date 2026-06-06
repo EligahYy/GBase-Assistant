@@ -1,4 +1,8 @@
-"""LangGraph 图构建和运行 — v2 多智能体 + token 级流式输出。"""
+"""LangGraph 图构建和运行 — v3 ReAct Multi-Agent + token 级流式输出。
+
+Supervisor Agent (ReAct + 5 tools) 动态委托给 SQL / Knowledge SubGraph。
+每个 SubGraph 是独立的 ReAct 循环，工具调用全过程流式可见。
+"""
 
 from __future__ import annotations
 
@@ -8,352 +12,27 @@ from collections.abc import AsyncIterator
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_stream_writer
+from langchain_core.messages import AIMessage, HumanMessage
 
-from app.agents.orchestrator import classify_intent_v2, route_after_intent, supervisor_check_node
-from app.agents.semantic_mapper import semantic_mapper_node
-from app.agents.state import AgentStateType
-from app.gateway.ag_ui_encoder import EventEncoder
-
-logger = logging.getLogger(__name__)
-
-# v3 ReAct Agent imports
 from app.agents.state import V3AgentState
 from app.agents.agents.react_agent import build_react_agent
 from app.agents.agents.supervisor import get_supervisor_tools, get_supervisor_prompt
 from app.agents.agents.sql_agent import get_sql_agent_tools, get_sql_agent_prompt
 from app.agents.agents.knowledge_agent import get_knowledge_agent_tools, get_knowledge_agent_prompt
-from app.agents.semantic_mapper import _LiteLLMChatAdapter
-from langchain_core.messages import HumanMessage
+from app.llm.adapter import LiteLLMChatAdapter
+from app.gateway.ag_ui_encoder import EventEncoder
 
-
-def _last_user_message(state: AgentStateType) -> str:
-    msgs = state.get("messages", [])
-    if msgs:
-        last = msgs[-1]
-        if hasattr(last, "content"):
-            content = last.content
-            if isinstance(content, str):
-                return content
-        if isinstance(last, dict):
-            return last.get("content", "")
-    return ""
-
-
-# ── 流式辅助 ──
-
-def _emit_token(token: str) -> None:
-    """通过 LangGraph StreamWriter 发射一个 token 作为自定义事件。"""
-    writer = get_stream_writer()
-    # 包在 list 里防止 StreamWriter 把字符串逐字符迭代
-    writer([{"delta": token}])
-
-
-# ── Agent 节点 ──
-
-async def orchestrator_node(state: AgentStateType) -> dict:
-    user_msg = _last_user_message(state)
-    intent = classify_intent_v2(user_msg)
-    logger.info("Orchestrator: intent=%s for '%s'", intent, user_msg[:50])
-    return {"intent": intent}
-
-
-async def sql_specialist_node(state: AgentStateType) -> dict:
-    from app.dependencies import get_llm_client, get_schema_retriever
-    from app.llm.prompts import build_sql_prompt
-    from app.knowledge.loader import load_dialect_rules
-    from app.sql.validator import extract_sql_from_markdown
-    from app.database import async_session_factory
-
-    grounding = state.get("grounding") or {}
-    user_msg = _last_user_message(state)
-
-    try:
-        llm_client = get_llm_client(task_type="sql")
-        dialect_rules = load_dialect_rules()
-
-        # Use cached schemas from semantic_mapper if available (avoid duplicate Qdrant query)
-        schemas = state.get("retrieved_schemas") or []
-        if not schemas and state.get("db_connection_id"):
-            async with async_session_factory() as session:
-                schema_retriever = get_schema_retriever(session)
-                schemas = await schema_retriever.retrieve(user_msg, state["db_connection_id"])
-
-        grounded_tables = set(grounding.get("tables", []))
-
-        # Use grounded tables as a hint but DON'T filter — trust the vector search
-        # and let the prompt's business_terms guide the LLM
-
-        # Fetch few-shot examples
-        examples_list: list = []
-        try:
-            from app.dependencies import get_example_retriever
-            example_retriever = get_example_retriever()
-            if example_retriever:
-                examples_list = await example_retriever.retrieve(user_msg, top_k=3)
-        except Exception:
-            pass
-
-        business_terms = state.get("business_terms")
-        chart_config_hint = state.get("chart_config")
-
-        messages = build_sql_prompt(
-            message=user_msg, dialect_rules=dialect_rules,
-            schemas=schemas, examples=examples_list, history=state.get("history", []),
-            business_terms=business_terms,
-            chart_config=chart_config_hint,
-        )
-
-        response_text = ""
-        async for token in llm_client.stream(messages, temperature=0.1):
-            response_text += token
-            _emit_token(token)
-
-        sql = extract_sql_from_markdown(response_text)
-        logger.info("SQL Specialist: generated SQL=%s", sql[:100] if sql else "None")
-        return {"generated_sql": sql}
-    except Exception as e:
-        logger.error("SQL Specialist failed: %s", e)
-        return {"generated_sql": None, "final_response": f"SQL 生成失败: {e}"}
-
-
-async def sql_verifier_node(state: AgentStateType) -> dict:
-    from app.sql.validator import validate_sql
-    sql = state.get("generated_sql")
-    if not sql:
-        return {"validation_passed": False, "validation_errors": ["未生成 SQL"]}
-
-    # Build schemas for Layer 3 cross-reference check
-    schemas_arg = None
-    grounding = state.get("grounding") or {}
-    tables_list = grounding.get("tables", [])
-    if tables_list and state.get("db_connection_id"):
-        from app.agents.schema_graph import get_schema_graph
-        g = get_schema_graph(state["db_connection_id"])
-        if g._built:
-            schemas_arg = []
-            for t in tables_list:
-                if t in g.tables:
-                    meta = g.tables[t]
-                    schemas_arg.append({"table_name": t, "columns": [{"name": c.name, "type": c.data_type} for c in meta.columns]})
-
-    result = validate_sql(sql, schemas=schemas_arg)
-    logger.info("SQL Verifier: passed=%s", result.is_valid)
-    retry = state.get("sql_retry_count", 0)
-    return {
-        "validation_passed": result.is_valid,
-        "validation_errors": result.errors + result.warnings,
-        "sql_retry_count": retry + 1,
-    }
-
-
-async def sql_executor_node(state: AgentStateType) -> dict:
-    from app.database import async_session_factory
-    from sqlalchemy import select
-    from app.models.connection import DbConnection
-    from app.db_connectors.connector_factory import get_connector
-    from app.api.connections import _to_connection_config
-    from app.sql.sandbox import SQLSandbox, SQLSandboxError
-
-    sql = state.get("generated_sql")
-    db_id = state.get("db_connection_id")
-    if not sql or not db_id:
-        return {"query_result": None, "execution_error": "没有 SQL 或数据库连接"}
-
-    try:
-        async with async_session_factory() as session:
-            result = await session.execute(select(DbConnection).where(DbConnection.id == db_id))
-            conn = result.scalar_one_or_none()
-        if not conn or conn.driver_type == "manual":
-            return {"query_result": None, "execution_error": "数据库连接不可用"}
-
-        connector = get_connector(conn.driver_type)
-        if not connector:
-            return {"query_result": None, "execution_error": f"驱动 {conn.driver_type} 不可用"}
-
-        config = _to_connection_config(conn)
-        sandbox = SQLSandbox()
-        query_result = await sandbox.execute_readonly(connector, config, sql, max_rows=1000, timeout_seconds=30)
-
-        return {"query_result": {
-            "columns": query_result.columns, "rows": query_result.rows[:50],
-            "row_count": query_result.row_count,
-            "execution_time_ms": round(query_result.execution_time_ms, 2),
-            "truncated": query_result.truncated or query_result.row_count > 50,
-        }, "execution_error": None}
-    except SQLSandboxError as e:
-        return {"query_result": None, "execution_error": str(e)}
-    except Exception as e:
-        logger.error("SQL Executor failed: %s", e)
-        return {"query_result": None, "execution_error": str(e)}
-
-
-async def knowledge_specialist_node(state: AgentStateType) -> dict:
-    from app.dependencies import get_llm_client, get_knowledge_retriever
-    from app.llm.prompts import build_qa_prompt
-
-    user_msg = _last_user_message(state)
-    if not user_msg:
-        return {"final_response": "请输入问题。"}
-
-    try:
-        llm_client = get_llm_client(task_type="qa")
-        retriever = get_knowledge_retriever()
-        chunks = await retriever.retrieve(user_msg)
-        messages = build_qa_prompt(message=user_msg, knowledge_chunks=chunks, history=state.get("history", []))
-
-        response_text = ""
-        async for token in llm_client.stream(messages):
-            response_text += token
-            _emit_token(token)
-
-        sources = [c.source for c in chunks] if chunks else []
-        return {"final_response": response_text, "knowledge_sources": sources}
-    except Exception as e:
-        logger.error("Knowledge Specialist failed: %s", e)
-        return {"final_response": f"知识检索失败: {e}"}
-
-
-async def general_specialist_node(state: AgentStateType) -> dict:
-    from app.dependencies import get_llm_client
-    from app.llm.prompts import build_general_prompt
-
-    user_msg = _last_user_message(state)
-    if not user_msg:
-        # 硬编码兜底：无 streaming，直接返回文本
-        return {"final_response": "您好！请问有什么可以帮您？"}
-
-    try:
-        llm_client = get_llm_client(task_type="general")
-        messages = build_general_prompt(message=user_msg, history=state.get("history", []))
-
-        response_text = ""
-        async for token in llm_client.stream(messages):
-            response_text += token
-            _emit_token(token)
-
-        return {"final_response": response_text}
-    except Exception as e:
-        logger.error("General Specialist failed: %s", e)
-        return {"final_response": f"抱歉，出错了: {e}"}
-
-
-async def response_formatter_node(state: AgentStateType) -> dict:
-    intent = state.get("intent", "general")
-    final_response = state.get("final_response", "")
-
-    if intent == "sql" and not final_response:
-        writer = get_stream_writer()
-
-        # Emit chart_config event
-        chart_config_data = state.get("chart_config")
-        if chart_config_data:
-            writer([{"chart_config": chart_config_data}])
-
-        sql = state.get("generated_sql")
-        if sql:
-            writer([{"sql": sql}])
-
-        query_result = state.get("query_result")
-        if query_result:
-            writer([{"result": query_result}])
-
-        validation_errors = state.get("validation_errors", [])
-        exec_error = state.get("execution_error")
-
-        parts = []
-        if sql:
-            parts.append(f"```sql\n{sql}\n```")
-        if validation_errors:
-            parts.append(f"\n⚠️ 验证警告: {', '.join(validation_errors)}")
-        if query_result:
-            parts.append(f"\n查询结果: {query_result['row_count']} 行, 耗时 {query_result['execution_time_ms']}ms")
-        if exec_error:
-            parts.append(f"\n执行错误: {exec_error}")
-        if not parts:
-            parts.append("SQL 生成完成，但未获得有效结果。")
-        final_response = "\n".join(parts)
-
-    if not final_response:
-        final_response = "处理完成。"
-
-    return {"final_response": final_response}
-
-
-async def ask_user_clarification_node(state: AgentStateType) -> dict:
-    """Ask user to clarify when confidence is too low or schema validation fails."""
-    clarification = state.get("needs_clarification", "无法理解您的问题，请提供更多信息。")
-    return {"final_response": clarification}
+logger = logging.getLogger(__name__)
 
 
 # ── 图构建 ──
 
-def build_graph() -> StateGraph:
-    builder = StateGraph(AgentStateType)
+def build_graph(db_connection_id: str = "") -> StateGraph:
+    """Build v3 ReAct Agent graph: Supervisor → (SQL | Knowledge) SubGraphs.
 
-    builder.add_node("orchestrator", orchestrator_node)
-    builder.add_node("semantic_mapper", semantic_mapper_node)
-    builder.add_node("supervisor_check", supervisor_check_node)
-    builder.add_node("ask_user_clarification", ask_user_clarification_node)
-    builder.add_node("sql_specialist", sql_specialist_node)
-    builder.add_node("sql_verifier", sql_verifier_node)
-    builder.add_node("sql_executor", sql_executor_node)
-    builder.add_node("knowledge_specialist", knowledge_specialist_node)
-    builder.add_node("general_specialist", general_specialist_node)
-    builder.add_node("response_formatter", response_formatter_node)
-
-    builder.add_edge(START, "orchestrator")
-
-    # Route based on intent
-    builder.add_conditional_edges(
-        "orchestrator", route_after_intent,
-        {"semantic_mapper": "semantic_mapper", "knowledge_specialist": "knowledge_specialist",
-         "general_specialist": "general_specialist", "response_formatter": "response_formatter"},
-    )
-
-    # SQL path: semantic_mapper → supervisor_check → (sql_specialist | ask_user_clarification)
-    builder.add_edge("semantic_mapper", "supervisor_check")
-
-    def route_after_supervisor(state: AgentStateType) -> str:
-        if state.get("final_response"):
-            return "response_formatter"
-        if state.get("needs_clarification"):
-            return "ask_user_clarification"
-        return "sql_specialist"
-
-    builder.add_conditional_edges(
-        "supervisor_check", route_after_supervisor,
-        {"sql_specialist": "sql_specialist", "ask_user_clarification": "ask_user_clarification", "response_formatter": "response_formatter"},
-    )
-    builder.add_edge("ask_user_clarification", END)
-
-    # Existing SQL specialist → verifier → executor path
-    builder.add_edge("sql_specialist", "sql_verifier")
-
-    def route_verifier(state: AgentStateType) -> str:
-        if state.get("validation_passed"):
-            return "sql_executor"
-        if state.get("sql_retry_count", 0) < 3:
-            return "sql_specialist"
-        return "response_formatter"
-
-    builder.add_conditional_edges(
-        "sql_verifier", route_verifier,
-        {"sql_executor": "sql_executor", "sql_specialist": "sql_specialist", "response_formatter": "response_formatter"},
-    )
-
-    builder.add_edge("sql_executor", "response_formatter")
-    builder.add_edge("knowledge_specialist", "response_formatter")
-    builder.add_edge("general_specialist", "response_formatter")
-    builder.add_edge("response_formatter", END)
-
-    return builder.compile(checkpointer=MemorySaver())
-
-
-# ── v3 ReAct Agent 图构建 ──
-
-
-def build_v3_graph(db_connection_id: str = "") -> StateGraph:
-    """Build v3 ReAct Agent graph: Supervisor -> (SQL | Knowledge) SubGraphs."""
+    Supervisor is a ReAct agent that dynamically delegates to specialist sub-agents.
+    Each specialist is itself a ReAct agent with its own tool set.
+    """
     from app.dependencies import get_llm_client
 
     builder = StateGraph(V3AgentState)
@@ -363,21 +42,21 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
 
     # Build sub-agents
     supervisor_subgraph = build_react_agent(
-        model=_LiteLLMChatAdapter(supervisor_llm),
+        model=LiteLLMChatAdapter(supervisor_llm),
         tools=get_supervisor_tools(db_connection_id),
         system_prompt=get_supervisor_prompt(),
         agent_name="supervisor",
     )
 
     sql_subgraph = build_react_agent(
-        model=_LiteLLMChatAdapter(specialist_llm),
+        model=LiteLLMChatAdapter(specialist_llm),
         tools=get_sql_agent_tools(db_id=db_connection_id, db_connection_id=db_connection_id),
         system_prompt=get_sql_agent_prompt(),
         agent_name="sql_agent",
     )
 
     knowledge_subgraph = build_react_agent(
-        model=_LiteLLMChatAdapter(specialist_llm),
+        model=LiteLLMChatAdapter(specialist_llm),
         tools=get_knowledge_agent_tools(),
         system_prompt=get_knowledge_agent_prompt(),
         agent_name="knowledge_agent",
@@ -386,7 +65,7 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
     builder.add_node("supervisor", supervisor_subgraph)
     builder.add_node("sql_agent", sql_subgraph)
     builder.add_node("knowledge_agent", knowledge_subgraph)
-    builder.add_node("response_formatter", _v3_response_formatter_node)
+    builder.add_node("response_formatter", _response_formatter_node)
 
     builder.add_edge(START, "supervisor")
 
@@ -394,9 +73,7 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
         msgs = state.get("messages", [])
         if not msgs:
             return "response_formatter"
-        # Search all messages in reverse for the most recent tool call.
-        # The last message may be a plain text response from the subgraph,
-        # but an earlier message contains the delegate tool_call.
+        # Search all messages in reverse for the most recent tool call
         for msg in reversed(msgs):
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for tc in msg.tool_calls:
@@ -407,7 +84,7 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
                         return "knowledge_agent"
                     if name in ("respond_general", "ask_user_clarification", "get_database_status"):
                         return "response_formatter"
-                break  # Only inspect the most recent tool_call message
+                break
         return "response_formatter"
 
     builder.add_conditional_edges("supervisor", route_supervisor, {
@@ -416,6 +93,7 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
         "response_formatter": "response_formatter",
     })
 
+    # Sub-agents return to supervisor for possible re-delegation
     builder.add_edge("sql_agent", "supervisor")
     builder.add_edge("knowledge_agent", "supervisor")
     builder.add_edge("response_formatter", END)
@@ -423,23 +101,16 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
     return builder.compile(checkpointer=MemorySaver())
 
 
-async def _v3_response_formatter_node(state: V3AgentState) -> dict:
-    """Format the final response from v3 agents.
-
-    Searches messages in reverse for the last AIMessage with text content
-    (skipping ToolMessage and delegate result payloads).
-    """
-    from langchain_core.messages import AIMessage
-
+async def _response_formatter_node(state: V3AgentState) -> dict:
+    """Format the final response — extract last AIMessage text content."""
     msgs = state.get("messages", [])
     final_text = ""
 
     for msg in reversed(msgs):
-        # Only consider AIMessage instances — skip ToolMessage and delegate payloads
         if isinstance(msg, AIMessage) and msg.content:
             content = msg.content
             if isinstance(content, str) and content.strip():
-                # Skip delegate tool call responses (they contain {"status": "delegated"})
+                # Skip delegate tool call response payloads
                 if content.strip().startswith('{"status":'):
                     continue
                 final_text = content
@@ -451,14 +122,16 @@ async def _v3_response_formatter_node(state: V3AgentState) -> dict:
     return {"final_response": final_text}
 
 
-async def _run_v3_agent(
+# ── Agent Runner（AG-UI 流式输出） ──
+
+async def _run_agent(
     user_message: str,
     conversation_id: str,
     model: str,
     db_connection_id: str | None = None,
 ) -> AsyncIterator[str]:
-    """Run v3 ReAct Agent graph with full streaming observability."""
-    graph = build_v3_graph(db_connection_id=db_connection_id or "")
+    """Run ReAct Agent graph with full streaming observability."""
+    graph = build_graph(db_connection_id=db_connection_id or "")
 
     history = []
     if conversation_id:
@@ -514,6 +187,11 @@ async def _run_v3_agent(
                                 info.get("agent_name", "unknown"),
                                 info.get("step_index", 0),
                             )
+                        elif "step_finished" in ev:
+                            info = ev["step_finished"]
+                            yield EventEncoder.step_finished(
+                                info.get("agent_name", "unknown")
+                            )
                         elif "tool_call_start" in ev:
                             info = ev["tool_call_start"]
                             yield EventEncoder.tool_call_start(
@@ -543,88 +221,16 @@ async def _run_v3_agent(
         yield EventEncoder.run_finished()
 
     except Exception as e:
-        logger.error("v3 Agent run failed: %s", e)
+        logger.error("Agent run failed: %s", e)
         yield EventEncoder.run_error(str(e))
 
-
-# ── Agent Runner（AG-UI 流式输出） ──
 
 async def run_agent_with_ag_ui(
     user_message: str,
     conversation_id: str,
     model: str,
     db_connection_id: str | None = None,
-    use_v3: bool = False,
 ) -> AsyncIterator[str]:
-    """运行 LangGraph Agent 并以 AG-UI token 级流式 SSE 输出。
-
-    Args:
-        use_v3: If True, use v3 ReAct architecture. Default False (v2).
-    """
-    if use_v3:
-        async for event in _run_v3_agent(user_message, conversation_id, model, db_connection_id):
-            yield event
-        return
-
-    graph = build_graph()
-
-    # Load conversation history for multi-turn context
-    history = []
-    if conversation_id:
-        try:
-            from app.database import async_session_factory
-            from app.models.conversation import Conversation
-            from app.services.conversation_service import build_context
-            from sqlalchemy import select
-
-            async with async_session_factory() as session:
-                result = await session.execute(select(Conversation).where(Conversation.id == conversation_id))
-                conv = result.scalar_one_or_none()
-                if conv:
-                    ctx = await build_context(session, conv)
-                    history = ctx.history or []
-        except Exception:
-            pass
-
-    initial_state: AgentStateType = {
-        "messages": [{"role": "user", "content": user_message}],
-        "conversation_id": conversation_id,
-        "model": model,
-        "db_connection_id": db_connection_id,
-        "history": history,
-    }
-
-    yield EventEncoder.run_started(conversation_id)
-
-    config = {"configurable": {"thread_id": conversation_id}}
-    streamed_text = False
-
-    try:
-        async for mode, events in graph.astream(initial_state, config=config, stream_mode=["custom", "updates"]):
-            if mode == "custom":
-                for ev in events:
-                    if isinstance(ev, dict):
-                        if "delta" in ev:
-                            yield EventEncoder.text_delta(ev["delta"])
-                            streamed_text = True
-                        elif "sql" in ev:
-                            yield EventEncoder.sql_event(ev["sql"])
-                        elif "chart_config" in ev:
-                            yield EventEncoder.chart_config(ev["chart_config"])
-                        elif "result" in ev:
-                            yield EventEncoder.result_event(ev["result"])
-
-        # 获取最终状态
-        final_state = await graph.aget_state(config)
-        state_values = final_state.values if final_state else {}
-        response = state_values.get("final_response", "") if state_values else ""
-
-        # 如果没有流式输出（硬编码兜底、SQL 格式化结果等），发送完整文本
-        if response and not streamed_text:
-            yield EventEncoder.text_delta(response)
-
-        yield EventEncoder.run_finished()
-
-    except Exception as e:
-        logger.error("Agent run failed: %s", e)
-        yield EventEncoder.run_error(str(e))
+    """运行 v3 ReAct Agent 并以 AG-UI token 级流式 SSE 输出。"""
+    async for event in _run_agent(user_message, conversation_id, model, db_connection_id):
+        yield event

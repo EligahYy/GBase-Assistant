@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     ]
     debug: bool = False
     secret_key: str = ""  # GBase 连接密码 AES-GCM 加密密钥
+    use_v3_arch: bool = False  # Enable v3 ReAct Agent architecture
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
