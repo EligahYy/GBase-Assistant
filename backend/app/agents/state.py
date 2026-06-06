@@ -61,9 +61,11 @@ class AgentState(TypedDict, total=False):
     final_response: str | None
     delegation_count: int  # Guard against infinite delegation loops
     supervisor_step: int   # Iteration counter for supervisor agent
+    supervisor_finished: bool  # Per-agent finish flag
     sql_step: int          # Iteration counter for SQL agent
+    sql_finished: bool     # Per-agent finish flag
     knowledge_step: int    # Iteration counter for knowledge agent
-    finished: bool         # True when active agent is done
+    knowledge_finished: bool  # Per-agent finish flag
     conversation_id: str
     db_connection_id: str | None
     model: str

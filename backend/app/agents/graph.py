@@ -119,63 +119,44 @@ def _build_messages(system_prompt: str, state_msgs: list) -> list[BaseMessage]:
 # Agent nodes (inlined — NOT compiled subgraphs)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_index_key: str):
-    """Create a ReAct agent reasoning node.
-
-    The node reads/writes state["messages"] and tracks its own iteration count
-    in state[step_index_key].
-    """
+def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_key: str, finished_key: str):
+    """Create a ReAct agent reasoning node with per-agent iteration + finish tracking."""
 
     async def node_fn(state: AgentState) -> dict:
         tools = get_tools()
         system_prompt = get_prompt()
-        step_idx = state.get(step_index_key, 0)
+        step_idx = state.get(step_key, 0)
 
         if step_idx == 0:
             _emit("step_started", {"agent_name": agent_name, "step_index": 0})
 
-        # Build messages
         msgs = state.get("messages", [])
         messages = _build_messages(system_prompt, msgs)
         tool_schemas = _to_openai_tools(tools)
 
-        # Call LLM
         try:
             response = await _call_llm(model, messages, tool_schemas if tool_schemas else None)
         except Exception as e:
             logger.error("Agent %s LLM call failed: %s", agent_name, e)
             _emit("delta", f"\n处理出错: {e}")
-            return {step_index_key: step_idx + 1, "messages": [AIMessage(content=f"处理出错: {e}")], "finished": True}
+            return {step_key: step_idx + 1, finished_key: True, "messages": [AIMessage(content=f"处理出错: {e}")]}
 
         tool_calls, text = _parse_tool_calls(response)
 
         if text and not tool_calls:
-            # Final text output
             _emit("delta", text)
             _emit("step_finished", {"agent_name": agent_name})
-            return {
-                step_index_key: step_idx + 1,
-                "messages": [response],
-                "finished": True,
-            }
+            return {step_key: step_idx + 1, finished_key: True, "messages": [response]}
 
         if tool_calls:
             _emit("thinking_start", {})
             _emit("thinking_delta", f"调用 {len(tool_calls)} 个工具: {', '.join(tc['name'] for tc in tool_calls)}")
             _emit("thinking_end", {})
-            return {
-                step_index_key: step_idx + 1,
-                "messages": [response],
-            }
+            return {step_key: step_idx + 1, "messages": [response]}
 
-        # No tool calls and no text — force end
         _emit("delta", "处理完成。")
         _emit("step_finished", {"agent_name": agent_name})
-        return {
-            step_index_key: step_idx + 1,
-            "messages": [AIMessage(content="处理完成。")],
-            "finished": True,
-        }
+        return {step_key: step_idx + 1, finished_key: True, "messages": [AIMessage(content="处理完成。")]}
 
     return node_fn
 
@@ -269,17 +250,17 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     # ── Add nodes ──
 
     builder.add_node("supervisor_agent", _make_agent_node(
-        supervisor_llm, _get_supervisor_tools, get_supervisor_prompt, "supervisor", "supervisor_step"
+        supervisor_llm, _get_supervisor_tools, get_supervisor_prompt, "supervisor", "supervisor_step", "supervisor_finished"
     ))
     builder.add_node("supervisor_tools", _make_tools_node(_get_supervisor_tools(), "supervisor"))
 
     builder.add_node("sql_agent", _make_agent_node(
-        specialist_llm, _get_sql_tools, get_sql_agent_prompt, "sql_agent", "sql_step"
+        specialist_llm, _get_sql_tools, get_sql_agent_prompt, "sql_agent", "sql_step", "sql_finished"
     ))
     builder.add_node("sql_tools", _make_tools_node(_get_sql_tools(), "sql_agent"))
 
     builder.add_node("knowledge_agent", _make_agent_node(
-        specialist_llm, _get_knowledge_tools, get_knowledge_agent_prompt, "knowledge_agent", "knowledge_step"
+        specialist_llm, _get_knowledge_tools, get_knowledge_agent_prompt, "knowledge_agent", "knowledge_step", "knowledge_finished"
     ))
     builder.add_node("knowledge_tools", _make_tools_node(_get_knowledge_tools(), "knowledge_agent"))
 
@@ -287,13 +268,13 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
 
     # ── Routing ──
 
-    def _route_agent(state: AgentState, step_key: str) -> str:
-        msgs = state.get("messages", [])
-        if state.get("finished"):
+    def _route_agent(state: AgentState, step_key: str, finished_key: str) -> str:
+        if state.get(finished_key):
             return "end"
         step = state.get(step_key, 0)
         if step >= MAX_ITERATIONS:
             return "end"
+        msgs = state.get("messages", [])
         if msgs:
             last = msgs[-1]
             tcs, _ = _parse_tool_calls(last)
@@ -302,10 +283,12 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
         return "end"
 
     def route_supervisor_agent(state: AgentState) -> str:
-        return _route_agent(state, "supervisor_step")
+        # Guard: if we've delegated too many times, force final response
+        if state.get("delegation_count", 0) >= MAX_DELEGATIONS:
+            return "end"
+        return _route_agent(state, "supervisor_step", "supervisor_finished")
 
     def route_supervisor_tools(state: AgentState) -> str:
-        # After executing supervisor's tools, check what was called
         msgs = state.get("messages", [])
         if msgs:
             for msg in reversed(msgs):
@@ -314,19 +297,18 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
                     for tc in tcs:
                         name = tc.get("name", "")
                         if name == "delegate_to_sql_specialist":
-                            # Increment delegation count before routing
                             return "sql_agent"
                         if name == "delegate_to_knowledge_specialist":
                             return "knowledge_agent"
+                    # Non-delegate tools: loop back to supervisor agent for follow-up
                     break
-        # For non-delegate tools (respond_general etc.), loop back to supervisor agent
         return "supervisor_agent"
 
     def route_sql_agent(state: AgentState) -> str:
-        return _route_agent(state, "sql_step")
+        return _route_agent(state, "sql_step", "sql_finished")
 
     def route_knowledge_agent(state: AgentState) -> str:
-        return _route_agent(state, "knowledge_step")
+        return _route_agent(state, "knowledge_step", "knowledge_finished")
 
     # ── Edges ──
 
@@ -347,9 +329,9 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     async def _specialist_return(state: AgentState) -> dict:
         return {
             "delegation_count": state.get("delegation_count", 0) + 1,
-            "sql_step": 0,
-            "knowledge_step": 0,
-            "finished": False,
+            "sql_step": 0, "sql_finished": False,
+            "knowledge_step": 0, "knowledge_finished": False,
+            "supervisor_finished": False,
         }
 
     builder.add_node("_specialist_return", _specialist_return)
@@ -438,10 +420,9 @@ async def run_agent_with_ag_ui(
         "db_connection_id": db_connection_id,
         "history": history,
         "delegation_count": 0,
-        "supervisor_step": 0,
-        "sql_step": 0,
-        "knowledge_step": 0,
-        "finished": False,
+        "supervisor_step": 0, "supervisor_finished": False,
+        "sql_step": 0, "sql_finished": False,
+        "knowledge_step": 0, "knowledge_finished": False,
         "supervisor": {},
         "sql": {},
         "knowledge": {},
