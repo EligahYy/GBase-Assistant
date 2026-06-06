@@ -307,16 +307,29 @@ def _make_query_error_code_tool():
 
 
 def build_semantic_mapper_tools(glossary: dict, db_id: str):
-    """Build the 6-tool set for the Semantic Mapper Agent."""
-    tools = [
-        _make_query_glossary_tool(glossary),
-        _make_search_schema_semantic_tool(db_id),
-        _make_get_table_profile_tool(db_id),
-        _make_find_join_path_tool(db_id),
-    ]
-    if db_id:
-        tools.append(_make_get_database_status_tool(db_id))
-    tools.append(_make_query_error_code_tool())
+    """Build the 6-tool set for the Semantic Mapper Agent (backward-compatible).
+
+    Returns tools from ToolRegistry. Falls back to closure-based tools if
+    registry is empty (e.g., in tests without full app context).
+    """
+    from app.agents.tools import get_tool_registry, register_all_tools
+
+    register_all_tools(db_id=db_id)
+    registry = get_tool_registry()
+
+    tools = registry.list_for_agent("semantic_mapper")
+
+    # If registry is empty (tests without full app context), fall back to closures
+    if not tools:
+        tools = [
+            _make_query_glossary_tool(glossary),
+            _make_search_schema_semantic_tool(db_id),
+            _make_get_table_profile_tool(db_id),
+            _make_find_join_path_tool(db_id),
+        ]
+        if db_id:
+            tools.append(_make_get_database_status_tool(db_id))
+        tools.append(_make_query_error_code_tool())
     return tools
 
 
