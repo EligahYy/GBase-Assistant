@@ -394,16 +394,20 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
         msgs = state.get("messages", [])
         if not msgs:
             return "response_formatter"
-        last_msg = msgs[-1]
-        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-            for tc in last_msg.tool_calls:
-                name = tc.get("name", "")
-                if name == "delegate_to_sql_specialist":
-                    return "sql_agent"
-                if name == "delegate_to_knowledge_specialist":
-                    return "knowledge_agent"
-                if name in ("respond_general", "ask_user_clarification", "get_database_status"):
-                    return "response_formatter"
+        # Search all messages in reverse for the most recent tool call.
+        # The last message may be a plain text response from the subgraph,
+        # but an earlier message contains the delegate tool_call.
+        for msg in reversed(msgs):
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    name = tc.get("name", "")
+                    if name == "delegate_to_sql_specialist":
+                        return "sql_agent"
+                    if name == "delegate_to_knowledge_specialist":
+                        return "knowledge_agent"
+                    if name in ("respond_general", "ask_user_clarification", "get_database_status"):
+                        return "response_formatter"
+                break  # Only inspect the most recent tool_call message
         return "response_formatter"
 
     builder.add_conditional_edges("supervisor", route_supervisor, {
@@ -420,18 +424,26 @@ def build_v3_graph(db_connection_id: str = "") -> StateGraph:
 
 
 async def _v3_response_formatter_node(state: V3AgentState) -> dict:
-    """Format the final response from v3 agents."""
+    """Format the final response from v3 agents.
+
+    Searches messages in reverse for the last AIMessage with text content
+    (skipping ToolMessage and delegate result payloads).
+    """
+    from langchain_core.messages import AIMessage
+
     msgs = state.get("messages", [])
     final_text = ""
 
     for msg in reversed(msgs):
-        if hasattr(msg, "content") and msg.content:
+        # Only consider AIMessage instances — skip ToolMessage and delegate payloads
+        if isinstance(msg, AIMessage) and msg.content:
             content = msg.content
-            if isinstance(content, str):
-                skip_patterns = ['{"status":', '{"error":', '{"summary":']
-                if not any(content.strip().startswith(p) for p in skip_patterns):
-                    final_text = content
-                    break
+            if isinstance(content, str) and content.strip():
+                # Skip delegate tool call responses (they contain {"status": "delegated"})
+                if content.strip().startswith('{"status":'):
+                    continue
+                final_text = content
+                break
 
     if not final_text:
         final_text = "处理完成。如有其他问题，请继续提问。"
@@ -513,8 +525,9 @@ async def _run_v3_agent(
                                 info["name"], info.get("result", {})
                             )
                         elif "tool_call_end" in ev:
+                            info = ev["tool_call_end"]
                             yield EventEncoder.tool_call_end(
-                                ev.get("name", "unknown")
+                                info.get("name", "unknown")
                             )
                         elif "delta" in ev:
                             yield EventEncoder.text_delta(ev["delta"])

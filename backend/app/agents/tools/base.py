@@ -24,6 +24,32 @@ class ToolParameter:
         return schema
 
 
+def build_openai_schema(name: str, description: str, parameters: list[ToolParameter]) -> dict:
+    """Build an OpenAI/AG-UI function-calling schema from tool metadata.
+
+    All Tool classes should use this helper instead of manually constructing
+    the schema dict. This ensures consistent format and reduces duplication.
+    """
+    props: dict[str, dict] = {}
+    required: list[str] = []
+    for p in parameters:
+        props[p.name] = p.to_json_schema()
+        if p.required:
+            required.append(p.name)
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": props,
+                "required": required,
+            },
+        },
+    }
+
+
 @runtime_checkable
 class AgentTool(Protocol):
     """Standard Tool interface. All Agent tools MUST implement this Protocol.

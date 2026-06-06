@@ -31,8 +31,9 @@ class DelegateToSQLAgent:
             ),
         ]
 
-    async def execute(self, query: str) -> dict:
-        return {"status": "delegated", "query": query}
+    async def execute(self, query: str = "", **kwargs) -> dict:
+        q = query or kwargs.get("query", "")
+        return {"status": "delegated", "query": q}
 
     def format_result(self, result: dict) -> dict:
         return {"summary": f"委托 SQL Agent 处理: {result.get('query', '')[:50]}...", "detail": result, "truncated": False}
@@ -80,8 +81,9 @@ class DelegateToKnowledgeAgent:
             ),
         ]
 
-    async def execute(self, query: str) -> dict:
-        return {"status": "delegated", "query": query}
+    async def execute(self, query: str = "", **kwargs) -> dict:
+        q = query or kwargs.get("query", "")
+        return {"status": "delegated", "query": q}
 
     def format_result(self, result: dict) -> dict:
         return {"summary": f"委托 Knowledge Agent 处理: {result.get('query', '')[:50]}...", "detail": result, "truncated": False}
@@ -128,8 +130,8 @@ class RespondGeneralTool:
             ),
         ]
 
-    async def execute(self, message: str) -> str:
-        return message
+    async def execute(self, message: str = "", **kwargs) -> str:
+        return message or kwargs.get("message", "")
 
     def format_result(self, result: str) -> dict:
         return {"summary": result, "detail": None, "truncated": False}
@@ -176,8 +178,8 @@ class AskUserClarificationTool:
             ),
         ]
 
-    async def execute(self, question: str) -> str:
-        return question
+    async def execute(self, question: str = "", **kwargs) -> str:
+        return question or kwargs.get("question", "")
 
     def format_result(self, result: str) -> dict:
         return {"summary": result, "detail": None, "truncated": False}

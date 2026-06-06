@@ -218,29 +218,38 @@ def _build_tool_execution_node(tools: list[Any], agent_name: str):
     return node_fn
 
 
-def _route_after_agent(state: ReActState) -> str:
-    """Route: if agent has tool calls → tools node, else → END."""
-    step_index = state.get("step_index", 0)
-    max_iter = state.get("max_iterations", MAX_ITERATIONS)
+def _make_router(agent_name: str):
+    """Create a route_after_agent function with agent_name captured in closure."""
 
-    if state.get("finished"):
+    def _route_after_agent(state: ReActState) -> str:
+        """Route: if agent has tool calls → tools node, else → END."""
+        step_index = state.get("step_index", 0)
+        max_iter = state.get("max_iterations", MAX_ITERATIONS)
+
+        if state.get("finished"):
+            _emit_custom("step_finished", {"agent_name": agent_name})
+            return "end"
+
+        if step_index >= max_iter:
+            logger.warning("ReAct agent reached max iterations (%d), forcing end", max_iter)
+            _emit_custom("step_finished", {"agent_name": agent_name})
+            return "end"
+
+        messages = state.get("messages", [])
+        if not messages:
+            _emit_custom("step_finished", {"agent_name": agent_name})
+            return "end"
+
+        last_msg = messages[-1]
+        tool_calls, _ = _parse_tool_calls(last_msg)
+
+        if tool_calls:
+            return "tools"
+
+        _emit_custom("step_finished", {"agent_name": agent_name})
         return "end"
 
-    if step_index >= max_iter:
-        logger.warning("ReAct agent reached max iterations (%d), forcing end", max_iter)
-        return "end"
-
-    messages = state.get("messages", [])
-    if not messages:
-        return "end"
-
-    last_msg = messages[-1]
-    tool_calls, _ = _parse_tool_calls(last_msg)
-
-    if tool_calls:
-        return "tools"
-
-    return "end"
+    return _route_after_agent
 
 
 def build_react_agent(
@@ -271,7 +280,7 @@ def build_react_agent(
     builder.add_node("tools", tools_node)
 
     builder.add_edge(START, "agent")
-    builder.add_conditional_edges("agent", _route_after_agent, {
+    builder.add_conditional_edges("agent", _make_router(agent_name), {
         "tools": "tools",
         "end": END,
     })
