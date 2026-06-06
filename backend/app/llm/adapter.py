@@ -51,8 +51,24 @@ class LiteLLMChatAdapter(BaseChatModel):
                 for t in tools
             ]
 
-        content, _ = await self.llm_client.complete(dict_msgs, **kwargs)
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content))])
+        content, _, tool_calls = await self.llm_client.complete(dict_msgs, **kwargs)
+
+        # Build AIMessage with tool_calls if the model responded with function calls
+        ai_message_kwargs: dict = {"content": content}
+        if tool_calls:
+            from langchain_core.messages import ToolCall
+
+            lc_tool_calls = [
+                ToolCall(
+                    name=tc["name"],
+                    args=tc["args"],
+                    id=tc.get("id", f"call_{i}"),
+                )
+                for i, tc in enumerate(tool_calls)
+            ]
+            ai_message_kwargs["tool_calls"] = lc_tool_calls
+
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(**ai_message_kwargs))])
 
     def bind_tools(self, tools: list, **kwargs):
         clone = LiteLLMChatAdapter(self.llm_client)

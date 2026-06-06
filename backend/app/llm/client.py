@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -91,8 +92,12 @@ class LiteLLMClientImpl:
         if settings.anthropic_api_key:
             os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
 
-    async def complete(self, messages: list[dict], **kwargs) -> tuple[str, dict]:
-        """Non-streaming generation with fallback. Returns (content, token_usage)."""
+    async def complete(self, messages: list[dict], **kwargs) -> tuple[str, dict, list[dict] | None]:
+        """Non-streaming generation with fallback. Returns (content, token_usage, tool_calls).
+
+        tool_calls is a list of dicts with {id, name, arguments} when the model
+        responds with a function call, or None for plain text responses.
+        """
         models = [self._resolve_model()] + self._get_fallback_models()
         params = self._resolve_params()
         params.update(kwargs)
@@ -102,7 +107,23 @@ class LiteLLMClientImpl:
             start = time.perf_counter()
             try:
                 response = await litellm.acompletion(model=model, messages=messages, **params)
-                content = response.choices[0].message.content or ""
+                msg = response.choices[0].message
+                content = msg.content or ""
+                # Extract tool_calls if present (model responded with function call)
+                tool_calls = None
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    tool_calls = [
+                        {
+                            "id": tc.id if hasattr(tc, "id") else f"call_{i}",
+                            "name": tc.function.name if hasattr(tc, "function") else tc.name,
+                            "args": (
+                                json.loads(tc.function.arguments)
+                                if hasattr(tc, "function") and tc.function.arguments
+                                else (tc.arguments if hasattr(tc, "arguments") else {})
+                            ),
+                        }
+                        for i, tc in enumerate(msg.tool_calls)
+                    ]
                 usage = {
                     "prompt": response.usage.prompt_tokens if response.usage else 0,
                     "completion": response.usage.completion_tokens if response.usage else 0,
@@ -119,7 +140,7 @@ class LiteLLMClientImpl:
                     prompt_tokens=usage["prompt"],
                     completion_tokens=usage["completion"],
                 )
-                return content, usage
+                return content, usage, tool_calls
             except Exception as e:
                 error_message = _sanitize_error(e)
                 logger.warning("Model %s failed for %s: %s", model, self.task_type, error_message)

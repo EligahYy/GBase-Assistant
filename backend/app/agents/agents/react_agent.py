@@ -34,6 +34,23 @@ def _emit_custom(key: str, value: Any) -> None:
         pass  # Not in a streaming context (e.g., tests)
 
 
+def _make_ai_message(content: str, tool_calls_data: list[dict] | None = None) -> AIMessage:
+    """Build an AIMessage, optionally with tool_calls."""
+    if tool_calls_data:
+        from langchain_core.messages import ToolCall
+
+        lc_tool_calls = [
+            ToolCall(
+                name=tc["name"],
+                args=tc.get("args", {}),
+                id=tc.get("id", f"call_{i}"),
+            )
+            for i, tc in enumerate(tool_calls_data)
+        ]
+        return AIMessage(content=content, tool_calls=lc_tool_calls)
+    return AIMessage(content=content)
+
+
 def _parse_tool_calls(response: AIMessage) -> tuple[list[dict] | None, str | None]:
     """Extract tool calls and/or text content from an AI message.
 
@@ -108,8 +125,10 @@ def _build_react_agent_node(
                     if hasattr(m, "type"):
                         role = "assistant" if m.type == "ai" else ("system" if m.type == "system" else "user")
                     dict_msgs.append({"role": role, "content": str(m.content)})
-                content, _ = await model.llm_client.complete(dict_msgs, tools=tool_schemas if tool_schemas else None)
-                full_response = AIMessage(content=content)
+                content, _, tool_calls_data = await model.llm_client.complete(
+                    dict_msgs, tools=tool_schemas if tool_schemas else None
+                )
+                full_response = _make_ai_message(content, tool_calls_data)
         except Exception as e:
             logger.error("ReAct agent %s LLM call failed: %s", agent_name, e)
             error_msg = AIMessage(content=f"处理出错: {e}")

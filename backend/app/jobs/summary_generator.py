@@ -66,7 +66,7 @@ async def generate_conversation_summary(
     # 4. 调用 LLM 生成摘要
     try:
         prompt = SUMMARY_PROMPT.format(dialogue=dialogue)
-        content, _ = await llm_client.complete([{"role": "user", "content": prompt}])
+        content, _, _tool_calls = await llm_client.complete([{"role": "user", "content": prompt}])
 
         # 解析 JSON
         content = content.strip()
