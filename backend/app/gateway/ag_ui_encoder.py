@@ -15,6 +15,13 @@ class EventType(StrEnum):
     RUN_STARTED = "RUN_STARTED"
     RUN_FINISHED = "RUN_FINISHED"
     RUN_ERROR = "RUN_ERROR"
+    # ── Thinking visibility ──
+    THINKING_START = "THINKING_START"
+    THINKING_CONTENT = "THINKING_CONTENT"
+    THINKING_END = "THINKING_END"
+    # ── Step lifecycle ──
+    STEP_STARTED = "STEP_STARTED"
+    STEP_FINISHED = "STEP_FINISHED"
 
 
 class EventEncoder:
@@ -69,6 +76,28 @@ class EventEncoder:
     @staticmethod
     def run_error(message: str) -> str:
         return EventEncoder._encode(EventType.RUN_ERROR, message=message)
+
+    @staticmethod
+    def thinking_start() -> str:
+        return EventEncoder._encode(EventType.THINKING_START)
+
+    @staticmethod
+    def thinking_delta(delta: str) -> str:
+        return EventEncoder._encode(EventType.THINKING_CONTENT, delta=delta)
+
+    @staticmethod
+    def thinking_end() -> str:
+        return EventEncoder._encode(EventType.THINKING_END)
+
+    @staticmethod
+    def step_started(agent_name: str, step_index: int = 0) -> str:
+        return EventEncoder._encode(
+            EventType.STEP_STARTED, agent_name=agent_name, step_index=step_index,
+        )
+
+    @staticmethod
+    def step_finished(agent_name: str) -> str:
+        return EventEncoder._encode(EventType.STEP_FINISHED, agent_name=agent_name)
 
     @staticmethod
     def chart_config(config: dict) -> str:
