@@ -16,6 +16,15 @@ from app.gateway.ag_ui_encoder import EventEncoder
 
 logger = logging.getLogger(__name__)
 
+# v3 ReAct Agent imports
+from app.agents.state import V3AgentState
+from app.agents.agents.react_agent import build_react_agent
+from app.agents.agents.supervisor import get_supervisor_tools, get_supervisor_prompt
+from app.agents.agents.sql_agent import get_sql_agent_tools, get_sql_agent_prompt
+from app.agents.agents.knowledge_agent import get_knowledge_agent_tools, get_knowledge_agent_prompt
+from app.agents.semantic_mapper import _LiteLLMChatAdapter
+from langchain_core.messages import HumanMessage
+
 
 def _last_user_message(state: AgentStateType) -> str:
     msgs = state.get("messages", [])
@@ -340,6 +349,191 @@ def build_graph() -> StateGraph:
     return builder.compile(checkpointer=MemorySaver())
 
 
+# ── v3 ReAct Agent 图构建 ──
+
+
+def build_v3_graph(db_connection_id: str = "") -> StateGraph:
+    """Build v3 ReAct Agent graph: Supervisor -> (SQL | Knowledge) SubGraphs."""
+    from app.dependencies import get_llm_client
+
+    builder = StateGraph(V3AgentState)
+
+    supervisor_llm = get_llm_client(task_type="general")
+    specialist_llm = get_llm_client(task_type="sql")
+
+    # Build sub-agents
+    supervisor_subgraph = build_react_agent(
+        model=_LiteLLMChatAdapter(supervisor_llm),
+        tools=get_supervisor_tools(db_connection_id),
+        system_prompt=get_supervisor_prompt(),
+        agent_name="supervisor",
+    )
+
+    sql_subgraph = build_react_agent(
+        model=_LiteLLMChatAdapter(specialist_llm),
+        tools=get_sql_agent_tools(db_id=db_connection_id, db_connection_id=db_connection_id),
+        system_prompt=get_sql_agent_prompt(),
+        agent_name="sql_agent",
+    )
+
+    knowledge_subgraph = build_react_agent(
+        model=_LiteLLMChatAdapter(specialist_llm),
+        tools=get_knowledge_agent_tools(),
+        system_prompt=get_knowledge_agent_prompt(),
+        agent_name="knowledge_agent",
+    )
+
+    builder.add_node("supervisor", supervisor_subgraph)
+    builder.add_node("sql_agent", sql_subgraph)
+    builder.add_node("knowledge_agent", knowledge_subgraph)
+    builder.add_node("response_formatter", _v3_response_formatter_node)
+
+    builder.add_edge(START, "supervisor")
+
+    def route_supervisor(state):
+        msgs = state.get("messages", [])
+        if not msgs:
+            return "response_formatter"
+        last_msg = msgs[-1]
+        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+            for tc in last_msg.tool_calls:
+                name = tc.get("name", "")
+                if name == "delegate_to_sql_specialist":
+                    return "sql_agent"
+                if name == "delegate_to_knowledge_specialist":
+                    return "knowledge_agent"
+                if name in ("respond_general", "ask_user_clarification", "get_database_status"):
+                    return "response_formatter"
+        return "response_formatter"
+
+    builder.add_conditional_edges("supervisor", route_supervisor, {
+        "sql_agent": "sql_agent",
+        "knowledge_agent": "knowledge_agent",
+        "response_formatter": "response_formatter",
+    })
+
+    builder.add_edge("sql_agent", "supervisor")
+    builder.add_edge("knowledge_agent", "supervisor")
+    builder.add_edge("response_formatter", END)
+
+    return builder.compile(checkpointer=MemorySaver())
+
+
+async def _v3_response_formatter_node(state: V3AgentState) -> dict:
+    """Format the final response from v3 agents."""
+    msgs = state.get("messages", [])
+    final_text = ""
+
+    for msg in reversed(msgs):
+        if hasattr(msg, "content") and msg.content:
+            content = msg.content
+            if isinstance(content, str):
+                skip_patterns = ['{"status":', '{"error":', '{"summary":']
+                if not any(content.strip().startswith(p) for p in skip_patterns):
+                    final_text = content
+                    break
+
+    if not final_text:
+        final_text = "处理完成。如有其他问题，请继续提问。"
+
+    return {"final_response": final_text}
+
+
+async def _run_v3_agent(
+    user_message: str,
+    conversation_id: str,
+    model: str,
+    db_connection_id: str | None = None,
+) -> AsyncIterator[str]:
+    """Run v3 ReAct Agent graph with full streaming observability."""
+    graph = build_v3_graph(db_connection_id=db_connection_id or "")
+
+    history = []
+    if conversation_id:
+        try:
+            from app.database import async_session_factory
+            from app.models.conversation import Conversation
+            from app.services.conversation_service import build_context
+            from sqlalchemy import select
+
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(Conversation).where(Conversation.id == conversation_id)
+                )
+                conv = result.scalar_one_or_none()
+                if conv:
+                    ctx = await build_context(session, conv)
+                    history = ctx.history or []
+        except Exception:
+            pass
+
+    initial_state: V3AgentState = {
+        "messages": [HumanMessage(content=user_message)],
+        "conversation_id": conversation_id,
+        "model": model,
+        "db_connection_id": db_connection_id,
+        "history": history,
+        "supervisor": {},
+        "sql": {},
+        "knowledge": {},
+    }
+
+    yield EventEncoder.run_started(conversation_id)
+
+    config = {"configurable": {"thread_id": f"v3_{conversation_id}"}}
+    streamed_text = False
+
+    try:
+        async for mode, events in graph.astream(
+            initial_state, config=config, stream_mode=["custom", "updates"]
+        ):
+            if mode == "custom":
+                for ev in events:
+                    if isinstance(ev, dict):
+                        if "thinking_start" in ev:
+                            yield EventEncoder.thinking_start()
+                        elif "thinking_delta" in ev:
+                            yield EventEncoder.thinking_delta(ev["thinking_delta"])
+                        elif "thinking_end" in ev:
+                            yield EventEncoder.thinking_end()
+                        elif "step_started" in ev:
+                            info = ev["step_started"]
+                            yield EventEncoder.step_started(
+                                info.get("agent_name", "unknown"),
+                                info.get("step_index", 0),
+                            )
+                        elif "tool_call_start" in ev:
+                            info = ev["tool_call_start"]
+                            yield EventEncoder.tool_call_start(
+                                info["name"], info.get("args")
+                            )
+                        elif "tool_call_result" in ev:
+                            info = ev["tool_call_result"]
+                            yield EventEncoder.tool_call_result(
+                                info["name"], info.get("result", {})
+                            )
+                        elif "tool_call_end" in ev:
+                            yield EventEncoder.tool_call_end(
+                                ev.get("name", "unknown")
+                            )
+                        elif "delta" in ev:
+                            yield EventEncoder.text_delta(ev["delta"])
+                            streamed_text = True
+
+        final_state = await graph.aget_state(config)
+        state_values = final_state.values if final_state else {}
+        response = state_values.get("final_response", "") if state_values else ""
+
+        if response and not streamed_text:
+            yield EventEncoder.text_delta(response)
+
+        yield EventEncoder.run_finished()
+
+    except Exception as e:
+        logger.error("v3 Agent run failed: %s", e)
+        yield EventEncoder.run_error(str(e))
+
+
 # ── Agent Runner（AG-UI 流式输出） ──
 
 async def run_agent_with_ag_ui(
@@ -347,8 +541,18 @@ async def run_agent_with_ag_ui(
     conversation_id: str,
     model: str,
     db_connection_id: str | None = None,
+    use_v3: bool = False,
 ) -> AsyncIterator[str]:
-    """运行 LangGraph Agent 并以 AG-UI token 级流式 SSE 输出。"""
+    """运行 LangGraph Agent 并以 AG-UI token 级流式 SSE 输出。
+
+    Args:
+        use_v3: If True, use v3 ReAct architecture. Default False (v2).
+    """
+    if use_v3:
+        async for event in _run_v3_agent(user_message, conversation_id, model, db_connection_id):
+            yield event
+        return
+
     graph = build_graph()
 
     # Load conversation history for multi-turn context

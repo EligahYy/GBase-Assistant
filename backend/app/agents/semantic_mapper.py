@@ -386,8 +386,7 @@ class _LiteLLMChatAdapter(BaseChatModel):
 
     def __init__(self, llm_client):
         from langchain_core.language_models import BaseChatModel
-        super().__init__()
-        self.llm_client = llm_client
+        super().__init__(llm_client=llm_client)
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         raise NotImplementedError("Use async version")
