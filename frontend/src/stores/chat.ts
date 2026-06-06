@@ -41,6 +41,10 @@ export interface Message {
   isStreaming?: boolean
   streamContent?: string
   streamSql?: string
+  thinking?: string
+  isThinking?: boolean
+  toolCalls?: ToolCallEntry[]
+  activeAgent?: string | null
 }
 
 export interface Conversation {

@@ -8,6 +8,8 @@ import {
 import { NIcon } from 'naive-ui'
 
 import MessageBubble from './MessageBubble.vue'
+import ThinkingSection from './ThinkingSection.vue'
+import ToolCallCard from './ToolCallCard.vue'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useSSE } from '@/composables/useSSE'
@@ -130,6 +132,34 @@ async function sendMessage() {
       } else if (path === 'chart_config') {
         chatStore.setStreamChartConfig(streamingId, value)
       }
+    } else if (chunk.type === 'THINKING_START') {
+      chatStore.setThinking(true)
+    } else if (chunk.type === 'THINKING_CONTENT') {
+      chatStore.appendThinkingToken(chunk.delta || '')
+    } else if (chunk.type === 'THINKING_END') {
+      chatStore.setThinking(false)
+    } else if (chunk.type === 'TOOL_CALL_START') {
+      chatStore.addToolCall({
+        id: `${chunk.tool_name}-${Date.now()}`,
+        name: chunk.tool_name || 'unknown',
+        args: (chunk.args as Record<string, unknown>) || {},
+        status: 'running',
+        agentName: chunk.agent_name || 'unknown',
+      })
+    } else if (chunk.type === 'TOOL_CALL_RESULT') {
+      const result = chunk.result as any
+      chatStore.updateToolCallStatus(
+        chunk.tool_name || 'unknown',
+        result?.error ? 'error' : 'done',
+        result?.summary,
+        result?.error,
+      )
+    } else if (chunk.type === 'TOOL_CALL_END') {
+      // Tool call cycle complete
+    } else if (chunk.type === 'STEP_STARTED') {
+      chatStore.setActiveAgent(chunk.agent_name || null)
+    } else if (chunk.type === 'STEP_FINISHED') {
+      // Step complete, keep agent context
     }
   })
 
