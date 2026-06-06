@@ -1,11 +1,37 @@
 import { ref } from 'vue'
 
+export interface ToolCallStartPayload {
+  name: string
+  args?: Record<string, unknown>
+  agent_name?: string
+}
+
+export interface ToolCallResultPayload {
+  name: string
+  result?: Record<string, unknown>
+  error?: string
+}
+
 export interface SSEChunk {
-  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error' | 'result' | 'result_error' | 'message_ids' | 'TEXT_MESSAGE_CONTENT' | 'chart_config' | 'STATE_DELTA'
+  type:
+    | 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error'
+    | 'result' | 'result_error' | 'message_ids'
+    | 'TEXT_MESSAGE_CONTENT' | 'STATE_DELTA' | 'chart_config'
+    // Thinking visibility
+    | 'THINKING_START' | 'THINKING_CONTENT' | 'THINKING_END'
+    // Tool call lifecycle
+    | 'TOOL_CALL_START' | 'TOOL_CALL_RESULT' | 'TOOL_CALL_END'
+    // Step lifecycle
+    | 'STEP_STARTED' | 'STEP_FINISHED'
   content?: string
   delta?: string
   path?: string
   value?: any
+  tool_name?: string
+  agent_name?: string
+  args?: Record<string, unknown>
+  result?: Record<string, unknown>
+  step_index?: number
   token_usage?: Record<string, unknown>
 }
 
