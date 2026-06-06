@@ -305,15 +305,45 @@ export const useChatStore = defineStore('chat', () => {
     if (!active) thinkingText.value = ''
   }
 
-  function appendThinkingToken(token: string) {
+  function appendThinkingToken(id: string, token: string) {
+    // Per-message thinking (for MessageBubble rendering)
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg) {
+      msg.thinking = (msg.thinking ?? '') + token
+      msg.isThinking = true
+    }
+    // Also update global (backward compat)
     thinkingText.value += token
+    isThinking.value = true
   }
 
-  function addToolCall(tc: ToolCallEntry) {
+  function setThinkingDone(id: string) {
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg) msg.isThinking = false
+    // Also update global
+    isThinking.value = false
+  }
+
+  function addToolCall(id: string, tc: ToolCallEntry) {
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg) {
+      msg.toolCalls = [...(msg.toolCalls ?? []), tc]
+    }
     toolCalls.value = [...toolCalls.value, tc]
   }
 
-  function updateToolCallStatus(name: string, status: 'done' | 'error', result?: string, error?: string) {
+  function updateToolCallStatus(id: string, name: string, status: 'done' | 'error', result?: string, error?: string) {
+    // Update per-message tool call
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg && msg.toolCalls) {
+      const msgIdx = msg.toolCalls.findIndex(tc => tc.name === name && tc.status === 'running')
+      if (msgIdx >= 0) {
+        const updated = [...msg.toolCalls]
+        updated[msgIdx] = { ...updated[msgIdx], status, result, error }
+        msg.toolCalls = updated
+      }
+    }
+    // Also update global
     const idx = toolCalls.value.findIndex(tc => tc.name === name && tc.status === 'running')
     if (idx >= 0) {
       const updated = [...toolCalls.value]
@@ -322,7 +352,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function setActiveAgent(name: string | null) {
+  function setActiveAgent(id: string, name: string | null) {
+    const msg = messages.value.find((m) => m.id === id)
+    if (msg) msg.activeAgent = name
     activeAgent.value = name
   }
 
@@ -369,6 +401,7 @@ export const useChatStore = defineStore('chat', () => {
     removeFolder,
     batchOperate,
     setThinking,
+    setThinkingDone,
     appendThinkingToken,
     addToolCall,
     updateToolCallStatus,

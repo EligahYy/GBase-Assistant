@@ -384,6 +384,55 @@ async def _response_formatter_node(state: AgentState) -> dict:
 # Agent Runner
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+# ── 监控快速路径：关键词匹配直接查询，跳过 LLM ──
+
+_MONITORING_PATTERNS = [
+    "连接状态", "连接数", "多少条", "sql在跑", "运行了多久",
+    "数据库状态", "慢查询", "连接信息", "数据库连接",
+    "多少连接", "活跃查询", "表概况", "运行时间",
+]
+
+
+async def _monitoring_fast_path(db_connection_id: str | None) -> AsyncIterator[str]:
+    """Execute database status query directly, bypassing the Agent graph."""
+    if not db_connection_id:
+        yield EventEncoder.text_delta("当前未选择数据库连接。请先在左侧设置中添加并选择一个 GBase 8a 数据库连接。")
+        yield EventEncoder.run_finished()
+        return
+
+    from app.agents.tools.status_tool import GetDatabaseStatusTool
+    import json
+
+    tool = GetDatabaseStatusTool(db_connection_id=db_connection_id)
+    raw_json = await tool.execute()
+
+    try:
+        status_data = json.loads(raw_json)
+        lines = ["**数据库状态概览**\n"]
+        for label, data in status_data.items():
+            if isinstance(data, dict) and "error" in data:
+                lines.append(f"### {label}\n> 错误: {data['error']}")
+            elif isinstance(data, dict) and data.get("rows") and data["rows"]:
+                cols = data["columns"]
+                line = f"### {label}"
+                if len(cols) == 1 and data["row_count"] == 1:
+                    line += f"\n{cols[0]}: **{data['rows'][0][0]}**"
+                else:
+                    line += f"\n| {' | '.join(cols)} |"
+                    line += f"\n|{'|'.join(['---' for _ in cols])}|"
+                    for row in data["rows"][:20]:
+                        line += f"\n| {' | '.join(str(c) for c in row)} |"
+                lines.append(line)
+            else:
+                lines.append(f"### {label}\n> 无数据")
+        formatted = "\n\n".join(lines)
+    except (json.JSONDecodeError, TypeError):
+        formatted = f"数据库状态查询结果:\n{raw_json}"
+
+    yield EventEncoder.text_delta(formatted)
+    yield EventEncoder.run_finished()
+
+
 async def run_agent_with_ag_ui(
     user_message: str,
     conversation_id: str,
@@ -391,6 +440,13 @@ async def run_agent_with_ag_ui(
     db_connection_id: str | None = None,
 ) -> AsyncIterator[str]:
     """运行 v3 ReAct Agent 并以 AG-UI SSE 流式输出。"""
+
+    # ── 监控快速路径：关键词匹配直接查询数据库状态，跳过 Agent 图 ──
+    if any(p in user_message for p in _MONITORING_PATTERNS):
+        async for event in _monitoring_fast_path(db_connection_id):
+            yield event
+        return
+
     graph = build_graph(db_connection_id=db_connection_id or "")
 
     # Load conversation history

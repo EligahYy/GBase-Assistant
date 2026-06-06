@@ -135,11 +135,11 @@ async function sendMessage() {
     } else if (chunk.type === 'THINKING_START') {
       chatStore.setThinking(true)
     } else if (chunk.type === 'THINKING_CONTENT') {
-      chatStore.appendThinkingToken(chunk.delta || '')
+      chatStore.appendThinkingToken(streamingId, chunk.delta || '')
     } else if (chunk.type === 'THINKING_END') {
-      chatStore.setThinking(false)
+      chatStore.setThinkingDone(streamingId)
     } else if (chunk.type === 'TOOL_CALL_START') {
-      chatStore.addToolCall({
+      chatStore.addToolCall(streamingId, {
         id: `${chunk.tool_name}-${Date.now()}`,
         name: chunk.tool_name || 'unknown',
         args: (chunk.args as Record<string, unknown>) || {},
@@ -149,6 +149,7 @@ async function sendMessage() {
     } else if (chunk.type === 'TOOL_CALL_RESULT') {
       const result = chunk.result as any
       chatStore.updateToolCallStatus(
+        streamingId,
         chunk.tool_name || 'unknown',
         result?.error ? 'error' : 'done',
         result?.summary,
@@ -157,7 +158,7 @@ async function sendMessage() {
     } else if (chunk.type === 'TOOL_CALL_END') {
       // Tool call cycle complete
     } else if (chunk.type === 'STEP_STARTED') {
-      chatStore.setActiveAgent(chunk.agent_name || null)
+      chatStore.setActiveAgent(streamingId, chunk.agent_name || null)
     } else if (chunk.type === 'STEP_FINISHED') {
       // Step complete, keep agent context
     }
