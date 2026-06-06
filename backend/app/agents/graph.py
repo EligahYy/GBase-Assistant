@@ -143,20 +143,20 @@ def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_ke
 
         tool_calls, text = _parse_tool_calls(response)
 
-        if text and not tool_calls:
+        # Emit text content if present (even alongside tool_calls — some models output both)
+        if text:
             _emit("delta", text)
+
+        if not tool_calls:
+            # Pure text response — agent is done
             _emit("step_finished", {"agent_name": agent_name})
             return {step_key: step_idx + 1, finished_key: True, "messages": [response]}
 
-        if tool_calls:
-            _emit("thinking_start", {})
-            _emit("thinking_delta", f"调用 {len(tool_calls)} 个工具: {', '.join(tc['name'] for tc in tool_calls)}")
-            _emit("thinking_end", {})
-            return {step_key: step_idx + 1, "messages": [response]}
-
-        _emit("delta", "处理完成。")
-        _emit("step_finished", {"agent_name": agent_name})
-        return {step_key: step_idx + 1, finished_key: True, "messages": [AIMessage(content="处理完成。")]}
+        # Has tool calls — emit thinking and proceed to tool execution
+        _emit("thinking_start", {})
+        _emit("thinking_delta", f"调用 {len(tool_calls)} 个工具: {', '.join(tc['name'] for tc in tool_calls)}")
+        _emit("thinking_end", {})
+        return {step_key: step_idx + 1, "messages": [response]}
 
     return node_fn
 
@@ -329,9 +329,9 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     async def _specialist_return(state: AgentState) -> dict:
         return {
             "delegation_count": state.get("delegation_count", 0) + 1,
+            "supervisor_step": 0, "supervisor_finished": False,
             "sql_step": 0, "sql_finished": False,
             "knowledge_step": 0, "knowledge_finished": False,
-            "supervisor_finished": False,
         }
 
     builder.add_node("_specialist_return", _specialist_return)
@@ -376,6 +376,17 @@ async def _response_formatter_node(state: AgentState) -> dict:
 
     if not final_text:
         final_text = "处理完成。如有其他问题，请继续提问。"
+
+    # Emit structured events: extract SQL blocks from response text
+    import re as _re
+    sql_match = _re.search(r'```sql\s*\n(.*?)\n```', final_text, _re.DOTALL)
+    if sql_match:
+        try:
+            writer = get_stream_writer()
+            sql = sql_match.group(1).strip()
+            writer([{"sql": sql}])
+        except RuntimeError:
+            pass
 
     return {"final_response": final_text}
 
@@ -510,10 +521,16 @@ async def run_agent_with_ag_ui(
                             yield EventEncoder.step_finished(info.get("agent_name", "unknown"))
                         elif "tool_call_start" in ev:
                             info = ev["tool_call_start"]
-                            yield EventEncoder.tool_call_start(info["name"], info.get("args"))
+                            yield EventEncoder.tool_call_start(
+                                info["name"], info.get("args"), info.get("agent_name", "")
+                            )
                         elif "tool_call_result" in ev:
                             info = ev["tool_call_result"]
-                            yield EventEncoder.tool_call_result(info["name"], info.get("result", {}))
+                            result = info.get("result", {})
+                            # Preserve error info so frontend can display failure status
+                            if "error" in info and "error" not in result:
+                                result = {**result, "error": info["error"]} if isinstance(result, dict) else {"error": info["error"]}
+                            yield EventEncoder.tool_call_result(info["name"], result)
                         elif "tool_call_end" in ev:
                             info = ev["tool_call_end"]
                             yield EventEncoder.tool_call_end(info.get("name", "unknown"))

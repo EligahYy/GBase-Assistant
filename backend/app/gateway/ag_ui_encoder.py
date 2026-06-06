@@ -50,14 +50,14 @@ class EventEncoder:
         return EventEncoder._encode(EventType.TEXT_MESSAGE_CONTENT, delta=content)
 
     @staticmethod
-    def tool_call_start(tool_name: str, args: dict | None = None) -> str:
+    def tool_call_start(tool_name: str, args: dict | None = None, agent_name: str = "") -> str:
         return EventEncoder._encode(
-            EventType.TOOL_CALL_START, tool_name=tool_name, args=args or {}
+            EventType.TOOL_CALL_START, tool_name=tool_name, args=args or {}, agent_name=agent_name
         )
 
     @staticmethod
-    def tool_call_end(tool_name: str) -> str:
-        return EventEncoder._encode(EventType.TOOL_CALL_END, tool_name=tool_name)
+    def tool_call_end(tool_name: str, agent_name: str = "") -> str:
+        return EventEncoder._encode(EventType.TOOL_CALL_END, tool_name=tool_name, agent_name=agent_name)
 
     @staticmethod
     def tool_call_result(tool_name: str, result: dict) -> str:

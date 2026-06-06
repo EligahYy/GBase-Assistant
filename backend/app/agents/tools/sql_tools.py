@@ -181,18 +181,18 @@ class ExecuteSQLTool:
                     select(DbConnection).where(DbConnection.id == self._db_connection_id)
                 )
                 conn = result.scalar_one_or_none()
+                # Extract fields while session is still open
+                if not conn or conn.driver_type == "manual":
+                    return {"error": "数据库连接不可用"}
+                driver_type = conn.driver_type
+                conn_config = _to_connection_config(conn)
 
-            if not conn or conn.driver_type == "manual":
-                return {"error": "数据库连接不可用"}
-
-            connector = get_connector(conn.driver_type)
+            connector = get_connector(driver_type)
             if not connector:
-                return {"error": f"驱动 {conn.driver_type} 不可用"}
-
-            config = _to_connection_config(conn)
+                return {"error": f"驱动 {driver_type} 不可用"}
             sandbox = SQLSandbox()
             query_result = await sandbox.execute_readonly(
-                connector, config, query, max_rows=1000, timeout_seconds=30
+                connector, conn_config, query, max_rows=1000, timeout_seconds=30
             )
 
             return {

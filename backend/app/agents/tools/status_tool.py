@@ -67,12 +67,12 @@ class GetDatabaseStatusTool:
                 select(DbConnection).where(DbConnection.id == self._db_connection_id)
             )
             conn = result.scalar_one_or_none()
+            if not conn:
+                return {"error": "连接不存在"}
+            driver_type = conn.driver_type
+            conn_config = _to_connection_config(conn)
 
-        if not conn:
-            return {"error": "连接不存在"}
-
-        connector = get_connector(conn.driver_type)
-        config = _to_connection_config(conn)
+        connector = get_connector(driver_type)
 
         queries = {
             "连接数": "SELECT COUNT(*) AS cnt FROM information_schema.PROCESSLIST",
@@ -96,7 +96,7 @@ class GetDatabaseStatusTool:
             try:
                 sandbox = SQLSandbox()
                 qr = await sandbox.execute_readonly(
-                    connector, config, sql, max_rows=100, timeout_seconds=10
+                    connector, conn_config, sql, max_rows=100, timeout_seconds=10
                 )
                 return label, {
                     "columns": qr.columns,
