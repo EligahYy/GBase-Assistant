@@ -313,9 +313,503 @@ _tool_registry = ToolRegistry()
 | (none) | `DelegateToSQLAgent` | Supervisor |
 | (none) | `DelegateToKnowledgeAgent` | Supervisor |
 
-## 5. State 重构
+## 5. 流式可见性：思考 + Tool 调用全透明
 
-### 5.1 当前 State 的问题
+### 5.1 目标体验（参考 Claude Code）
+
+用户应该能看到 Agent 的**完整思考链**：
+
+```
+🔍 正在思考...
+   用户想查询上个月的销售额，这需要 SQL 查询能力。
+   委托给 SQL Agent...
+
+📞 调用工具: delegate_to_sql_specialist
+   └─ 参数: {"query": "上个月各产品销售额统计"}
+
+  ┌─ SQL Agent ─────────────────────────────────────┐
+  │ 🔍 正在思考...                                    │
+  │   首先需要找到存储销售数据的表                      │
+  │                                                   │
+  │ 📞 调用工具: search_schemas                        │
+  │    └─ 参数: {"query": "产品销售额"}                 │
+  │    ✅ 返回: 找到 orders, products, order_items      │
+  │                                                   │
+  │ 🔍 正在思考...                                    │
+  │   找到了 3 张相关表，查看列结构确认字段              │
+  │                                                   │
+  │ 📞 调用工具: get_table_profile                     │
+  │    └─ 参数: {"table": "orders"}                   │
+  │    ✅ 返回: 12 列 (id, amount, created_at, ...)    │
+  │                                                   │
+  │ 📞 调用工具: get_table_profile                     │
+  │    └─ 参数: {"table": "products"}                 │
+  │    ✅ 返回: 8 列 (id, name, category_id, ...)      │
+  │                                                   │
+  │ 🔍 正在思考...                                    │
+  │   信息已足够。需要 JOIN orders 和 products。        │
+  │   生成 SQL...                                     │
+  │                                                   │
+  │ ```sql                                            │
+  │ SELECT p.name, SUM(o.amount) AS total             │
+  │ FROM orders o                                     │
+  │ JOIN products p ON o.product_id = p.id             │
+  │ WHERE o.created_at >= CURDATE() - INTERVAL 1 MONTH │
+  │ GROUP BY p.name                                   │
+  │ ORDER BY total DESC                               │
+  │ ```                                               │
+  │                                                   │
+  │ 🔍 正在思考...                                    │
+  │   先验证 SQL 语法和 Schema 一致性                   │
+  │                                                   │
+  │ 📞 调用工具: validate_sql                          │
+  │    └─ 参数: {"sql": "SELECT p.name..."}            │
+  │    ✅ 返回: {valid: true}                          │
+  │                                                   │
+  │ 📞 调用工具: execute_sql                           │
+  │    └─ 参数: {"sql": "SELECT p.name..."}            │
+  │    ✅ 返回: 5 行, 耗时 42ms                         │
+  └──────────────────────────────────────────────────┘
+
+🔍 正在思考...
+   SQL Agent 已完成查询，整理结果...
+
+📊 查询结果: 5 行
+📈 图表配置: 柱状图
+```
+
+### 5.2 AG-UI 事件扩展
+
+当前 `EventEncoder` 已支持 `TOOL_CALL_START` / `TOOL_CALL_RESULT` / `TOOL_CALL_END`，但缺少 **思考过程** 和 **步骤边界** 事件。
+
+#### 新增事件类型
+
+```python
+class EventType(StrEnum):
+    # ── 现有 ──
+    TEXT_MESSAGE_CONTENT = "TEXT_MESSAGE_CONTENT"
+    TOOL_CALL_START = "TOOL_CALL_START"
+    TOOL_CALL_RESULT = "TOOL_CALL_RESULT"
+    TOOL_CALL_END = "TOOL_CALL_END"
+    STATE_DELTA = "STATE_DELTA"
+    RUN_STARTED = "RUN_STARTED"
+    RUN_FINISHED = "RUN_FINISHED"
+    RUN_ERROR = "RUN_ERROR"
+
+    # ── 🆕 思考可见性 ──
+    THINKING_START = "THINKING_START"       # 开始思考（前端展示折叠区）
+    THINKING_CONTENT = "THINKING_CONTENT"   # 思考内容 delta 流式
+    THINKING_END = "THINKING_END"           # 思考结束
+
+    # ── 🆕 步骤生命周期 ──
+    STEP_STARTED = "STEP_STARTED"           # Agent 步骤开始（标注是哪个 Agent）
+    STEP_FINISHED = "STEP_FINISHED"         # Agent 步骤结束
+```
+
+#### EventEncoder 新增方法
+
+```python
+@staticmethod
+def thinking_start() -> str:
+    return EventEncoder._encode(EventType.THINKING_START)
+
+@staticmethod
+def thinking_delta(delta: str) -> str:
+    return EventEncoder._encode(EventType.THINKING_CONTENT, delta=delta)
+
+@staticmethod
+def thinking_end() -> str:
+    return EventEncoder._encode(EventType.THINKING_END)
+
+@staticmethod
+def step_started(agent_name: str, step_index: int = 0) -> str:
+    return EventEncoder._encode(
+        EventType.STEP_STARTED,
+        agent_name=agent_name,
+        step_index=step_index,
+    )
+
+@staticmethod
+def step_finished(agent_name: str) -> str:
+    return EventEncoder._encode(
+        EventType.STEP_FINISHED,
+        agent_name=agent_name,
+    )
+```
+
+### 5.3 ReAct 循环中的事件发射
+
+每个 Agent 的 ReAct 循环需要在关键节点发射事件。关键切入点：**通过 LangGraph 的 `get_stream_writer()` 在 tool 执行前后发射事件**。
+
+#### 方案：自定义 ReAct Agent（替代 `create_react_agent`）
+
+`langgraph.prebuilt.create_react_agent` 是一个黑盒 — 它的内部 tool 调用和推理过程无法插入自定义事件。需要替换为**自定义 ReAct 图**：
+
+```python
+def build_react_agent(
+    model: BaseChatModel,
+    tools: list[AgentTool],
+    system_prompt: str,
+    agent_name: str,
+    max_iterations: int = 15,
+) -> StateGraph:
+    """构建自定义 ReAct Agent 子图，在 tool 调用和推理过程中发射流式事件。"""
+
+    builder = StateGraph(ReActState)
+
+    builder.add_node("agent", _react_agent_node(model, tools, system_prompt))
+    builder.add_node("tools", _tool_execution_node(tools, agent_name))
+
+    builder.add_edge(START, "agent")
+
+    # Agent 节点输出 → 路由: 有 tool_call → 执行 tools, 否则 → END
+    builder.add_conditional_edges("agent", _route_after_agent, {
+        "tools": "tools",
+        "end": END,
+    })
+
+    # tools 节点执行完毕后回到 agent（ReAct 循环）
+    builder.add_edge("tools", "agent")
+
+    return builder.compile()
+```
+
+#### Agent 节点：发射 THINKING 事件
+
+```python
+async def _react_agent_node(model, tools, system_prompt):
+    """ReAct Agent 推理节点 — 流式发射 THINKING 事件。"""
+
+    async def node_fn(state: ReActState) -> dict:
+        writer = get_stream_writer()
+
+        # 🆕 发射 STEP_STARTED（仅首次）
+        if state.get("step_index", 0) == 0:
+            writer([{"step_started": {"agent_name": agent_name}}])
+
+        messages = state["messages"]
+
+        # 流式调用 LLM，将推理过程作为 THINKING 事件发射
+        thinking_buffer = ""
+        async for token in model.astream(messages):
+            thinking_buffer += token
+
+            # 🆕 发射 THINKING_CONTENT delta
+            writer([{"thinking_delta": token}])
+
+        # 解析 LLM 输出中的 tool_call 或 text response
+        last_msg = ...  # 从 LLM 输出中提取
+
+        if has_tool_calls(last_msg):
+            return {"messages": [last_msg], "step_index": state.get("step_index", 0) + 1}
+        else:
+            # 最终文本输出
+            if last_msg.content:
+                writer([{"delta": last_msg.content}])
+            return {"messages": [last_msg], "finished": True}
+
+    return node_fn
+```
+
+#### Tools 节点：发射 TOOL_CALL 事件
+
+```python
+async def _tool_execution_node(tools: list[AgentTool], agent_name: str):
+    """执行 tool 并发射 TOOL_CALL_START / TOOL_CALL_RESULT / TOOL_CALL_END 事件。"""
+
+    async def node_fn(state: ReActState) -> dict:
+        writer = get_stream_writer()
+        last_msg = state["messages"][-1]
+        tool_calls = last_msg.tool_calls  # 从 AI 消息中提取
+
+        tool_messages = []
+        for tc in tool_calls:
+            tool_name = tc["name"]
+            tool_args = tc["args"]
+
+            # 🆕 发射 TOOL_CALL_START
+            writer([{
+                "tool_call_start": {
+                    "name": tool_name,
+                    "args": tool_args,
+                    "agent_name": agent_name,
+                }
+            }])
+
+            # 执行 tool
+            tool = tool_registry.get(tool_name)
+            try:
+                result = await tool.execute(**tool_args)
+                result_str = tool.format_result(result)  # 截断/格式化
+
+                # 🆕 发射 TOOL_CALL_RESULT
+                writer([{
+                    "tool_call_result": {
+                        "name": tool_name,
+                        "result": result_str,
+                    }
+                }])
+            except Exception as e:
+                writer([{
+                    "tool_call_result": {
+                        "name": tool_name,
+                        "error": str(e),
+                    }
+                }])
+
+            # 🆕 发射 TOOL_CALL_END
+            writer([{"tool_call_end": {"name": tool_name}}])
+
+            tool_messages.append(ToolMessage(content=result_str, tool_call_id=tc["id"]))
+
+        return {"messages": tool_messages}
+
+    return node_fn
+```
+
+### 5.4 图层的流式适配
+
+Supervisor 的 `graph.py` 需要处理两类流事件：
+
+```python
+async def run_agent_with_ag_ui(user_message, conversation_id, model, db_connection_id):
+    ...
+    async for mode, events in graph.astream(initial_state, config=config, stream_mode=["custom", "updates"]):
+        if mode == "custom":
+            for ev in events:
+                if isinstance(ev, dict):
+                    # ── 🆕 思考事件 ──
+                    if "thinking_delta" in ev:
+                        yield EventEncoder.thinking_delta(ev["thinking_delta"])
+
+                    # ── 🆕 步骤事件 ──
+                    elif "step_started" in ev:
+                        info = ev["step_started"]
+                        yield EventEncoder.step_started(info["agent_name"])
+
+                    # ── 🆕 Tool 调用事件 ──
+                    elif "tool_call_start" in ev:
+                        info = ev["tool_call_start"]
+                        yield EventEncoder.tool_call_start(info["name"], info.get("args"))
+
+                    elif "tool_call_result" in ev:
+                        info = ev["tool_call_result"]
+                        yield EventEncoder.tool_call_result(info["name"], info.get("result", {}))
+
+                    elif "tool_call_end" in ev:
+                        yield EventEncoder.tool_call_end(ev["tool_call_end"]["name"])
+
+                    # ── 现有事件 ──
+                    elif "delta" in ev:
+                        yield EventEncoder.text_delta(ev["delta"])
+                    elif "sql" in ev:
+                        yield EventEncoder.sql_event(ev["sql"])
+                    elif "chart_config" in ev:
+                        yield EventEncoder.chart_config(ev["chart_config"])
+                    elif "result" in ev:
+                        yield EventEncoder.result_event(ev["result"])
+    ...
+```
+
+### 5.5 前端适配
+
+#### useSSE.ts — 新增事件处理
+
+```typescript
+export interface SSEChunk {
+  type: 'text' | 'sql' | 'sources' | 'warning' | 'done' | 'error'
+    | 'result' | 'result_error' | 'message_ids'
+    | 'TEXT_MESSAGE_CONTENT' | 'STATE_DELTA' | 'chart_config'
+    // 🆕
+    | 'THINKING_START' | 'THINKING_CONTENT' | 'THINKING_END'
+    | 'TOOL_CALL_START' | 'TOOL_CALL_RESULT' | 'TOOL_CALL_END'
+    | 'STEP_STARTED' | 'STEP_FINISHED'
+  delta?: string
+  tool_name?: string
+  agent_name?: string
+  args?: Record<string, unknown>
+  result?: Record<string, unknown>
+  step_index?: number
+  // ...
+}
+```
+
+#### Chat Store — 新增状态管理
+
+```typescript
+// 流式消息中可追加的中间状态
+interface StreamingState {
+  // 思考内容（折叠区内）
+  thinking: string          // 当前思考文本
+  isThinking: boolean       // 是否正在思考
+
+  // Tool 调用历史
+  toolCalls: ToolCallEntry[]
+
+  // 当前活跃的 Agent
+  activeAgent: string | null
+  agentStepIndex: number
+}
+
+interface ToolCallEntry {
+  id: string
+  name: string
+  args: Record<string, unknown>
+  result?: string
+  error?: string
+  status: 'pending' | 'running' | 'done' | 'error'
+  agentName: string
+}
+```
+
+#### MessageBubble.vue — 思考 + Tool 可见渲染
+
+在每条 AI 消息气泡内，渲染：
+
+1. **思考折叠区**（`THINKING_CONTENT`）
+   - 默认折叠，用灰色斜体显示
+   - 流式过程中自动展开
+   - 标题："🔍 思考中..." → "💭 思考过程"（完成后）
+
+2. **Tool 调用卡片**（`TOOL_CALL_START` / `TOOL_CALL_RESULT`）
+   - 紧凑卡片：图标 + tool name + 参数摘要
+   - 状态指示：🔄 执行中 / ✅ 完成 / ❌ 失败
+   - 点击展开查看完整参数和返回值
+
+3. **Agent 切换指示**（`STEP_STARTED`）
+   - "🤖 SQL Agent 正在处理..." / "📚 Knowledge Agent 检索中..."
+   - 缩进层级表示嵌套关系
+
+```
+┌─ AI Message ─────────────────────────────────────┐
+│                                                   │
+│  💭 思考过程                          [展开/折叠]  │
+│  ┌─────────────────────────────────────────────┐ │
+│  │ 用户想查询上个月的销售额，需要 SQL...         │ │
+│  │ 委托给 SQL Agent...                          │ │
+│  └─────────────────────────────────────────────┘ │
+│                                                   │
+│  🤖 SQL Agent 处理中                             │
+│  ┌─────────────────────────────────────────────┐ │
+│  │ 💭 思考...    首先需要找到销售相关的表        │ │
+│  │                                              │ │
+│  │ 📞 search_schemas              ✅ 完成       │ │
+│  │    参数: {"query": "产品销售额"}              │ │
+│  │    结果: 找到 orders, products                │ │
+│  │                                              │ │
+│  │ 📞 get_table_profile            ✅ 完成       │ │
+│  │    参数: {"table": "orders"}                 │ │
+│  │    结果: 12 列                              │ │
+│  │                                              │ │
+│  │ 💭 思考...    信息足够，开始生成 SQL          │ │
+│  │                                              │ │
+│  │ 📞 validate_sql                 ✅ 通过       │ │
+│  │ 📞 execute_sql                  ✅ 5行, 42ms  │ │
+│  └─────────────────────────────────────────────┘ │
+│                                                   │
+│  ```sql                                          │
+│  SELECT p.name, SUM(o.amount) AS total           │
+│  FROM orders o                                   │
+│  JOIN products p ON o.product_id = p.id           │
+│  ...                                             │
+│  ```                                             │
+│                                                   │
+│  📊 查询结果: 5 行                                │
+│  ┌──────────┬──────────┐                        │
+│  │ name     │ total    │                        │
+│  ├──────────┼──────────┤                        │
+│  │ 产品A    │ 150,000  │                        │
+│  │ 产品B    │ 120,000  │                        │
+│  └──────────┴──────────┘                        │
+└───────────────────────────────────────────────────┘
+```
+
+### 5.6 流式事件时序
+
+完整时序（SQL 查询场景）：
+
+```
+Time ──────────────────────────────────────────────────────────→
+
+RUN_STARTED
+│
+├─ STEP_STARTED {agent: "supervisor"}
+│   THINKING_START
+│   THINKING_CONTENT: "这是数据查询..." (delta 流式)
+│   THINKING_END
+│   TOOL_CALL_START {name: "delegate_to_sql_specialist"}
+│   TOOL_CALL_END {name: "delegate_to_sql_specialist"}
+│   │
+│   ├─ STEP_STARTED {agent: "sql_agent"}   ← 嵌套在 SQL SubGraph 内
+│   │   THINKING_START
+│   │   THINKING_CONTENT: "先找相关表..."
+│   │   THINKING_END
+│   │   TOOL_CALL_START {name: "search_schemas"}
+│   │   TOOL_CALL_RESULT {name: "search_schemas", result: {...}}
+│   │   TOOL_CALL_END {name: "search_schemas"}
+│   │   ... (更多 tool 调用)
+│   │   TEXT_MESSAGE_CONTENT: "```sql\nSELECT ...\n```"
+│   │   STATE_DELTA {path: "sql"}
+│   │   STATE_DELTA {path: "result"}
+│   │   STATE_DELTA {path: "chart_config"}
+│   ├─ STEP_FINISHED {agent: "sql_agent"}
+│   │
+│   TOOL_CALL_RESULT {name: "delegate_to_sql_specialist"}
+│   THINKING_START
+│   THINKING_CONTENT: "整理结果..."
+│   THINKING_END
+├─ STEP_FINISHED {agent: "supervisor"}
+│
+TEXT_MESSAGE_CONTENT: "查询完成，共 5 条记录..."
+RUN_FINISHED
+```
+
+### 5.7 Tool 结果格式化
+
+为避免 SSE 传输超大 payload，Tool 结果需要在服务端截断/格式化：
+
+```python
+class AgentTool(Protocol):
+    # ...
+
+    def format_result(self, result: Any) -> dict:
+        """将 tool 执行结果格式化为前端可展示的结构。
+
+        Returns:
+            {
+                "summary": "找到 3 张表: orders, products, order_items",
+                "detail": {...},  # 可选，完整数据供前端展开
+                "truncated": bool,
+            }
+        """
+        ...
+
+# 各 Tool 的格式化规则
+TOOL_RESULT_FORMAT = {
+    "search_schemas": lambda r: {
+        "summary": f"找到 {len(r)} 张表: {', '.join(t.table_name for t in r[:5])}",
+        "detail": [{"table": t.table_name, "description": t.description} for t in r[:5]],
+        "truncated": len(r) > 5,
+    },
+    "get_table_profile": lambda r: {
+        "summary": f"{r['table_name']}: {len(r['columns'])} 列",
+        "detail": r,
+    },
+    "execute_sql": lambda r: {
+        "summary": f"{r['row_count']} 行, {r['execution_time_ms']}ms",
+        "detail": {"columns": r["columns"], "rows": r["rows"][:20]},
+        "truncated": r.get("truncated", False),
+    },
+    "validate_sql": lambda r: {
+        "summary": "✅ 验证通过" if r["valid"] else f"❌ {len(r['errors'])} 个错误",
+        "detail": r,
+    },
+}
+```
+
+## 6. State 重构
+
+### 6.1 当前 State 的问题
 
 24 个扁平字段，所有 Agent 共享同一个 TypedDict。字段虽然标注了"所有权"，但技术上任何节点都能读写任意字段。
 
@@ -374,9 +868,9 @@ class AgentState(TypedDict, total=False):
 - Knowledge Agent 只写 `state["knowledge"]` 下的字段
 - 跨 Agent 通信通过**消息**（Supervisor 的 delegate tool 参数和返回值），而非直接读写对方 state
 
-## 6. 图结构
+## 7. 图结构
 
-### 6.1 新图定义（伪代码）
+### 7.1 新图定义（伪代码）
 
 ```python
 def build_v3_graph() -> StateGraph:
@@ -407,7 +901,7 @@ def build_v3_graph() -> StateGraph:
     return builder.compile(checkpointer=MemorySaver())
 ```
 
-### 6.2 与 v2 图的对比
+### 7.2 与 v2 图的对比
 
 | 维度 | v2 | v3 |
 |------|-----|-----|
@@ -416,7 +910,7 @@ def build_v3_graph() -> StateGraph:
 | 循环 | `sql_verifier → sql_specialist`（硬编码最多 3 次） | Agent 内部 ReAct 循环（自主决定） |
 | 路由逻辑 | `route_after_intent()`, `route_after_supervisor()`, `route_verifier()` | Supervisor LLM tool_call 决策 |
 
-## 7. 文件结构变化
+## 8. 文件结构变化
 
 ```
 backend/app/agents/
@@ -442,22 +936,27 @@ backend/app/agents/
 └── orchestrator.py       # 废弃，关键字分类逻辑移除
 ```
 
-## 8. 迁移策略
+## 9. 迁移策略
 
-### Phase 1: Tool 标准化（不改变行为）
+### Phase 1: Tool 标准化 + 流式事件（不改变行为）
 
-1. 定义 `AgentTool` Protocol + `ToolRegistry`
+1. 定义 `AgentTool` Protocol + `ToolRegistry` + `format_result()` 接口
 2. 将现有 6 个闭包 tool 改写为标准 Tool 类
-3. 保持 `semantic_mapper_node` 不变，只替换 tool 创建方式
-4. 验证：163 个现有测试全部通过
+3. 新增 AG-UI 事件类型：`THINKING_START/CONTENT/END`、`STEP_STARTED/FINISHED`
+4. 新增 `EventEncoder` 对应编码方法
+5. 前端 `useSSE.ts` 新增事件类型定义
+6. 保持现有图节点不变，只替换 tool 创建方式
+7. 验证：163 个现有测试全部通过
 
-### Phase 2: Agent 收敛
+### Phase 2: Agent 收敛 + 自定义 ReAct 图
 
-1. 实现 `SQLAgent`（ReAct），将 `semantic_mapper` + `sql_specialist` + `sql_verifier` + `sql_executor` 合并
-2. 实现 `KnowledgeAgent`（ReAct），替代 `knowledge_specialist`
-3. 实现 `SupervisorAgent`（ReAct），替代 `orchestrator` + `supervisor_check`
-4. 实现新 `graph.py`（3 节点 + subgraph）
-5. 并行运行新旧图，对比输出
+1. 实现自定义 `build_react_agent()`（替代 `create_react_agent`），在 tool 调用前后发射流式事件
+2. 实现 `SQLAgent`（ReAct + 7 tools），合并 5 个节点
+3. 实现 `KnowledgeAgent`（ReAct + 2 tools）
+4. 实现 `SupervisorAgent`（ReAct + 5 tools）
+5. 实现新 `graph.py`（Supervisor + 2 SubGraph）
+6. 前端 `MessageBubble` 新增思考折叠区 + Tool 调用卡片渲染
+7. 并行运行新旧图，对比输出
 
 ### Phase 3: 清理
 
@@ -466,27 +965,32 @@ backend/app/agents/
 3. 移除 `semantic_mapper.py`
 4. 更新 `state.py` 为新结构
 
-## 9. 测试策略
+## 10. 测试策略
 
 ### 新增测试
 
 | 类别 | 内容 |
 |------|------|
-| Tool 单元测试 | 每个 Tool 类的 schema 输出、execute 行为 |
+| Tool 单元测试 | 每个 Tool 类的 schema 输出、execute 行为、format_result |
 | ToolRegistry | 注册、查询、按 Agent 过滤 |
-| Agent 单元测试 | Mock LLM，验证 ReAct 循环的 tool 选择逻辑 |
-| 图集成测试 | 完整流：user msg → supervisor → agent → response |
+| 流式事件测试 | EventEncoder 新增事件类型编码、SSE 格式校验 |
+| Agent 单元测试 | Mock LLM，验证 ReAct 循环的 tool 选择逻辑 + 事件发射 |
+| 图集成测试 | 完整流：user msg → supervisor → agent → response + 事件序列验证 |
+| 前端渲染测试 | THINKING 折叠区、TOOL_CALL 卡片、STEP 嵌套渲染 |
 | 回退测试 | 新旧架构相同输入得到相同输出（或新架构更好） |
 
 ### 现有测试
 
 163 个现有测试在迁移期间**必须持续通过**。
 
-## 10. 风险与缓解
+## 11. 风险与缓解
 
 | 风险 | 缓解 |
 |------|------|
 | ReAct 循环失控（无限 tool call） | 设置 `max_iterations=15`，达到上限后强制输出 |
 | LLM 路由错误增加延迟 | Supervisor 使用 faster/cheaper 模型（如 qwen-turbo），Specialist 用主模型 |
-| Tool 调用增加 token 消耗 | Tool 结果截断（DDL 200 字、检索 top-5 条），System Prompt 精简 |
+| Tool 调用增加 token 消耗 | Tool 结果截断（`format_result`），System Prompt 精简 |
 | 迁移期间功能回退 | Phase 2 双轨并行，feature flag 控制新旧路径 |
+| 流式事件量过大导致前端卡顿 | 前端批量渲染（60ms buffer），思考内容默认折叠，Tool 结果摘要优先 |
+| `create_react_agent` 替换后 Agent 行为退化 | 自定义 ReAct 图在 tool 选择和推理质量上做 A/B 对比，低于阈值则回退 |
+| 嵌套 SubGraph 事件顺序错乱 | 事件携带 `agent_name` + `step_index`，前端按层级重组而非依赖时序 |
