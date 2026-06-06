@@ -1,21 +1,22 @@
 """LangGraph 图构建和运行 — v3 ReAct Multi-Agent + token 级流式输出。
 
-Supervisor Agent (ReAct + 5 tools) 动态委托给 SQL / Knowledge SubGraph。
-每个 SubGraph 是独立的 ReAct 循环，工具调用全过程流式可见。
+所有 Agent 节点内联到主图中（非编译子图），确保 get_stream_writer()
+的 custom events 正确传播到 AG-UI SSE 流。
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
+from typing import Any
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_stream_writer
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.agents.state import V3AgentState
-from app.agents.agents.react_agent import build_react_agent
+from app.agents.state import AgentState
 from app.agents.agents.supervisor import get_supervisor_tools, get_supervisor_prompt
 from app.agents.agents.sql_agent import get_sql_agent_tools, get_sql_agent_prompt
 from app.agents.agents.knowledge_agent import get_knowledge_agent_tools, get_knowledge_agent_prompt
@@ -24,107 +25,368 @@ from app.gateway.ag_ui_encoder import EventEncoder
 
 logger = logging.getLogger(__name__)
 
+MAX_DELEGATIONS = 3
+MAX_ITERATIONS = 15
 
-# ── 图构建 ──
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+def _emit(key: str, value: Any) -> None:
+    """Emit a custom event through LangGraph's stream writer."""
+    try:
+        writer = get_stream_writer()
+        writer([{key: value}])
+    except RuntimeError:
+        pass
+
+
+def _parse_tool_calls(msg) -> tuple[list[dict] | None, str | None]:
+    """Extract tool_calls and/or text from a message."""
+    tool_calls = None
+    text = None
+
+    if hasattr(msg, "tool_calls") and msg.tool_calls:
+        tool_calls = []
+        for tc in msg.tool_calls:
+            tool_calls.append({
+                "id": tc.get("id", f"call_{len(tool_calls)}"),
+                "name": tc.get("name", ""),
+                "args": tc.get("args", {}),
+            })
+
+    if hasattr(msg, "content") and msg.content:
+        content = msg.content
+        if isinstance(content, str) and content.strip():
+            text = content.strip()
+
+    return tool_calls, text
+
+
+def _make_ai_message(content: str, tool_calls_data: list[dict] | None = None) -> AIMessage:
+    """Build an AIMessage, optionally with tool_calls."""
+    if tool_calls_data:
+        from langchain_core.messages import ToolCall as LCToolCall
+        lc_tool_calls = [
+            LCToolCall(name=tc["name"], args=tc.get("args", {}), id=tc.get("id", f"call_{i}"))
+            for i, tc in enumerate(tool_calls_data)
+        ]
+        return AIMessage(content=content, tool_calls=lc_tool_calls)
+    return AIMessage(content=content)
+
+
+async def _call_llm(
+    model: Any, messages: list[BaseMessage], tool_schemas: list[dict] | None
+) -> AIMessage:
+    """Call the LLM and return an AIMessage with tool_calls if present."""
+    if hasattr(model, "_agenerate"):
+        kwargs: dict = {}
+        if tool_schemas:
+            kwargs["tools"] = tool_schemas
+        result = await model._agenerate(messages, **kwargs)
+        if result.generations and result.generations[0]:
+            return result.generations[0].message
+        return AIMessage(content="")
+    else:
+        dict_msgs = []
+        for m in messages:
+            role = "system" if isinstance(m, SystemMessage) else "user"
+            if hasattr(m, "type"):
+                role = "assistant" if m.type == "ai" else ("system" if m.type == "system" else "user")
+            dict_msgs.append({"role": role, "content": str(m.content)})
+        content, _, tool_calls_data = await model.llm_client.complete(
+            dict_msgs, tools=tool_schemas if tool_schemas else None
+        )
+        return _make_ai_message(content or "", tool_calls_data)
+
+
+def _to_openai_tools(tools: list[Any]) -> list[dict]:
+    """Convert tool objects to OpenAI function-calling schema."""
+    schemas = []
+    for t in tools:
+        if hasattr(t, "to_openai_schema"):
+            schemas.append(t.to_openai_schema())
+    return schemas
+
+
+def _build_messages(system_prompt: str, state_msgs: list) -> list[BaseMessage]:
+    """Build message list: system prompt + existing conversation."""
+    return [SystemMessage(content=system_prompt)] + list(state_msgs)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# Agent nodes (inlined — NOT compiled subgraphs)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_index_key: str):
+    """Create a ReAct agent reasoning node.
+
+    The node reads/writes state["messages"] and tracks its own iteration count
+    in state[step_index_key].
+    """
+
+    async def node_fn(state: AgentState) -> dict:
+        tools = get_tools()
+        system_prompt = get_prompt()
+        step_idx = state.get(step_index_key, 0)
+
+        if step_idx == 0:
+            _emit("step_started", {"agent_name": agent_name, "step_index": 0})
+
+        # Build messages
+        msgs = state.get("messages", [])
+        messages = _build_messages(system_prompt, msgs)
+        tool_schemas = _to_openai_tools(tools)
+
+        # Call LLM
+        try:
+            response = await _call_llm(model, messages, tool_schemas if tool_schemas else None)
+        except Exception as e:
+            logger.error("Agent %s LLM call failed: %s", agent_name, e)
+            _emit("delta", f"\n处理出错: {e}")
+            return {step_index_key: step_idx + 1, "messages": [AIMessage(content=f"处理出错: {e}")], "finished": True}
+
+        tool_calls, text = _parse_tool_calls(response)
+
+        if text and not tool_calls:
+            # Final text output
+            _emit("delta", text)
+            _emit("step_finished", {"agent_name": agent_name})
+            return {
+                step_index_key: step_idx + 1,
+                "messages": [response],
+                "finished": True,
+            }
+
+        if tool_calls:
+            _emit("thinking_start", {})
+            _emit("thinking_delta", f"调用 {len(tool_calls)} 个工具: {', '.join(tc['name'] for tc in tool_calls)}")
+            _emit("thinking_end", {})
+            return {
+                step_index_key: step_idx + 1,
+                "messages": [response],
+            }
+
+        # No tool calls and no text — force end
+        _emit("delta", "处理完成。")
+        _emit("step_finished", {"agent_name": agent_name})
+        return {
+            step_index_key: step_idx + 1,
+            "messages": [AIMessage(content="处理完成。")],
+            "finished": True,
+        }
+
+    return node_fn
+
+
+def _make_tools_node(tools: list[Any], agent_name: str):
+    """Create a tool execution node. Reads tool_calls from the last message, executes, emits events."""
+
+    tool_map = {t.name: t for t in tools if hasattr(t, "name")}
+
+    async def node_fn(state: AgentState) -> dict:
+        msgs = state.get("messages", [])
+        if not msgs:
+            return {"messages": []}
+
+        last_msg = msgs[-1]
+        tool_calls, _ = _parse_tool_calls(last_msg)
+        if not tool_calls:
+            return {"messages": []}
+
+        tool_messages = []
+        for tc in tool_calls:
+            tool_name = tc["name"]
+            tool_args = tc.get("args", {})
+
+            _emit("tool_call_start", {"name": tool_name, "args": tool_args, "agent_name": agent_name})
+
+            tool = tool_map.get(tool_name)
+            if tool is None:
+                _emit("tool_call_result", {"name": tool_name, "error": f"Tool '{tool_name}' not found"})
+                _emit("tool_call_end", {"name": tool_name})
+                tool_messages.append(ToolMessage(
+                    content=json.dumps({"error": f"Tool '{tool_name}' not found"}), tool_call_id=tc["id"]
+                ))
+                continue
+
+            try:
+                result = await tool.execute(**tool_args)
+                formatted = tool.format_result(result) if hasattr(tool, "format_result") else {"summary": str(result)[:200]}
+                _emit("tool_call_result", {"name": tool_name, "result": formatted})
+                tool_messages.append(ToolMessage(
+                    content=formatted.get("summary", str(result)), tool_call_id=tc["id"]
+                ))
+            except Exception as e:
+                logger.error("Tool %s failed: %s", tool_name, e)
+                _emit("tool_call_result", {"name": tool_name, "error": str(e)})
+                tool_messages.append(ToolMessage(
+                    content=json.dumps({"error": str(e)}), tool_call_id=tc["id"]
+                ))
+
+            _emit("tool_call_end", {"name": tool_name})
+
+        return {"messages": tool_messages}
+
+    return node_fn
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# Graph builder
+# ═══════════════════════════════════════════════════════════════════════════════════
 
 def build_graph(db_connection_id: str = "") -> StateGraph:
-    """Build v3 ReAct Agent graph: Supervisor → (SQL | Knowledge) SubGraphs.
+    """Build v3 ReAct Agent graph with inlined agent+tools nodes.
 
-    Supervisor is a ReAct agent that dynamically delegates to specialist sub-agents.
-    Each specialist is itself a ReAct agent with its own tool set.
+    Graph structure:
+        START → supervisor_agent ⇄ supervisor_tools
+                    │ (delegate_to_sql)
+                    ├──→ sql_agent ⇄ sql_tools ──→ supervisor_agent
+                    │ (delegate_to_knowledge)
+                    ├──→ knowledge_agent ⇄ knowledge_tools ──→ supervisor_agent
+                    │ (respond_general / ask_clarify / get_status)
+                    └──→ response_formatter → END
     """
     from app.dependencies import get_llm_client
 
-    builder = StateGraph(V3AgentState)
+    builder = StateGraph(AgentState)
 
-    supervisor_llm = get_llm_client(task_type="general")
-    specialist_llm = get_llm_client(task_type="sql")
+    supervisor_llm = LiteLLMChatAdapter(get_llm_client(task_type="general"))
+    specialist_llm = LiteLLMChatAdapter(get_llm_client(task_type="sql"))
 
-    # Build sub-agents
-    supervisor_subgraph = build_react_agent(
-        model=LiteLLMChatAdapter(supervisor_llm),
-        tools=get_supervisor_tools(db_connection_id),
-        system_prompt=get_supervisor_prompt(),
-        agent_name="supervisor",
-    )
+    # ── Node factories (capture db_connection_id in closure) ──
 
-    sql_subgraph = build_react_agent(
-        model=LiteLLMChatAdapter(specialist_llm),
-        tools=get_sql_agent_tools(db_id=db_connection_id, db_connection_id=db_connection_id),
-        system_prompt=get_sql_agent_prompt(),
-        agent_name="sql_agent",
-    )
+    def _get_supervisor_tools():
+        return get_supervisor_tools(db_connection_id)
 
-    knowledge_subgraph = build_react_agent(
-        model=LiteLLMChatAdapter(specialist_llm),
-        tools=get_knowledge_agent_tools(),
-        system_prompt=get_knowledge_agent_prompt(),
-        agent_name="knowledge_agent",
-    )
+    def _get_sql_tools():
+        return get_sql_agent_tools(db_id=db_connection_id, db_connection_id=db_connection_id)
 
-    builder.add_node("supervisor", supervisor_subgraph)
-    builder.add_node("sql_agent", sql_subgraph)
-    builder.add_node("knowledge_agent", knowledge_subgraph)
+    def _get_knowledge_tools():
+        return get_knowledge_agent_tools()
+
+    # ── Add nodes ──
+
+    builder.add_node("supervisor_agent", _make_agent_node(
+        supervisor_llm, _get_supervisor_tools, get_supervisor_prompt, "supervisor", "supervisor_step"
+    ))
+    builder.add_node("supervisor_tools", _make_tools_node(_get_supervisor_tools(), "supervisor"))
+
+    builder.add_node("sql_agent", _make_agent_node(
+        specialist_llm, _get_sql_tools, get_sql_agent_prompt, "sql_agent", "sql_step"
+    ))
+    builder.add_node("sql_tools", _make_tools_node(_get_sql_tools(), "sql_agent"))
+
+    builder.add_node("knowledge_agent", _make_agent_node(
+        specialist_llm, _get_knowledge_tools, get_knowledge_agent_prompt, "knowledge_agent", "knowledge_step"
+    ))
+    builder.add_node("knowledge_tools", _make_tools_node(_get_knowledge_tools(), "knowledge_agent"))
+
     builder.add_node("response_formatter", _response_formatter_node)
 
-    builder.add_edge(START, "supervisor")
+    # ── Routing ──
 
-    MAX_DELEGATIONS = 3
-
-    def route_supervisor(state):
-        # Guard: limit total delegations to prevent infinite loops
-        count = state.get("delegation_count", 0)
-        if count >= MAX_DELEGATIONS:
-            return "response_formatter"
-
+    def _route_agent(state: AgentState, step_key: str) -> str:
         msgs = state.get("messages", [])
-        if not msgs:
-            return "response_formatter"
-        # Search all messages in reverse for the most recent delegate tool call
-        for msg in reversed(msgs):
-            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    name = tc.get("name", "")
-                    if name == "delegate_to_sql_specialist":
-                        return "sql_agent"
-                    if name == "delegate_to_knowledge_specialist":
-                        return "knowledge_agent"
-                    if name in ("respond_general", "ask_user_clarification", "get_database_status"):
-                        return "response_formatter"
-                break
-        return "response_formatter"
+        if state.get("finished"):
+            return "end"
+        step = state.get(step_key, 0)
+        if step >= MAX_ITERATIONS:
+            return "end"
+        if msgs:
+            last = msgs[-1]
+            tcs, _ = _parse_tool_calls(last)
+            if tcs:
+                return "tools"
+        return "end"
 
-    async def _inc_delegation(state: V3AgentState) -> dict:
-        """Increment delegation counter after each specialist run."""
-        return {"delegation_count": state.get("delegation_count", 0) + 1}
+    def route_supervisor_agent(state: AgentState) -> str:
+        return _route_agent(state, "supervisor_step")
 
-    builder.add_node("_inc_counter", _inc_delegation)
+    def route_supervisor_tools(state: AgentState) -> str:
+        # After executing supervisor's tools, check what was called
+        msgs = state.get("messages", [])
+        if msgs:
+            for msg in reversed(msgs):
+                tcs, _ = _parse_tool_calls(msg)
+                if tcs:
+                    for tc in tcs:
+                        name = tc.get("name", "")
+                        if name == "delegate_to_sql_specialist":
+                            # Increment delegation count before routing
+                            return "sql_agent"
+                        if name == "delegate_to_knowledge_specialist":
+                            return "knowledge_agent"
+                    break
+        # For non-delegate tools (respond_general etc.), loop back to supervisor agent
+        return "supervisor_agent"
 
-    builder.add_conditional_edges("supervisor", route_supervisor, {
+    def route_sql_agent(state: AgentState) -> str:
+        return _route_agent(state, "sql_step")
+
+    def route_knowledge_agent(state: AgentState) -> str:
+        return _route_agent(state, "knowledge_step")
+
+    # ── Edges ──
+
+    builder.add_edge(START, "supervisor_agent")
+
+    # Supervisor loop
+    builder.add_conditional_edges("supervisor_agent", route_supervisor_agent, {
+        "tools": "supervisor_tools",
+        "end": "response_formatter",
+    })
+    builder.add_conditional_edges("supervisor_tools", route_supervisor_tools, {
+        "supervisor_agent": "supervisor_agent",
         "sql_agent": "sql_agent",
         "knowledge_agent": "knowledge_agent",
-        "response_formatter": "response_formatter",
     })
 
-    # Sub-agents → counter → supervisor (prevents infinite delegation loop)
-    builder.add_edge("sql_agent", "_inc_counter")
-    builder.add_edge("knowledge_agent", "_inc_counter")
-    builder.add_edge("_inc_counter", "supervisor")
+    # Increment delegation counter and reset state when specialists return
+    async def _specialist_return(state: AgentState) -> dict:
+        return {
+            "delegation_count": state.get("delegation_count", 0) + 1,
+            "sql_step": 0,
+            "knowledge_step": 0,
+            "finished": False,
+        }
+
+    builder.add_node("_specialist_return", _specialist_return)
+
+    # SQL Agent loop → counter → supervisor on finish
+    builder.add_conditional_edges("sql_agent", route_sql_agent, {
+        "tools": "sql_tools",
+        "end": "_specialist_return",
+    })
+    builder.add_edge("sql_tools", "sql_agent")
+
+    # Knowledge Agent loop → counter → supervisor on finish
+    builder.add_conditional_edges("knowledge_agent", route_knowledge_agent, {
+        "tools": "knowledge_tools",
+        "end": "_specialist_return",
+    })
+    builder.add_edge("knowledge_tools", "knowledge_agent")
+
+    builder.add_edge("_specialist_return", "supervisor_agent")
+
+    # Terminal
     builder.add_edge("response_formatter", END)
 
     return builder.compile(checkpointer=MemorySaver())
 
 
-async def _response_formatter_node(state: V3AgentState) -> dict:
+async def _response_formatter_node(state: AgentState) -> dict:
     """Format the final response — extract last AIMessage text content."""
     msgs = state.get("messages", [])
     final_text = ""
 
+    from langchain_core.messages import AIMessage as AIMsg
+
     for msg in reversed(msgs):
-        if isinstance(msg, AIMessage) and msg.content:
+        if isinstance(msg, AIMsg) and msg.content:
             content = msg.content
             if isinstance(content, str) and content.strip():
-                # Skip delegate tool call response payloads
                 if content.strip().startswith('{"status":'):
                     continue
                 final_text = content
@@ -136,17 +398,20 @@ async def _response_formatter_node(state: V3AgentState) -> dict:
     return {"final_response": final_text}
 
 
-# ── Agent Runner（AG-UI 流式输出） ──
+# ═══════════════════════════════════════════════════════════════════════════════════
+# Agent Runner
+# ═══════════════════════════════════════════════════════════════════════════════════
 
-async def _run_agent(
+async def run_agent_with_ag_ui(
     user_message: str,
     conversation_id: str,
     model: str,
     db_connection_id: str | None = None,
 ) -> AsyncIterator[str]:
-    """Run ReAct Agent graph with full streaming observability."""
+    """运行 v3 ReAct Agent 并以 AG-UI SSE 流式输出。"""
     graph = build_graph(db_connection_id=db_connection_id or "")
 
+    # Load conversation history
     history = []
     if conversation_id:
         try:
@@ -166,13 +431,17 @@ async def _run_agent(
         except Exception:
             pass
 
-    initial_state: V3AgentState = {
+    initial_state: AgentState = {
         "messages": [HumanMessage(content=user_message)],
         "conversation_id": conversation_id,
         "model": model,
         "db_connection_id": db_connection_id,
         "history": history,
         "delegation_count": 0,
+        "supervisor_step": 0,
+        "sql_step": 0,
+        "knowledge_step": 0,
+        "finished": False,
         "supervisor": {},
         "sql": {},
         "knowledge": {},
@@ -180,7 +449,7 @@ async def _run_agent(
 
     yield EventEncoder.run_started(conversation_id)
 
-    config = {"configurable": {"thread_id": f"v3_{conversation_id}"}}
+    config = {"configurable": {"thread_id": conversation_id}}
     streamed_text = False
 
     try:
@@ -198,30 +467,19 @@ async def _run_agent(
                             yield EventEncoder.thinking_end()
                         elif "step_started" in ev:
                             info = ev["step_started"]
-                            yield EventEncoder.step_started(
-                                info.get("agent_name", "unknown"),
-                                info.get("step_index", 0),
-                            )
+                            yield EventEncoder.step_started(info.get("agent_name", "unknown"), info.get("step_index", 0))
                         elif "step_finished" in ev:
                             info = ev["step_finished"]
-                            yield EventEncoder.step_finished(
-                                info.get("agent_name", "unknown")
-                            )
+                            yield EventEncoder.step_finished(info.get("agent_name", "unknown"))
                         elif "tool_call_start" in ev:
                             info = ev["tool_call_start"]
-                            yield EventEncoder.tool_call_start(
-                                info["name"], info.get("args")
-                            )
+                            yield EventEncoder.tool_call_start(info["name"], info.get("args"))
                         elif "tool_call_result" in ev:
                             info = ev["tool_call_result"]
-                            yield EventEncoder.tool_call_result(
-                                info["name"], info.get("result", {})
-                            )
+                            yield EventEncoder.tool_call_result(info["name"], info.get("result", {}))
                         elif "tool_call_end" in ev:
                             info = ev["tool_call_end"]
-                            yield EventEncoder.tool_call_end(
-                                info.get("name", "unknown")
-                            )
+                            yield EventEncoder.tool_call_end(info.get("name", "unknown"))
                         elif "delta" in ev:
                             yield EventEncoder.text_delta(ev["delta"])
                             streamed_text = True
@@ -238,14 +496,3 @@ async def _run_agent(
     except Exception as e:
         logger.error("Agent run failed: %s", e)
         yield EventEncoder.run_error(str(e))
-
-
-async def run_agent_with_ag_ui(
-    user_message: str,
-    conversation_id: str,
-    model: str,
-    db_connection_id: str | None = None,
-) -> AsyncIterator[str]:
-    """运行 v3 ReAct Agent 并以 AG-UI token 级流式 SSE 输出。"""
-    async for event in _run_agent(user_message, conversation_id, model, db_connection_id):
-        yield event
