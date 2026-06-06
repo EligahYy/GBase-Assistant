@@ -119,8 +119,13 @@ def _build_messages(system_prompt: str, state_msgs: list) -> list[BaseMessage]:
 # Agent nodes (inlined — NOT compiled subgraphs)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_key: str, finished_key: str):
-    """Create a ReAct agent reasoning node with per-agent iteration + finish tracking."""
+def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_key: str, finished_key: str, isolate_context: bool = False):
+    """Create a ReAct agent reasoning node with per-agent iteration + finish tracking.
+
+    Args:
+        isolate_context: If True, only show the user's original question + this agent's
+            own messages. Supervisor delegation chatter is excluded. Use for specialists.
+    """
 
     async def node_fn(state: AgentState) -> dict:
         tools = get_tools()
@@ -131,6 +136,16 @@ def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_ke
             _emit("step_started", {"agent_name": agent_name, "step_index": 0})
 
         msgs = state.get("messages", [])
+        if isolate_context and step_idx == 0:
+            # Specialist agent: only include the original user question (first HumanMessage)
+            # + this agent's own messages. Supervisor delegation chatter is excluded.
+            user_msg = None
+            for m in msgs:
+                if isinstance(m, HumanMessage):
+                    user_msg = m
+                    break
+            msgs = [user_msg] if user_msg else msgs
+
         messages = _build_messages(system_prompt, msgs)
         tool_schemas = _to_openai_tools(tools)
 
@@ -143,16 +158,20 @@ def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_ke
 
         tool_calls, text = _parse_tool_calls(response)
 
-        # Emit text content if present (even alongside tool_calls — some models output both)
-        if text:
-            _emit("delta", text)
-
         if not tool_calls:
             # Pure text response — agent is done
+            if text:
+                _emit("delta", text)
             _emit("step_finished", {"agent_name": agent_name})
             return {step_key: step_idx + 1, finished_key: True, "messages": [response]}
 
-        # Has tool calls — emit thinking and proceed to tool execution
+        # Has tool calls — emit text (if any) as THINKING, not as visible content
+        # This prevents internal reasoning like "我来帮您查询..." from appearing in the response
+        if text:
+            _emit("thinking_start", {})
+            _emit("thinking_delta", text)
+            _emit("thinking_end", {})
+
         _emit("thinking_start", {})
         _emit("thinking_delta", f"调用 {len(tool_calls)} 个工具: {', '.join(tc['name'] for tc in tool_calls)}")
         _emit("thinking_end", {})
@@ -255,12 +274,14 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     builder.add_node("supervisor_tools", _make_tools_node(_get_supervisor_tools(), "supervisor"))
 
     builder.add_node("sql_agent", _make_agent_node(
-        specialist_llm, _get_sql_tools, get_sql_agent_prompt, "sql_agent", "sql_step", "sql_finished"
+        specialist_llm, _get_sql_tools, get_sql_agent_prompt, "sql_agent", "sql_step", "sql_finished",
+        isolate_context=True,
     ))
     builder.add_node("sql_tools", _make_tools_node(_get_sql_tools(), "sql_agent"))
 
     builder.add_node("knowledge_agent", _make_agent_node(
-        specialist_llm, _get_knowledge_tools, get_knowledge_agent_prompt, "knowledge_agent", "knowledge_step", "knowledge_finished"
+        specialist_llm, _get_knowledge_tools, get_knowledge_agent_prompt, "knowledge_agent", "knowledge_step", "knowledge_finished",
+        isolate_context=True,
     ))
     builder.add_node("knowledge_tools", _make_tools_node(_get_knowledge_tools(), "knowledge_agent"))
 
