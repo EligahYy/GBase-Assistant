@@ -78,14 +78,14 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, AgentTool] = {}
-        self._agent_tool_map: dict[str, list[str]] = {}  # agent_type → [tool_name, ...]
+        self._agent_tool_map: dict[str, set[str]] = {}  # agent_type → {tool_name, ...}
 
     def register(self, tool: AgentTool, agent_types: list[str] | None = None) -> None:
         """Register a tool, optionally assigning it to specific agent types."""
         self._tools[tool.name] = tool
         if agent_types:
             for agent_type in agent_types:
-                self._agent_tool_map.setdefault(agent_type, []).append(tool.name)
+                self._agent_tool_map.setdefault(agent_type, set()).add(tool.name)
 
     def get(self, name: str) -> AgentTool | None:
         """Get a tool by name."""

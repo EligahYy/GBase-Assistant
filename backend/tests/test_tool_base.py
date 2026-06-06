@@ -48,13 +48,10 @@ class TestToolParameter:
 class TestToolRegistry:
     @pytest.fixture
     def registry(self):
-        # Reset singleton for test isolation
+        # Fresh instance for test isolation (not the singleton)
         from app.agents.tools.base import ToolRegistry as TR
 
-        reg = TR()
-        reg._tools.clear()
-        reg._agent_tool_map.clear()
-        return reg
+        return TR()
 
     def test_register_and_get(self, registry):
         from app.agents.tools.base import ToolParameter
@@ -164,3 +161,60 @@ class TestToolRegistry:
 
     def test_get_missing_tool_returns_none(self, registry):
         assert registry.get("nonexistent") is None
+
+    def test_clear_removes_all_registrations(self, registry):
+        class FakeTool:
+            name = "t1"
+            description = "desc"
+            parameters = []
+
+            async def execute(self, **kw):
+                return {}
+
+            def format_result(self, r):
+                return {"summary": ""}
+
+            def to_openai_schema(self):
+                return {}
+
+        registry.register(FakeTool(), agent_types=["sql"])
+        assert registry.get("t1") is not None
+        assert len(registry.list_for_agent("sql")) == 1
+
+        registry.clear()
+        assert registry.get("t1") is None
+        assert len(registry.list_for_agent("sql")) == 0
+
+    def test_duplicate_agent_type_does_not_duplicate_tool(self, registry):
+        class FakeTool:
+            name = "dup_tool"
+            description = "desc"
+            parameters = []
+
+            async def execute(self, **kw):
+                return {}
+
+            def format_result(self, r):
+                return {"summary": ""}
+
+            def to_openai_schema(self):
+                return {}
+
+        registry.register(FakeTool(), agent_types=["sql", "sql"])
+        tools = registry.list_for_agent("sql")
+        assert len(tools) == 1
+
+
+class TestGetToolRegistry:
+    def test_singleton_returns_same_instance(self):
+        from app.agents.tools.base import get_tool_registry
+
+        reg1 = get_tool_registry()
+        reg2 = get_tool_registry()
+        assert reg1 is reg2
+
+    def test_singleton_is_tool_registry_instance(self):
+        from app.agents.tools.base import get_tool_registry, ToolRegistry
+
+        reg = get_tool_registry()
+        assert isinstance(reg, ToolRegistry)
