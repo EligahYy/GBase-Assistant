@@ -371,7 +371,9 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     })
     builder.add_edge("knowledge_tools", "knowledge_agent")
 
-    builder.add_edge("_specialist_return", "supervisor_agent")
+    # Specialists produce the final answer — route directly to formatter.
+    # The Supervisor is a router, not a re-answerer.
+    builder.add_edge("_specialist_return", "response_formatter")
 
     # Terminal
     builder.add_edge("response_formatter", END)
