@@ -257,8 +257,18 @@ def _make_tools_node(tools: list[Any], agent_name: str):
                 result = await tool.execute(**tool_args)
                 formatted = tool.format_result(result) if hasattr(tool, "format_result") else {"summary": str(result)[:200]}
                 _emit("tool_call_result", {"name": tool_name, "result": formatted})
+                # Build LLM context: always include full detail so the LLM can reason.
+                # Frontend gets summary; LLM gets summary + detail for grounding.
+                llm_content = formatted.get("summary", str(result))
+                detail = formatted.get("detail")
+                if detail is not None:
+                    try:
+                        import json as _json
+                        llm_content = llm_content + "\n\n" + _json.dumps(detail, ensure_ascii=False, default=str)
+                    except Exception:
+                        llm_content = llm_content + "\n\n" + str(detail)
                 tool_messages.append(ToolMessage(
-                    content=formatted.get("summary", str(result)), tool_call_id=tc["id"]
+                    content=llm_content[:4000], tool_call_id=tc["id"]  # Cap at 4000 chars
                 ))
             except Exception as e:
                 logger.error("Tool %s failed: %s", tool_name, e)
