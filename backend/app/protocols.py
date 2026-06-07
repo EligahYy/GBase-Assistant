@@ -21,15 +21,6 @@ class TableSchema:
 
 
 @dataclass
-class SQLExample:
-    question: str
-    sql: str
-    tables: list[str] = field(default_factory=list)
-    pattern: str = ""
-    difficulty: str = "medium"
-
-
-@dataclass
 class KnowledgeChunk:
     content: str
     source: str
@@ -137,15 +128,6 @@ class SchemaRetriever(Protocol):
 
     async def retrieve(self, query: str, db_id: str) -> list[TableSchema]:
         """根据查询和 db_id 检索相关表 schema"""
-        ...
-
-
-@runtime_checkable
-class ExampleRetriever(Protocol):
-    """Few-shot 示例检索接口。Phase 1: 文件全量加载 → Phase 3: Qdrant 向量检索"""
-
-    async def retrieve(self, query: str, top_k: int = 5) -> list[SQLExample]:
-        """根据查询检索最相关的 SQL 示例"""
         ...
 
 

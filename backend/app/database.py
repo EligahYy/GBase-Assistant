@@ -77,7 +77,6 @@ async def init_db() -> None:
                             modified_sql TEXT,
                             feedback_note TEXT,
                             created_at DATETIME,
-                            enriched_at DATETIME,
                             FOREIGN KEY (message_id) REFERENCES messages (id)
                         )"""
                     )
@@ -85,8 +84,8 @@ async def init_db() -> None:
                 for row in rows:
                     conn.execute(
                         sa.text(
-                            "INSERT INTO sql_feedback (id, message_id, action, original_sql, modified_sql, feedback_note, created_at, enriched_at) "
-                            "VALUES (:id, :message_id, :action, :original_sql, :modified_sql, :feedback_note, :created_at, :enriched_at)"
+                            "INSERT INTO sql_feedback (id, message_id, action, original_sql, modified_sql, feedback_note, created_at) "
+                            "VALUES (:id, :message_id, :action, :original_sql, :modified_sql, :feedback_note, :created_at)"
                         ),
                         dict(row._mapping),
                     )

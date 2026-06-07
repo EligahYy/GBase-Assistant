@@ -2,7 +2,6 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NButton,
   NSelect,
   useMessage,
   NModal,
@@ -56,10 +55,6 @@ const connOptions = computed(() =>
   connStore.connections
     .filter(c => c.driver_type !== 'manual')
     .map(c => ({ label: `${c.name}`, value: c.id })),
-)
-
-const selectedConn = computed(() =>
-  connStore.connections.find(c => c.id === selectedConnId.value),
 )
 
 onMounted(() => { connStore.loadConnections() })
@@ -186,9 +181,6 @@ function formatCell(val: unknown): string {
   return String(val)
 }
 
-function staggerN(n: number): number {
-  return n > 8 ? 8 : n
-}
 </script>
 
 <template>

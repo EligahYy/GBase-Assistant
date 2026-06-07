@@ -1,7 +1,6 @@
 """ConnectionHealthChecker 单元测试。"""
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.connection_health_checker import ConnectionHealthChecker
@@ -82,7 +81,7 @@ class TestConnectionHealthChecker:
 
     async def test_probe_one_broadcasts_on_status_change(self):
         """_probe_one 在状态变更时应广播事件。"""
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, patch
 
         from app.services.connection_health_checker import ConnectionHealthChecker
 
@@ -134,7 +133,7 @@ class TestConnectionHealthChecker:
 
     async def test_probe_one_no_broadcast_when_status_unchanged(self):
         """状态未变更时不应广播。"""
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, patch
 
         from app.services.connection_health_checker import ConnectionHealthChecker
 

@@ -1,11 +1,10 @@
 """GetDatabaseStatusTool — queries GBase 8a runtime status metrics.
 
-Converted from closure _make_get_database_status_tool() in semantic_mapper.py.
+Provides the monitoring fast path with predefined read-only queries.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -52,12 +51,13 @@ class GetDatabaseStatusTool:
         """
         import asyncio
 
+        from sqlalchemy import select
+
         from app.api.connections import _to_connection_config
         from app.database import async_session_factory
         from app.db_connectors.connector_factory import get_connector
         from app.models.connection import DbConnection
         from app.sql.sandbox import SQLSandbox
-        from sqlalchemy import select
 
         if not self._db_connection_id:
             return {"error": "未选择数据库连接"}

@@ -1,6 +1,5 @@
 """Tests for SchemaGraph.validate_mapping() — supervisor check validation."""
-import pytest
-from app.agents.schema_graph import SchemaGraph, ColumnMeta, TableMeta
+from app.agents.schema_graph import ColumnMeta, SchemaGraph, TableMeta
 
 
 def make_graph():

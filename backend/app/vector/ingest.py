@@ -1,4 +1,4 @@
-"""数据向量化入库脚本：FAQ / SQL 示例 / Schema / 错误码。"""
+"""数据向量化入库脚本：FAQ / Schema / 错误码。"""
 
 from __future__ import annotations
 
@@ -86,57 +86,6 @@ async def ingest_faq(embedder: Embedder, force: bool = False) -> int:
     _save_index_state(state)
     logger.info("FAQ 索引完成：%d 条", len(faq))
     return len(faq)
-
-
-async def ingest_sql_examples(embedder: Embedder, force: bool = False) -> int:
-    """将 SQL 示例向量化入库。返回入库条数。"""
-    examples_path = _knowledge_dir() / "examples" / "sql_examples.jsonl"
-    if not examples_path.exists():
-        logger.warning("SQL 示例文件不存在: %s", examples_path)
-        return 0
-
-    state = _get_index_state()
-    current_hash = _file_hash(examples_path)
-    if not force and state.get("examples_hash") == current_hash:
-        logger.info("SQL 示例未变更，跳过索引")
-        return 0
-
-    examples = []
-    with open(examples_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            examples.append(json.loads(line))
-
-    qdrant = get_qdrant_manager().client
-    collection = get_settings().models_config.get("collections", {}).get("sql_examples", "sql_examples")
-
-    texts = [f"问题：{ex['question']}\nSQL：{ex['sql']}" for ex in examples]
-    embeddings = await _embed_in_batches(embedder, texts)
-
-    points = []
-    for i, ex in enumerate(examples):
-        points.append(
-            {
-                "id": i,
-                "vector": embeddings[i],
-                "payload": {
-                    "question": ex["question"],
-                    "sql": ex["sql"],
-                    "tables": ex.get("tables", []),
-                    "pattern": ex.get("pattern", ""),
-                    "difficulty": ex.get("difficulty", "medium"),
-                },
-            }
-        )
-
-    await qdrant.upsert(collection_name=collection, points=points, wait=True)
-
-    state["examples_hash"] = current_hash
-    _save_index_state(state)
-    logger.info("SQL 示例索引完成：%d 条", len(examples))
-    return len(examples)
 
 
 async def ingest_error_codes(embedder: Embedder, force: bool = False) -> int:
@@ -319,7 +268,6 @@ async def sync_all_to_qdrant(embedder: Embedder, force: bool = False) -> dict:
     results = {}
 
     results["faq"] = await ingest_faq(embedder, force=force)
-    results["sql_examples"] = await ingest_sql_examples(embedder, force=force)
     results["error_codes"] = await ingest_error_codes(embedder, force=force)
     results["ops_docs"] = await ingest_ops_docs(embedder, force=force)
 

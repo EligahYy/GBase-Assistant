@@ -8,8 +8,6 @@ import {
 import { NIcon } from 'naive-ui'
 
 import MessageBubble from './MessageBubble.vue'
-import ThinkingSection from './ThinkingSection.vue'
-import ToolCallCard from './ToolCallCard.vue'
 import { useChatStore } from '@/stores/chat'
 import { useConnectionStore } from '@/stores/connection'
 import { useSSE } from '@/composables/useSSE'
@@ -91,22 +89,22 @@ async function sendMessage() {
     if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
       chatStore.appendStreamToken(streamingId, (chunk.delta as string) || '')
     } else if (chunk.type === 'text') {
-      chatStore.appendStreamToken(streamingId, chunk.content)
+      chatStore.appendStreamToken(streamingId, chunk.content ?? '')
     } else if (chunk.type === 'sql') {
-      chatStore.setStreamSql(streamingId, chunk.content)
+      chatStore.setStreamSql(streamingId, chunk.content ?? '')
     } else if (chunk.type === 'sources') {
-      chatStore.setStreamSources(streamingId, chunk.content)
+      chatStore.setStreamSources(streamingId, chunk.content ?? '')
     } else if (chunk.type === 'result') {
       try {
-        const result = JSON.parse(chunk.content)
+        const result = JSON.parse(chunk.content ?? '{}')
         chatStore.setStreamQueryResult(streamingId, result)
       } catch {
         // ignore
       }
     } else if (chunk.type === 'error') {
-      naiveMsg.error(chunk.content)
+      naiveMsg.error(chunk.content ?? '流式请求失败')
     } else if (chunk.type === 'result_error') {
-      naiveMsg.warning(chunk.content)
+      naiveMsg.warning(chunk.content ?? '查询结果异常')
     } else if (chunk.type === 'chart_config') {
       try {
         const config = JSON.parse(chunk.content || '{}')
@@ -116,7 +114,7 @@ async function sendMessage() {
       }
     } else if (chunk.type === 'message_ids') {
       try {
-        const ids = JSON.parse(chunk.content)
+        const ids = JSON.parse(chunk.content ?? '{}')
         chatStore.syncMessageIdsFromStream(streamingId, ids)
       } catch {
         // ignore parse errors
@@ -131,13 +129,11 @@ async function sendMessage() {
         chatStore.setStreamQueryResult(streamingId, value)
       } else if (path === 'chart_config') {
         chatStore.setStreamChartConfig(streamingId, value)
+      } else if (path === 'sources') {
+        chatStore.setStreamSources(streamingId, (value?.sources || []).join('\n'))
       }
-    } else if (chunk.type === 'THINKING_START') {
-      chatStore.setThinking(true)
     } else if (chunk.type === 'THINKING_CONTENT') {
       chatStore.appendThinkingToken(streamingId, chunk.delta || '')
-    } else if (chunk.type === 'THINKING_END') {
-      chatStore.setThinkingDone(streamingId)
     } else if (chunk.type === 'TOOL_CALL_START') {
       chatStore.addToolCall(streamingId, {
         id: `${chunk.tool_name}-${Date.now()}`,
@@ -155,12 +151,6 @@ async function sendMessage() {
         result?.summary,
         result?.error,
       )
-    } else if (chunk.type === 'TOOL_CALL_END') {
-      // Tool call cycle complete
-    } else if (chunk.type === 'STEP_STARTED') {
-      chatStore.setActiveAgent(streamingId, chunk.agent_name || null)
-    } else if (chunk.type === 'STEP_FINISHED') {
-      // Step complete, keep agent context
     }
   })
 
@@ -171,7 +161,6 @@ async function sendMessage() {
     if (syncedId) finalAsstId = syncedId
   }
 
-  chatStore.setThinkingDone(streamingId)
   chatStore.finalizeStreamMessage(finalAsstId, serverConversationId ?? conversationId ?? crypto.randomUUID())
   chatStore.activeFolderId = null
   await chatStore.loadConversations()

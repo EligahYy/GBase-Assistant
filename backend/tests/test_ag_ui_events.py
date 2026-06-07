@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from app.gateway.ag_ui_encoder import EventEncoder, EventType
+from app.gateway.ag_ui_encoder import EventEncoder
 
 
 class TestNewEventTypes:

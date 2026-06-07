@@ -21,4 +21,3 @@ class SQLFeedback(Base):
     modified_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
-    enriched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

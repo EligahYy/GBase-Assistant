@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from app.knowledge.parsers.interface import DocumentParser
 from app.knowledge.parsers.md_parser import MdParser
 from app.knowledge.parsers.pdf_parser import PdfParser

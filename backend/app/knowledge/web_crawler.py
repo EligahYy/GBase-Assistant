@@ -75,7 +75,6 @@ async def render_page(browser, url: str) -> str | None:
 
         if content and len(content) > 100:
             md = f"# {title}\n\n"
-            path = url.replace(BASE_URL, "")
             md += f"> 来源: {url}\n\n"
             md += content
             return md

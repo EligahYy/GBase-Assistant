@@ -8,19 +8,14 @@ import logging
 from functools import lru_cache
 from typing import Any
 
-from app.knowledge.loader import DbSchemaRetriever, FileExampleRetriever, FileKnowledgeRetriever
+from app.knowledge.loader import DbSchemaRetriever, FileKnowledgeRetriever
 from app.llm.client import LiteLLMClientImpl
 from app.observability import metrics
-from app.protocols import ExampleRetriever, KnowledgeRetriever, LLMClient, SchemaRetriever
+from app.protocols import KnowledgeRetriever, LLMClient, SchemaRetriever
 
 logger = logging.getLogger(__name__)
 
 # ── Phase 1 基础实现（作为降级回退）──────────────────────────────────────────────
-
-
-@lru_cache
-def _get_file_example_retriever() -> FileExampleRetriever:
-    return FileExampleRetriever()
 
 
 @lru_cache
@@ -88,28 +83,6 @@ def get_schema_retriever(db_session=None) -> SchemaRetriever:
         primary=primary,
         fallback=fallback,
         name="SchemaRetriever",
-    )  # type: ignore[return-value]
-
-
-def get_example_retriever() -> ExampleRetriever:
-    """ExampleRetriever：优先 Qdrant 动态检索，失败时回退到文件前 top_k 条。"""
-    from app.vector.client import is_qdrant_available
-
-    if not is_qdrant_available():
-        return _get_file_example_retriever()
-
-    primary = None
-    try:
-        from app.vector.retrievers import QdrantExampleRetriever
-
-        primary = QdrantExampleRetriever()
-    except Exception as e:
-        logger.debug("QdrantExampleRetriever 实例化失败: %s", e)
-
-    return FallbackRetriever(
-        primary=primary,
-        fallback=_get_file_example_retriever(),
-        name="ExampleRetriever",
     )  # type: ignore[return-value]
 
 

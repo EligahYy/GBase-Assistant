@@ -141,9 +141,10 @@ class QdrantKnowledgeIndexer:
         self._embedder = embedder
 
     async def index_chunks(self, chunks: list[DocumentChunk], clear_existing: bool = True) -> int:
+        from qdrant_client.models import PointStruct
+
         from app.vector.client import get_qdrant_manager
         from app.vector.embedder import get_embedder
-        from qdrant_client.models import PointStruct
 
         embedder = self._embedder or get_embedder()
         qdrant = get_qdrant_manager()

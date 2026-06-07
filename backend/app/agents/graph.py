@@ -11,22 +11,22 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from langgraph.graph import StateGraph, START, END
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_stream_writer
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.graph import END, START, StateGraph
 
-from app.agents.state import AgentState
-from app.agents.agents.supervisor import get_supervisor_tools, get_supervisor_prompt
-from app.agents.agents.sql_agent import get_sql_agent_tools, get_sql_agent_prompt
-from app.agents.agents.knowledge_agent import get_knowledge_agent_tools, get_knowledge_agent_prompt
 from app.agents.agents.general_agent import get_general_agent_prompt
-from app.llm.adapter import LiteLLMChatAdapter
+from app.agents.agents.sql_agent import get_sql_agent_prompt, get_sql_agent_tools
+from app.agents.agents.supervisor import get_supervisor_prompt, get_supervisor_tools
+from app.agents.state import AgentState
+from app.agents.tools.sql_tools import ExecuteSQLTool
 from app.gateway.ag_ui_encoder import EventEncoder
+from app.llm.adapter import LiteLLMChatAdapter
 
 logger = logging.getLogger(__name__)
 
-MAX_DELEGATIONS = 3
+MAX_PLANNED_TASKS = 3
 MAX_ITERATIONS = 15
 
 
@@ -139,6 +139,21 @@ def _build_messages(system_prompt: str, state_msgs: list) -> list[BaseMessage]:
     return [SystemMessage(content=system_prompt)] + list(state_msgs)
 
 
+def _build_conversation_messages(history: list[dict], current_message: str) -> list[BaseMessage]:
+    """Convert persisted history to LangChain messages and append the current turn once."""
+    messages: list[BaseMessage] = []
+    for item in history:
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        role = item.get("role")
+        messages.append(AIMessage(content=content) if role == "assistant" else HumanMessage(content=content))
+
+    if not messages or not isinstance(messages[-1], HumanMessage) or messages[-1].content != current_message:
+        messages.append(HumanMessage(content=current_message))
+    return messages
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # Agent nodes (inlined — NOT compiled subgraphs)
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -177,14 +192,13 @@ def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_ke
 
         msgs = state.get("messages", [])
         if isolate_context and step_idx == 0:
-            # Specialist agent: only include the original user question (first HumanMessage)
-            # + this agent's own messages. Supervisor delegation chatter is excluded.
-            user_msg = None
-            for m in msgs:
-                if isinstance(m, HumanMessage):
-                    user_msg = m
-                    break
-            msgs = [user_msg] if user_msg else msgs
+            # Keep persisted conversation through the current user turn, excluding
+            # the Supervisor's delegation tool call and its tool result.
+            last_user_index = max(
+                (idx for idx, message in enumerate(msgs) if isinstance(message, HumanMessage)),
+                default=-1,
+            )
+            msgs = msgs[: last_user_index + 1] if last_user_index >= 0 else msgs
 
         messages = _build_messages(system_prompt, msgs)
         tool_schemas = _to_openai_tools(tools)
@@ -238,6 +252,7 @@ def _make_tools_node(tools: list[Any], agent_name: str):
             return {"messages": []}
 
         tool_messages = []
+        state_update: dict[str, Any] = {}
         for tc in tool_calls:
             tool_name = tc["name"]
             tool_args = tc.get("args", {})
@@ -257,6 +272,16 @@ def _make_tools_node(tools: list[Any], agent_name: str):
                 result = await tool.execute(**tool_args)
                 formatted = tool.format_result(result) if hasattr(tool, "format_result") else {"summary": str(result)[:200]}
                 _emit("tool_call_result", {"name": tool_name, "result": formatted})
+                if agent_name == "sql_agent":
+                    sql_state = {**state.get("sql", {})}
+                    if tool_name == "search_schemas":
+                        sql_state["grounded_schemas"] = result
+                    elif tool_name == "submit_sql":
+                        sql_state.update({
+                            "generated_sql": result.get("sql", "") if isinstance(result, dict) else "",
+                            "phase": "proposed",
+                        })
+                    state_update["sql"] = sql_state
                 # Build LLM context: always include full detail so the LLM can reason.
                 # Frontend gets summary; LLM gets summary + detail for grounding.
                 llm_content = formatted.get("summary", str(result))
@@ -279,7 +304,7 @@ def _make_tools_node(tools: list[Any], agent_name: str):
 
             _emit("tool_call_end", {"name": tool_name})
 
-        return {"messages": tool_messages}
+        return {"messages": tool_messages, **state_update}
 
     return node_fn
 
@@ -288,7 +313,7 @@ def _make_tools_node(tools: list[Any], agent_name: str):
 # Knowledge Agent — search→answer pipeline (NOT ReAct, no tools for LLM)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-# ── v3 Knowledge Agent prompt (better than v2 QA_SYSTEM: RRF fusion aware + keyword fallback + source citation) ──
+# ── Knowledge retrieval prompt ─────────────────────────────────────────────────────
 
 V3_QA_SYSTEM = """你是 GBase 8a 数据库专家助手。根据以下知识库内容回答用户问题。
 
@@ -308,10 +333,45 @@ V3_QA_SYSTEM = """你是 GBase 8a 数据库专家助手。根据以下知识库�
 """
 
 
+_KNOWLEDGE_QUERY_EXPANSIONS = {
+    "创建": "table_options CREATE TABLE 随机分布表 DDL 建表语句",
+    "分布": "分布表 分布方式 DISTRIBUTED 随机分布 HASH",
+    "分区": "分区表 分区键 PARTITION CREATE TABLE",
+    "随机": "随机分布 RANDOM DISTRIBUTION 分布表",
+    "hash": "HASH 哈希 分布键 分布表 随机分布",
+}
+
+
+def _expand_knowledge_query(query: str) -> str:
+    """Append domain terms found inside a natural-language query."""
+    lowered = query.lower()
+    expansions = [
+        expansion
+        for term, expansion in _KNOWLEDGE_QUERY_EXPANSIONS.items()
+        if term in lowered
+    ]
+    return f"{query} {' '.join(expansions)}".strip() if expansions else query
+
+
+def _merge_knowledge_chunks(*groups: list[Any], limit: int = 5) -> list[Any]:
+    merged = []
+    seen = set()
+    for group in groups:
+        for chunk in group:
+            key = f"{chunk.source}|{' '.join(chunk.content.split())[:240]}"
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(chunk)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
 def _make_knowledge_node(model: Any):
     """Knowledge agent: auto-search → LLM formats answer (v3 approach).
 
-    v3 advantages over v2:
+    Design:
     - HybridKnowledgeRetriever: Qdrant vector + ripgrep + RRF fusion
     - Keyword fallback: auto-extract domain terms and retry if results sparse
     - Better prompt: source citation, multi-source synthesis, clear fallback
@@ -325,7 +385,7 @@ def _make_knowledge_node(model: Any):
 
         msgs = state.get("messages", [])
         user_msg = None
-        for m in msgs:
+        for m in reversed(msgs):
             if isinstance(m, HumanMessage):
                 user_msg = m.content if hasattr(m, "content") else str(m)
                 break
@@ -340,25 +400,11 @@ def _make_knowledge_node(model: Any):
         retriever = get_knowledge_retriever()
         chunks = await retriever.retrieve(user_msg)
 
-        # Keyword fallback: if results are too sparse, expand known domain terms and retry
-        if len(chunks) < 2:
-            import re
-            terms = re.findall(r'[一-鿿]{2,4}', user_msg)
-            domain_expansions = {
-                "分布": "分布表 分布方式 DISTRIBUTED 随机分布 HASH",
-                "分区": "分区表 分区键 PARTITION CREATE TABLE",
-                "随机": "随机分布 RANDOM DISTRIBUTION 分布表",
-                "创建": "创建 分布表 随机分布 DDL 建表语句",
-                "Hash": "HASH 哈希 分布键 分布表 随机分布",
-                "表": "创建表 建表 表结构 分布表 随机分布 HASH 分布",
-            }
-            for term in terms:
-                if term in domain_expansions:
-                    alt = domain_expansions[term]
-                    alt_chunks = await retriever.retrieve(alt)
-                    if len(alt_chunks) > len(chunks):
-                        chunks = alt_chunks
-                        break
+        # Domain expansion improves exact fallback and gives vector retrieval extra GBase terminology.
+        expanded_query = _expand_knowledge_query(str(user_msg))
+        if expanded_query != user_msg:
+            expanded_chunks = await retriever.retrieve(expanded_query)
+            chunks = _merge_knowledge_chunks(expanded_chunks, chunks)
 
         _emit("tool_call_start", {"name": "search_knowledge", "args": {"query": str(user_msg)[:100]}, "agent_name": "knowledge_agent"})
         _emit("tool_call_result", {"name": "search_knowledge", "result": {"summary": f"检索到 {len(chunks)} 条相关文档"}})
@@ -366,6 +412,7 @@ def _make_knowledge_node(model: Any):
 
         # ── Phase 2: Build knowledge context ──
         knowledge_lines = []
+        source_names: list[str] = []
         if chunks:
             seen_sources = set()
             for i, chunk in enumerate(chunks[:5]):
@@ -374,12 +421,14 @@ def _make_knowledge_node(model: Any):
                 if dedup_key in seen_sources:
                     continue
                 seen_sources.add(dedup_key)
-                content = chunk.content[:1000] if chunk.content else ""
+                if src not in source_names:
+                    source_names.append(src)
+                content = chunk.content[:3000] if chunk.content else ""
                 if content:
                     knowledge_lines.append(f"**来源 {i+1}: [{src}]**\n{content}\n")
         knowledge_section = "\n".join(knowledge_lines) if knowledge_lines else "（未找到相关文档）"
 
-        # ── Phase 3: Build prompt (v3 style, not v2 build_qa_prompt) ──
+        # ── Phase 3: Build grounded answer prompt ──
         prompt_text = V3_QA_SYSTEM.format(knowledge_section=knowledge_section)
         prompt_text += f"\n## 用户问题\n{user_msg}"
 
@@ -394,8 +443,98 @@ def _make_knowledge_node(model: Any):
             answer = f"知识检索处理出错: {e}"
 
         _emit("delta", answer)
+        _emit("state_delta", {"path": "sources", "value": {"sources": source_names}})
         _emit("step_finished", {"agent_name": "knowledge_agent"})
-        return {"knowledge_finished": True, "messages": [AIMessage(content=answer)]}
+        return {
+            "knowledge": {"knowledge_sources": source_names, "answer": answer},
+            "messages": [AIMessage(content=answer)],
+        }
+
+    return node_fn
+
+
+def _make_sql_validation_node():
+    """Create the deterministic SQL validation gate."""
+
+    async def node_fn(state: AgentState) -> dict:
+        from app.sql.sandbox import SQLSandbox, SQLSandboxError
+        from app.sql.validator import validate_sql
+
+        sql_state = {**state.get("sql", {})}
+        sql = str(sql_state.get("generated_sql") or "")
+        schemas = sql_state.get("grounded_schemas") or None
+        result = validate_sql(sql, schemas=schemas)
+        safety_errors: list[str] = []
+        try:
+            SQLSandbox._validate_first_word(sql)
+            SQLSandbox._validate_ast(sql)
+            SQLSandbox._validate_single_statement(sql)
+        except SQLSandboxError as exc:
+            safety_errors.append(str(exc))
+        validation = {
+            "valid": result.is_valid and not safety_errors,
+            "errors": [*safety_errors, *result.errors],
+            "warnings": result.warnings,
+        }
+        sql_state["validation"] = validation
+        _emit("state_delta", {"path": "sql", "value": {"sql": sql, "validation": validation}})
+
+        if validation["valid"]:
+            sql_state["phase"] = "validated"
+            sql_state["execution_error"] = None
+            return {"sql": sql_state}
+
+        retry_count = sql_state.get("retry_count", 0) + 1
+        sql_state.update({
+            "phase": "validation_failed",
+            "retry_count": retry_count,
+            "execution_error": "；".join(validation["errors"]) or "SQL 验证失败",
+        })
+        feedback = (
+            "确定性 SQL 验证失败，请修正后重新调用 submit_sql。"
+            f"\n错误：{sql_state['execution_error']}"
+        )
+        if retry_count >= 3:
+            final = f"SQL 在 3 次尝试后仍未通过验证：{sql_state['execution_error']}"
+            _emit("delta", final)
+            return {"sql": sql_state, "sql_finished": True, "messages": [AIMessage(content=final)]}
+        return {"sql": sql_state, "messages": [HumanMessage(content=feedback)]}
+
+    return node_fn
+
+
+def _make_sql_execution_node(db_connection_id: str):
+    """Create the deterministic SQL execution gate."""
+
+    async def node_fn(state: AgentState) -> dict:
+        sql_state = {**state.get("sql", {})}
+        sql = str(sql_state.get("generated_sql") or "")
+        tool = ExecuteSQLTool(db_connection_id=db_connection_id)
+        result = await tool.execute(sql=sql)
+
+        if isinstance(result, dict) and result.get("error"):
+            retry_count = sql_state.get("retry_count", 0) + 1
+            sql_state.update({
+                "phase": "execution_failed",
+                "retry_count": retry_count,
+                "execution_error": str(result["error"]),
+            })
+            final = f"SQL 执行失败：{result['error']}"
+            _emit("delta", final)
+            return {"sql": sql_state, "sql_finished": True, "messages": [AIMessage(content=final)]}
+
+        sql_state.update({
+            "phase": "completed",
+            "query_result": result,
+            "execution_error": None,
+        })
+        _emit("state_delta", {"path": "result", "value": result})
+        final = (
+            f"```sql\n{sql}\n```\n\n"
+            f"查询完成：共 {result.get('row_count', 0)} 行，耗时 {result.get('execution_time_ms', 0)}ms。"
+        )
+        _emit("delta", final)
+        return {"sql": sql_state, "sql_finished": True, "messages": [AIMessage(content=final)]}
 
     return node_fn
 
@@ -404,35 +543,32 @@ def _make_knowledge_node(model: Any):
 # Graph builder
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-def build_graph(db_connection_id: str = "") -> StateGraph:
-    """Build v3 ReAct Agent graph with inlined agent+tools nodes.
+def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGraph:
+    """Build the v3 hybrid collaborative Agent graph.
 
     Graph structure:
-        START → supervisor_agent ⇄ supervisor_tools
-                    │ (delegate_to_sql)
-                    ├──→ sql_agent ⇄ sql_tools ──→ supervisor_agent
-                    │ (delegate_to_knowledge)
-                    ├──→ knowledge_agent ⇄ knowledge_tools ──→ supervisor_agent
-                    │ (respond_general / ask_clarify / get_status)
-                    └──→ response_formatter → END
+        START → Planner → task queue → specialist → task complete
+                                  ├── SQL ReAct → validate gate → execute gate
+                                  ├── Knowledge retrieval pipeline
+                                  └── General Agent
+                             task queue empty → response formatter → END
     """
     from app.dependencies import get_llm_client
 
     builder = StateGraph(AgentState)
 
-    supervisor_llm = LiteLLMChatAdapter(get_llm_client(task_type="general"))
-    specialist_llm = LiteLLMChatAdapter(get_llm_client(task_type="sql"))
+    planner_llm = LiteLLMChatAdapter(get_llm_client(model=model, task_type="intent_classification"))
+    sql_llm = LiteLLMChatAdapter(get_llm_client(model=model, task_type="sql_generation"))
+    knowledge_llm = LiteLLMChatAdapter(get_llm_client(model=model, task_type="knowledge_qa"))
+    general_llm = LiteLLMChatAdapter(get_llm_client(model=model, task_type="general"))
 
     # ── Node factories (capture db_connection_id in closure) ──
 
     def _get_supervisor_tools():
-        return get_supervisor_tools(db_connection_id)
+        return get_supervisor_tools()
 
     def _get_sql_tools():
-        return get_sql_agent_tools(db_id=db_connection_id, db_connection_id=db_connection_id)
-
-    def _get_knowledge_tools():
-        return get_knowledge_agent_tools()
+        return get_sql_agent_tools(db_id=db_connection_id)
 
     def _get_no_tools():
         return []  # General agent has no tools
@@ -440,24 +576,89 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     # ── Add nodes ──
 
     builder.add_node("supervisor_agent", _make_agent_node(
-        supervisor_llm, _get_supervisor_tools, get_supervisor_prompt, "supervisor", "supervisor_step", "supervisor_finished"
+        planner_llm, _get_supervisor_tools, get_supervisor_prompt, "supervisor", "supervisor_step", "supervisor_finished"
     ))
     builder.add_node("supervisor_tools", _make_tools_node(_get_supervisor_tools(), "supervisor"))
 
     builder.add_node("sql_agent", _make_agent_node(
-        specialist_llm, _get_sql_tools, get_sql_agent_prompt, "sql_agent", "sql_step", "sql_finished",
+        sql_llm, _get_sql_tools, get_sql_agent_prompt, "sql_agent", "sql_step", "sql_finished",
         isolate_context=True,
     ))
     builder.add_node("sql_tools", _make_tools_node(_get_sql_tools(), "sql_agent"))
+    builder.add_node("sql_validate", _make_sql_validation_node())
+    builder.add_node("sql_execute", _make_sql_execution_node(db_connection_id))
 
     # Knowledge Agent: auto-search → LLM formats answer (NOT ReAct — no tools, no loop)
-    builder.add_node("knowledge_agent", _make_knowledge_node(specialist_llm))
+    builder.add_node("knowledge_agent", _make_knowledge_node(knowledge_llm))
 
     builder.add_node("general_agent", _make_agent_node(
-        supervisor_llm, _get_no_tools, get_general_agent_prompt, "general_agent", "general_step", "general_finished",
+        general_llm, _get_no_tools, get_general_agent_prompt, "general_agent", "general_step", "general_finished",
         isolate_context=True,
     ))
 
+    async def _build_task_plan(state: AgentState) -> dict:
+        """Translate Supervisor delegate calls into an explicit specialist task queue."""
+        tasks: list[dict] = []
+        for message in reversed(state.get("messages", [])):
+            tool_calls, _ = _parse_tool_calls(message)
+            if not tool_calls:
+                continue
+            for tool_call in tool_calls:
+                task_type = {
+                    "delegate_to_sql_specialist": "sql",
+                    "delegate_to_knowledge_specialist": "knowledge",
+                    "delegate_to_general": "general",
+                }.get(tool_call.get("name", ""))
+                if task_type:
+                    tasks.append({
+                        "type": task_type,
+                        "query": str(tool_call.get("args", {}).get("query", "")),
+                    })
+            break
+        supervisor_state = {**state.get("supervisor", {})}
+        supervisor_state.update({
+            "pending_tasks": tasks[:MAX_PLANNED_TASKS],
+            "completed_tasks": [],
+            "active_task": None,
+        })
+        return {"supervisor": supervisor_state}
+
+    async def _dispatch_task(state: AgentState) -> dict:
+        """Pop one planned task and add its scoped query to the specialist context."""
+        supervisor_state = {**state.get("supervisor", {})}
+        pending = list(supervisor_state.get("pending_tasks", []))
+        if not pending:
+            return {"supervisor": supervisor_state}
+        active = pending.pop(0)
+        supervisor_state.update({"pending_tasks": pending, "active_task": active})
+        return {
+            "supervisor": supervisor_state,
+            "messages": [HumanMessage(content=active.get("query", ""))],
+        }
+
+    async def _complete_task(state: AgentState) -> dict:
+        """Record specialist output, reset its loop state, and continue the plan."""
+        supervisor_state = {**state.get("supervisor", {})}
+        completed = list(supervisor_state.get("completed_tasks", []))
+        active = supervisor_state.get("active_task") or {}
+        answer = ""
+        for message in reversed(state.get("messages", [])):
+            if isinstance(message, AIMessage) and message.content:
+                answer = str(message.content)
+                break
+        completed.append({**active, "answer": answer})
+        supervisor_state.update({"completed_tasks": completed, "active_task": None})
+        return {
+            "supervisor": supervisor_state,
+            "sql_step": 0,
+            "sql_finished": False,
+            "general_step": 0,
+            "general_finished": False,
+        }
+
+    builder.add_node("task_plan", _build_task_plan)
+    builder.add_node("task_dispatch", _dispatch_task)
+    builder.add_node("task_complete", _complete_task)
     builder.add_node("response_formatter", _response_formatter_node)
 
     # ── Routing ──
@@ -477,37 +678,33 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
         return "end"
 
     def route_supervisor_agent(state: AgentState) -> str:
-        # Guard: if we've delegated too many times, force final response
-        if state.get("delegation_count", 0) >= MAX_DELEGATIONS:
-            return "end"
         return _route_agent(state, "supervisor_step", "supervisor_finished")
 
-    def route_supervisor_tools(state: AgentState) -> str:
-        msgs = state.get("messages", [])
-        if msgs:
-            for msg in reversed(msgs):
-                tcs, _ = _parse_tool_calls(msg)
-                if tcs:
-                    for tc in tcs:
-                        name = tc.get("name", "")
-                        if name == "delegate_to_sql_specialist":
-                            return "sql_agent"
-                        if name == "delegate_to_knowledge_specialist":
-                            return "knowledge_agent"
-                        if name == "delegate_to_general":
-                            return "general_agent"
-                    break
-        return "response_formatter"
+    def route_task_plan(state: AgentState) -> str:
+        return "dispatch" if state.get("supervisor", {}).get("pending_tasks") else "end"
+
+    def route_task_dispatch(state: AgentState) -> str:
+        task_type = state.get("supervisor", {}).get("active_task", {}).get("type")
+        return task_type if task_type in {"sql", "knowledge", "general"} else "end"
+
+    def route_task_complete(state: AgentState) -> str:
+        return "dispatch" if state.get("supervisor", {}).get("pending_tasks") else "end"
 
     def route_sql_agent(state: AgentState) -> str:
         return _route_agent(state, "sql_step", "sql_finished")
 
-    def route_knowledge_agent(state: AgentState) -> str:
-        return _route_agent(state, "knowledge_step", "knowledge_finished")
+    def route_sql_tools(state: AgentState) -> str:
+        if state.get("sql", {}).get("phase") == "proposed":
+            return "validate"
+        return "agent"
 
-    def route_general_agent(state: AgentState) -> str:
-        # General agent has no tools — always returns text, never loops
-        return "end"
+    def route_sql_validation(state: AgentState) -> str:
+        sql_state = state.get("sql", {})
+        if sql_state.get("validation", {}).get("valid"):
+            return "execute"
+        if state.get("sql_finished"):
+            return "end"
+        return "agent"
 
     # ── Edges ──
 
@@ -518,42 +715,41 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
         "tools": "supervisor_tools",
         "end": "response_formatter",
     })
-    builder.add_conditional_edges("supervisor_tools", route_supervisor_tools, {
-        "sql_agent": "sql_agent",
-        "knowledge_agent": "knowledge_agent",
-        "general_agent": "general_agent",
-        "response_formatter": "response_formatter",
+    builder.add_edge("supervisor_tools", "task_plan")
+    builder.add_conditional_edges("task_plan", route_task_plan, {
+        "dispatch": "task_dispatch",
+        "end": "response_formatter",
     })
-
-    # Increment delegation counter and reset state when specialists return
-    async def _specialist_return(state: AgentState) -> dict:
-        return {
-            "delegation_count": state.get("delegation_count", 0) + 1,
-            "supervisor_step": 0, "supervisor_finished": False,
-            "sql_step": 0, "sql_finished": False,
-            "knowledge_step": 0, "knowledge_finished": False,
-        }
-
-    builder.add_node("_specialist_return", _specialist_return)
-
-    # SQL Agent loop → counter → supervisor on finish
-    builder.add_conditional_edges("sql_agent", route_sql_agent, {
-        "tools": "sql_tools",
-        "end": "_specialist_return",
-    })
-    builder.add_edge("sql_tools", "sql_agent")
-
-    # Knowledge Agent → direct to formatter (search→answer pipeline, no ReAct)
-    builder.add_edge("knowledge_agent", "response_formatter")
-
-    # General Agent → always goes to response_formatter (no tools, straight answer)
-    builder.add_conditional_edges("general_agent", route_general_agent, {
+    builder.add_conditional_edges("task_dispatch", route_task_dispatch, {
+        "sql": "sql_agent",
+        "knowledge": "knowledge_agent",
+        "general": "general_agent",
         "end": "response_formatter",
     })
 
-    # Specialists produce the final answer — route directly to formatter.
-    # The Supervisor is a router, not a re-answerer.
-    builder.add_edge("_specialist_return", "response_formatter")
+    # SQL Specialist loop and deterministic gates
+    builder.add_conditional_edges("sql_agent", route_sql_agent, {
+        "tools": "sql_tools",
+        "end": "task_complete",
+    })
+    builder.add_conditional_edges("sql_tools", route_sql_tools, {
+        "validate": "sql_validate",
+        "agent": "sql_agent",
+    })
+    builder.add_conditional_edges("sql_validate", route_sql_validation, {
+        "execute": "sql_execute",
+        "agent": "sql_agent",
+        "end": "task_complete",
+    })
+    builder.add_edge("sql_execute", "task_complete")
+
+    builder.add_edge("knowledge_agent", "task_complete")
+
+    builder.add_edge("general_agent", "task_complete")
+    builder.add_conditional_edges("task_complete", route_task_complete, {
+        "dispatch": "task_dispatch",
+        "end": "response_formatter",
+    })
 
     # Terminal
     builder.add_edge("response_formatter", END)
@@ -565,31 +761,30 @@ async def _response_formatter_node(state: AgentState) -> dict:
     """Format the final response — extract last AIMessage text content."""
     msgs = state.get("messages", [])
     final_text = ""
+    completed_tasks = state.get("supervisor", {}).get("completed_tasks", [])
+    if len(completed_tasks) > 1:
+        sections = []
+        labels = {"sql": "数据查询", "knowledge": "知识说明", "general": "补充回答"}
+        for task in completed_tasks:
+            answer = str(task.get("answer", "")).strip()
+            if answer:
+                sections.append(f"### {labels.get(task.get('type'), '任务结果')}\n{answer}")
+        final_text = "\n\n".join(sections)
 
     from langchain_core.messages import AIMessage as AIMsg
 
-    for msg in reversed(msgs):
-        if isinstance(msg, AIMsg) and msg.content:
-            content = msg.content
-            if isinstance(content, str) and content.strip():
-                if content.strip().startswith('{"status":'):
-                    continue
-                final_text = content
-                break
+    if not final_text:
+        for msg in reversed(msgs):
+            if isinstance(msg, AIMsg) and msg.content:
+                content = msg.content
+                if isinstance(content, str) and content.strip():
+                    if content.strip().startswith('{"status":'):
+                        continue
+                    final_text = content
+                    break
 
     if not final_text:
         final_text = "处理完成。如有其他问题，请继续提问。"
-
-    # Emit structured events: extract SQL blocks from response text
-    import re as _re
-    sql_match = _re.search(r'```sql\s*\n(.*?)\n```', final_text, _re.DOTALL)
-    if sql_match:
-        try:
-            writer = get_stream_writer()
-            sql = sql_match.group(1).strip()
-            writer([{"sql": sql}])
-        except RuntimeError:
-            pass
 
     return {"final_response": final_text}
 
@@ -624,14 +819,15 @@ async def _monitoring_fast_path(db_connection_id: str | None) -> AsyncIterator[s
         yield EventEncoder.run_finished()
         return
 
-    from app.agents.tools.status_tool import GetDatabaseStatusTool
     import json
 
+    from app.agents.tools.status_tool import GetDatabaseStatusTool
+
     tool = GetDatabaseStatusTool(db_connection_id=db_connection_id)
-    raw_json = await tool.execute()
+    raw_result = await tool.execute()
 
     try:
-        status_data = json.loads(raw_json)
+        status_data = raw_result if isinstance(raw_result, dict) else json.loads(raw_result)
         lines = ["**数据库状态概览**\n"]
         for label, data in status_data.items():
             if isinstance(data, dict) and "error" in data:
@@ -651,7 +847,7 @@ async def _monitoring_fast_path(db_connection_id: str | None) -> AsyncIterator[s
                 lines.append(f"### {label}\n> 无数据")
         formatted = "\n\n".join(lines)
     except (json.JSONDecodeError, TypeError):
-        formatted = f"数据库状态查询结果:\n{raw_json}"
+        formatted = f"数据库状态查询结果:\n{raw_result}"
 
     yield EventEncoder.text_delta(formatted)
     yield EventEncoder.run_finished()
@@ -677,16 +873,15 @@ async def run_agent_with_ag_ui(
             yield event
         return
 
-    graph = build_graph(db_connection_id=db_connection_id or "")
-
     # Load conversation history
     history = []
     if conversation_id:
         try:
+            from sqlalchemy import select
+
             from app.database import async_session_factory
             from app.models.conversation import Conversation
             from app.services.conversation_service import build_context
-            from sqlalchemy import select
 
             async with async_session_factory() as session:
                 result = await session.execute(
@@ -699,18 +894,16 @@ async def run_agent_with_ag_ui(
         except Exception:
             pass
 
+    graph = build_graph(db_connection_id=db_connection_id or "", model=model)
+
     initial_state: AgentState = {
-        "messages": [HumanMessage(content=user_message)],
-        "conversation_id": conversation_id,
-        "model": model,
+        "messages": _build_conversation_messages(history, user_message),
         "db_connection_id": db_connection_id,
-        "history": history,
-        "delegation_count": 0,
         "supervisor_step": 0, "supervisor_finished": False,
         "sql_step": 0, "sql_finished": False,
-        "knowledge_step": 0, "knowledge_finished": False,
+        "general_step": 0, "general_finished": False,
         "supervisor": {},
-        "sql": {},
+        "sql": {"retry_count": 0, "phase": "idle"},
         "knowledge": {},
     }
 
@@ -756,6 +949,9 @@ async def run_agent_with_ag_ui(
                         elif "delta" in ev:
                             yield EventEncoder.text_delta(ev["delta"])
                             streamed_text = True
+                        elif "state_delta" in ev:
+                            info = ev["state_delta"]
+                            yield EventEncoder.state_delta(info["path"], info["value"])
 
         final_state = await graph.aget_state(config)
         state_values = final_state.values if final_state else {}

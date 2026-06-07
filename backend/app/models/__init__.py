@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from app.models.connection import DbConnection
 from app.models.conversation import Conversation
-from app.models.folder import Folder
 from app.models.conversation_summary import ConversationSummary
+from app.models.folder import Folder
 from app.models.knowledge_document import KnowledgeDocument
 from app.models.message import Message
 from app.models.sql_feedback import SQLFeedback

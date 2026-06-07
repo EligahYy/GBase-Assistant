@@ -17,6 +17,12 @@ RRF_K = 60
 TOP_K = 5
 
 
+def _chunk_key(chunk: KnowledgeChunk) -> str:
+    """Identify a chunk without collapsing distinct chapters from the same document."""
+    normalized = " ".join(chunk.content.split())
+    return f"{chunk.source}|{normalized[:240]}"
+
+
 def reciprocal_rank_fusion(
     results_a: list[KnowledgeChunk],
     results_b: list[KnowledgeChunk],
@@ -31,12 +37,12 @@ def reciprocal_rank_fusion(
     content_map: dict[str, KnowledgeChunk] = {}
 
     for rank, chunk in enumerate(results_a, 1):
-        key = chunk.source or chunk.content[:80]
+        key = _chunk_key(chunk)
         scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
         content_map[key] = chunk
 
     for rank, chunk in enumerate(results_b, 1):
-        key = chunk.source or chunk.content[:80]
+        key = _chunk_key(chunk)
         scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
         if key not in content_map:
             content_map[key] = chunk

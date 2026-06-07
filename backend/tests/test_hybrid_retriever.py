@@ -1,8 +1,6 @@
 # backend/tests/test_hybrid_retriever.py
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from app.protocols import KnowledgeChunk, KnowledgeRetriever
@@ -107,7 +105,7 @@ class TestHybridKnowledgeRetriever:
         )
         grep = FakeKnowledgeRetriever(
             results=[
-                make_chunk("chunk B dup", "error_codes.json", "error_code"),
+                make_chunk("chunk B", "error_codes.json", "error_code"),
                 make_chunk("chunk C", "ops_cluster.json", "ops"),
             ]
         )
@@ -115,10 +113,18 @@ class TestHybridKnowledgeRetriever:
         hybrid = HybridKnowledgeRetriever(vector=vector, grep=grep)
         results = await hybrid.retrieve("GBase 8a 错误码")
 
-        # RRF 按 source 去重，error_codes.json 只出现一次
-        sources = [r.source for r in results]
-        assert len(sources) == len(set(sources))
         assert len(results) == 3
+
+    def test_rrf_keeps_distinct_chapters_from_same_document(self):
+        """同一 PDF 的不同章节不能因 source 相同而互相覆盖。"""
+        from app.vector.hybrid_retriever import reciprocal_rank_fusion
+
+        results = reciprocal_rank_fusion(
+            [make_chunk("随机分布表创建语法", "GBase 8a 产品手册")],
+            [make_chunk("哈希分布表创建语法", "GBase 8a 产品手册")],
+        )
+
+        assert [chunk.content for chunk in results] == ["随机分布表创建语法", "哈希分布表创建语法"]
 
     @pytest.mark.anyio
     async def test_grep_failure_falls_back_to_vector(self):

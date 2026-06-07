@@ -16,7 +16,6 @@ DEFAULT_DISTANCE = Distance.COSINE
 
 COLLECTIONS = {
     "schemas": "schemas",
-    "sql_examples": "sql_examples",
     "knowledge": "knowledge",
     "error_codes": "error_codes",
 }

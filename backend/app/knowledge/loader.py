@@ -15,10 +15,8 @@ import yaml
 
 from app.config import get_settings
 from app.protocols import (
-    ExampleRetriever,
     KnowledgeChunk,
     KnowledgeRetriever,
-    SQLExample,
     TableSchema,
 )
 
@@ -153,60 +151,6 @@ def _parse_ddl_to_schemas(ddl_text: str) -> list[TableSchema]:
             )
 
     return schemas
-
-
-# ── ExampleRetriever Phase 1 实现 ──────────────────────────────────────────────────
-
-
-class FileExampleRetriever:
-    """
-    ExampleRetriever Phase 1 实现：从 JSONL 文件加载所有示例，返回前 top_k 条。
-    Phase 3 升级：替换为 QdrantExampleRetriever（向量相似度检索）。
-    """
-
-    def __init__(self):
-        self._examples: list[SQLExample] | None = None
-
-    def _load(self) -> list[SQLExample]:
-        if self._examples is not None:
-            return self._examples
-
-        examples_path = _knowledge_dir() / "examples" / "sql_examples.jsonl"
-        self._examples = []
-
-        if not examples_path.exists():
-            logger.warning("sql_examples.jsonl 不存在: %s", examples_path)
-            return self._examples
-
-        with open(examples_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                    self._examples.append(
-                        SQLExample(
-                            question=data["question"],
-                            sql=data["sql"],
-                            tables=data.get("tables", []),
-                            pattern=data.get("pattern", ""),
-                            difficulty=data.get("difficulty", "medium"),
-                        )
-                    )
-                except Exception as e:
-                    logger.warning("解析示例行失败: %s | %s", e, line[:80])
-
-        logger.info("加载 %d 条 SQL 示例", len(self._examples))
-        return self._examples
-
-    async def retrieve(self, query: str, top_k: int = 5) -> list[SQLExample]:
-        """Phase 1: 返回前 top_k 条示例（不做相关性过滤）。"""
-        examples = self._load()
-        return examples[:top_k]
-
-
-assert isinstance(FileExampleRetriever(), ExampleRetriever)
 
 
 # ── KnowledgeRetriever Phase 1 实现 ──────────────────────────────────────────────

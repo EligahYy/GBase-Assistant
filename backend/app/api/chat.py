@@ -1,4 +1,4 @@
-"""聊天 API — v2 多智能体 AG-UI 流式聊天 + 对话管理。"""
+"""聊天 API — v3 多智能体 AG-UI 流式聊天 + 对话管理。"""
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ async def chat_stream(
     user_message_id = str(uuid.uuid4())
     try:
         from datetime import UTC, datetime
+
         from app.models.message import Message
 
         if not request.conversation_id:
@@ -74,6 +75,7 @@ async def chat_stream(
     async def persistent_stream():
         full_text = ""
         sql_generated = None
+        sql_validated = None
         query_result = None
         chart_config = None
         async for event in event_stream:
@@ -90,7 +92,13 @@ async def chat_stream(
                             path = data.get("path", "")
                             value = data.get("value", {})
                             if path == "sql":
-                                sql_generated = value.get("sql", "") if isinstance(value, dict) else str(value)
+                                if isinstance(value, dict):
+                                    sql_generated = value.get("sql", "")
+                                    validation = value.get("validation")
+                                    if isinstance(validation, dict):
+                                        sql_validated = validation.get("valid")
+                                else:
+                                    sql_generated = str(value)
                             elif path == "result" and isinstance(value, dict):
                                 query_result = value
                             elif path == "chart_config" and isinstance(value, dict):
@@ -110,6 +118,7 @@ async def chat_stream(
                         content=full_text.strip(),
                         message_type="sql" if sql_generated else "general",
                         sql_generated=sql_generated,
+                        sql_validated=sql_validated,
                         query_result=json.dumps(query_result) if query_result else None,
                         chart_config=json.dumps(chart_config) if chart_config else None,
                         created_at=datetime.now(UTC),
@@ -233,8 +242,9 @@ async def create_feedback(
 @router.get("/folders", response_model=list[FolderResponse])
 async def list_folders(db: AsyncSession = Depends(get_db)):
     """获取文件夹列表，含对话计数。"""
-    from app.models.folder import Folder
     from sqlalchemy import func
+
+    from app.models.folder import Folder
 
     result = await db.execute(
         select(

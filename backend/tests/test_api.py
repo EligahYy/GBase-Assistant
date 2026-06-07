@@ -139,7 +139,8 @@ class TestSSEAPI:
     async def test_connection_status_stream(self):
         """SSE 端点应返回 text/event-stream。"""
         import asyncio
-        from httpx import AsyncClient, ASGITransport
+
+        from httpx import ASGITransport, AsyncClient
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -153,5 +154,5 @@ class TestSSEAPI:
                         async for line in response.aiter_lines():
                             assert ": keepalive" in line
                             break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # expected — infinite stream timed out after reading data

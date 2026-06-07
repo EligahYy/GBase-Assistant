@@ -6,7 +6,6 @@ import pytest
 
 from app.protocols import TableSchema
 from app.sql.validator import (
-    extract_sql_from_markdown,
     validate_sql,
 )
 
@@ -164,26 +163,3 @@ class TestGroupByChecks:
     def test_group_by_all_columns_ok(self):
         result = validate_sql("SELECT department, name, COUNT(*) FROM employees GROUP BY department, name")
         assert not any("GROUP BY 中缺少" in w for w in result.warnings)
-
-
-class TestExtractSQLFromMarkdown:
-    """Markdown SQL extraction utility."""
-
-    def test_extract_sql_code_block(self):
-        text = "```sql\nSELECT * FROM users\n```"
-        assert extract_sql_from_markdown(text) == "SELECT * FROM users"
-
-    def test_extract_plain_code_block(self):
-        text = "```\nSELECT * FROM users\n```"
-        assert extract_sql_from_markdown(text) == "SELECT * FROM users"
-
-    def test_extract_direct_sql(self):
-        text = "Here is the query: SELECT id FROM users"
-        assert extract_sql_from_markdown(text) == "SELECT id FROM users"
-
-    def test_no_sql_found(self):
-        text = "Just some text without SQL"
-        assert extract_sql_from_markdown(text) is None
-
-    def test_empty_string(self):
-        assert extract_sql_from_markdown("") is None

@@ -48,7 +48,7 @@ class ColumnMeta:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ColumnMeta":
+    def from_dict(cls, d: dict) -> ColumnMeta:
         return cls(
             name=d["name"],
             data_type=d["type"],
@@ -81,7 +81,7 @@ class TableMeta:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "TableMeta":
+    def from_dict(cls, d: dict) -> TableMeta:
         return cls(
             name=d["name"],
             label=d.get("label", ""),
@@ -116,12 +116,6 @@ class DDLParser:
             return None
         table_name = table_match.group(1)
 
-        # 提取列定义：匹配 column_name type [options] [COMMENT '...']
-        col_pattern = re.compile(
-            r'[`"\[]?(\w+)[`"\]]?\s+(\w+(?:\([^)]*\))?)'  # name + type
-            r'(.*?)(?:,|\n\s*\)|$)',  # everything until comma or end of columns
-            re.DOTALL
-        )
         # Better approach: split by commas between the outermost parentheses
         columns_section = DDLParser._extract_columns_section(ddl)
         if not columns_section:
@@ -676,7 +670,7 @@ class SchemaGraph:
         return filepath
 
     @classmethod
-    def load(cls, db_id: str, data_dir: str | None = None) -> "SchemaGraph | None":
+    def load(cls, db_id: str, data_dir: str | None = None) -> SchemaGraph | None:
         """从 JSON 文件加载。"""
         if data_dir is None:
             data_dir = str(Path(__file__).parent.parent.parent / "data" / "schema_graph")
@@ -684,7 +678,7 @@ class SchemaGraph:
         if not Path(filepath).exists():
             return None
 
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
 
         graph = cls(db_id=db_id)

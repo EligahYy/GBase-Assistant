@@ -30,16 +30,14 @@ from app.schemas.connection import (
     TestConnectionResponse,
 )
 from app.security.crypto import decrypt_password, encrypt_password
-from app.sql.sandbox import SQLSandbox, SQLSandboxError
-
 from app.services.connection_cache import (
-    CACHE_TTL,
     clear_testing,
     get_cached_status,
     is_testing,
     set_cached_status,
     set_testing,
 )
+from app.sql.sandbox import SQLSandbox, SQLSandboxError
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 logger = logging.getLogger(__name__)
@@ -444,7 +442,7 @@ async def stream_connection_status():
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # 15 秒无事件，发送 keepalive 注释（SSE 标准）
                     yield ": keepalive\n\n"
                     continue

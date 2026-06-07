@@ -1,7 +1,4 @@
-"""SQL tool implementations — ValidateSQLTool, ExecuteSQLTool.
-
-Converted from validate_sql() in app.sql.validator and sql_executor_node in graph.py.
-"""
+"""SQL proposal and execution tools."""
 
 from __future__ import annotations
 
@@ -13,110 +10,43 @@ from app.agents.tools.base import ToolParameter
 logger = logging.getLogger(__name__)
 
 
-class ValidateSQLTool:
-    """Tool: validate SQL syntax, GBase 8a dialect compliance, and schema cross-references."""
-
-    def __init__(self) -> None:
-        pass
+class SubmitSQLTool:
+    """Submit a candidate SQL statement to the deterministic validation gate."""
 
     @property
     def name(self) -> str:
-        return "validate_sql"
+        return "submit_sql"
 
     @property
     def description(self) -> str:
         return (
-            "Validate SQL syntax and GBase 8a dialect compliance. "
-            "Returns whether the SQL is valid, plus any errors and warnings."
+            "Submit the final candidate SQL for deterministic validation and execution. "
+            "This is the only way to execute SQL; do not call it until schema exploration is complete."
         )
 
     @property
     def parameters(self) -> list[ToolParameter]:
-        return [
-            ToolParameter(
-                name="sql",
-                type="string",
-                description="The SQL statement to validate",
-            ),
-        ]
+        return [ToolParameter(name="sql", type="string", description="The final read-only SQL candidate")]
 
-    async def execute(self, sql: str = "", **kwargs: Any) -> Any:
-        """Validate SQL syntax and GBase 8a dialect compliance.
-
-        Args:
-            sql: The SQL statement to validate.
-
-        Returns:
-            dict with keys: valid (bool), errors (list[str]), warnings (list[str]).
-        """
-        query = sql or kwargs.get("sql", "")
-        if not query:
-            return {"valid": False, "errors": ["SQL 语句为空"], "warnings": []}
-
-        from app.sql.validator import validate_sql
-
-        result = validate_sql(query)
-        return {
-            "valid": result.is_valid,
-            "errors": result.errors,
-            "warnings": result.warnings,
-        }
+    async def execute(self, sql: str = "", **kwargs: Any) -> dict:
+        return {"sql": sql or kwargs.get("sql", "")}
 
     def format_result(self, result: Any) -> dict:
-        """Format validation results for display.
-
-        Args:
-            result: dict from execute().
-
-        Returns:
-            {"summary": str, "detail": dict|None, "truncated": bool}
-        """
-        if not result:
-            return {
-                "summary": "SQL 验证失败（无结果）。",
-                "detail": None,
-                "truncated": False,
-            }
-
-        is_valid = result.get("valid", False)
-        errors = result.get("errors", [])
-        warnings = result.get("warnings", [])
-
-        if is_valid:
-            summary = "SQL 验证通过"
-            if warnings:
-                summary += f"（{len(warnings)} 个警告）"
-        else:
-            summary = f"SQL 验证失败（{len(errors)} 个错误）"
-
+        sql = result.get("sql", "") if isinstance(result, dict) else ""
         return {
-            "summary": summary,
-            "detail": {
-                "valid": is_valid,
-                "errors": errors,
-                "warnings": warnings,
-            },
+            "summary": "SQL 已提交，等待确定性验证。",
+            "detail": {"sql": sql},
             "truncated": False,
         }
 
     def to_openai_schema(self) -> dict:
-        """Return OpenAI function-calling schema."""
-        props = {}
-        required = []
-        for p in self.parameters:
-            props[p.name] = p.to_json_schema()
-            if p.required:
-                required.append(p.name)
+        props = {p.name: p.to_json_schema() for p in self.parameters}
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": props,
-                    "required": required,
-                },
+                "parameters": {"type": "object", "properties": props, "required": ["sql"]},
             },
         }
 
@@ -168,12 +98,13 @@ class ExecuteSQLTool:
         if not self._db_connection_id:
             return {"error": "未选择数据库连接"}
 
+        from sqlalchemy import select
+
         from app.api.connections import _to_connection_config
         from app.database import async_session_factory
         from app.db_connectors.connector_factory import get_connector
         from app.models.connection import DbConnection
         from app.sql.sandbox import SQLSandbox, SQLSandboxError
-        from sqlalchemy import select
 
         try:
             async with async_session_factory() as session:

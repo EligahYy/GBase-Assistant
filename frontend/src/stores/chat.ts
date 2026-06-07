@@ -49,11 +49,7 @@ export interface Message {
   isStreaming?: boolean
   streamContent?: string
   streamSql?: string
-  thinking?: string
-  isThinking?: boolean
-  toolCalls?: ToolCallEntry[]
   streamEvents?: StreamEvent[]  // chronological event timeline for interleaved display
-  activeAgent?: string | null
 }
 
 export interface Conversation {
@@ -74,12 +70,6 @@ export const useChatStore = defineStore('chat', () => {
   const conversationSummary = ref<ConversationSummary | null>(null)
   const activeFolderId = ref<string | null>(null)
   const folders = ref<FolderResponse[]>([])
-
-  // ReAct streaming observability
-  const thinkingText = ref('')
-  const isThinking = ref(false)
-  const toolCalls = ref<ToolCallEntry[]>([])
-  const activeAgent = ref<string | null>(null)
 
   function addUserMessage(content: string): string {
     const id = crypto.randomUUID()
@@ -337,17 +327,9 @@ export const useChatStore = defineStore('chat', () => {
 
   // ── ReAct streaming observability ──
 
-  function setThinking(active: boolean) {
-    isThinking.value = active
-    if (!active) thinkingText.value = ''
-  }
-
   function appendThinkingToken(id: string, token: string) {
     const msg = messages.value.find((m) => m.id === id)
     if (msg) {
-      msg.thinking = (msg.thinking ?? '') + token
-      msg.isThinking = true
-      // Append to streamEvents timeline
       const events = msg.streamEvents ?? []
       const last = events[events.length - 1]
       if (last && last.type === 'thinking' && last.thinking !== undefined) {
@@ -357,60 +339,32 @@ export const useChatStore = defineStore('chat', () => {
       }
       msg.streamEvents = events
     }
-    thinkingText.value += token
-    isThinking.value = true
-  }
-
-  function setThinkingDone(id: string) {
-    const msg = messages.value.find((m) => m.id === id)
-    if (msg) msg.isThinking = false
-    // Also update global
-    isThinking.value = false
   }
 
   function addToolCall(id: string, tc: ToolCallEntry) {
     const msg = messages.value.find((m) => m.id === id)
     if (msg) {
-      msg.toolCalls = [...(msg.toolCalls ?? []), tc]
-      // Append to streamEvents timeline
       const events = msg.streamEvents ?? []
       events.push({ type: 'tool_call', timestamp: Date.now(), toolCall: tc })
       msg.streamEvents = events
     }
-    toolCalls.value = [...toolCalls.value, tc]
   }
 
   function updateToolCallStatus(id: string, name: string, status: 'done' | 'error', result?: string, error?: string) {
-    // Update per-message tool call
     const msg = messages.value.find((m) => m.id === id)
-    if (msg && msg.toolCalls) {
-      const msgIdx = msg.toolCalls.findIndex(tc => tc.name === name && tc.status === 'running')
-      if (msgIdx >= 0) {
-        const updated = [...msg.toolCalls]
-        updated[msgIdx] = { ...updated[msgIdx], status, result, error }
-        msg.toolCalls = updated
-      }
-    }
-    // Also update global
-    const idx = toolCalls.value.findIndex(tc => tc.name === name && tc.status === 'running')
-    if (idx >= 0) {
-      const updated = [...toolCalls.value]
-      updated[idx] = { ...updated[idx], status, result, error }
-      toolCalls.value = updated
-    }
-  }
+    if (!msg?.streamEvents) return
 
-  function setActiveAgent(id: string, name: string | null) {
-    const msg = messages.value.find((m) => m.id === id)
-    if (msg) msg.activeAgent = name
-    activeAgent.value = name
-  }
+    const index = msg.streamEvents.findIndex(
+      event => event.type === 'tool_call' && event.toolCall?.name === name && event.toolCall.status === 'running',
+    )
+    if (index < 0) return
 
-  function clearToolCalls() {
-    toolCalls.value = []
-    thinkingText.value = ''
-    isThinking.value = false
-    activeAgent.value = null
+    const events = [...msg.streamEvents]
+    const current = events[index]
+    if (current?.toolCall) {
+      events[index] = { ...current, toolCall: { ...current.toolCall, status, result, error } }
+      msg.streamEvents = events
+    }
   }
 
   return {
@@ -421,10 +375,6 @@ export const useChatStore = defineStore('chat', () => {
     conversationSummary,
     activeFolderId,
     folders,
-    thinkingText,
-    isThinking,
-    toolCalls,
-    activeAgent,
     addUserMessage,
     addStreamingMessage,
     appendStreamToken,
@@ -448,12 +398,8 @@ export const useChatStore = defineStore('chat', () => {
     renameFolder,
     removeFolder,
     batchOperate,
-    setThinking,
-    setThinkingDone,
     appendThinkingToken,
     addToolCall,
     updateToolCallStatus,
-    setActiveAgent,
-    clearToolCalls,
   }
 })

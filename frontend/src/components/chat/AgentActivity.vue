@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import type { StreamEvent } from '@/stores/chat'
 
 const props = defineProps<{

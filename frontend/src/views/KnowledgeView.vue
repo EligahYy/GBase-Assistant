@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, h, computed } from 'vue'
+import { ref, onMounted, onUnmounted, h } from 'vue'
 import {
-  NCard, NDataTable, NUpload, NButton, NTag, NProgress,
+  NDataTable, NUpload, NButton, NTag, NProgress,
   NIcon, NSpace, NModal, NAlert, useMessage,
   type DataTableColumn, type UploadFileInfo,
 } from 'naive-ui'
 import {
   TrashOutline, RefreshOutline, CloudUploadOutline,
   DocumentTextOutline, AlertCircleOutline, CheckmarkCircleOutline,
-  CloseCircleOutline,
 } from '@vicons/ionicons5'
 import {
   fetchDocuments, uploadDocument, deleteDocument, reindexDocument,
@@ -139,7 +138,8 @@ async function remove(doc: KnowledgeDocument) {
   try {
     await deleteDocument(doc.id)
     documents.value = documents.value.filter(d => d.id !== doc.id)
-    if (eventSources[doc.id]) { eventSources[doc.id].close(); delete eventSources[doc.id] }
+    const eventSource = eventSources[doc.id]
+    if (eventSource) { eventSource.close(); delete eventSources[doc.id] }
     delete progressMap.value[doc.id]
     msg.success('已删除')
   } catch (e: any) {

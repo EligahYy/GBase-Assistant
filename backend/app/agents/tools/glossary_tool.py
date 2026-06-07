@@ -1,6 +1,6 @@
 """QueryGlossaryTool — looks up business terms in the glossary YAML.
 
-Converted from closure _make_query_glossary_tool() in semantic_mapper.py.
+Maps business terms to database tables and columns.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def _load_glossary(path: str | None = None) -> dict:
     if not Path(filepath).exists():
         logger.warning("Glossary file not found: %s", filepath)
         return {}
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     glossary = data.get("terms", {}) or {}
     logger.info("Glossary loaded: %d terms from %s", len(glossary), filepath)

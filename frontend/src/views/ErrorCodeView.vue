@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NInput, NButton, NTag, NEmpty, NSpin, useMessage } from 'naive-ui'
+import { NInput, NTag, NEmpty, NSpin, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import {
   ArrowBackOutline,

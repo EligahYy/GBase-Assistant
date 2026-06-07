@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.knowledge.parsers.interface import DocumentParser, ParsedDocument, Section
+from app.knowledge.parsers.interface import ParsedDocument, Section
 
 
 class MdParser:

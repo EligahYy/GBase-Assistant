@@ -20,13 +20,13 @@ class TestVectorRetrievalCounters:
         reg.record_vector_retrieval("SchemaRetriever", hit=True)
         reg.record_vector_retrieval("SchemaRetriever", hit=True)
         reg.record_vector_retrieval("SchemaRetriever", hit=False)
-        reg.record_vector_retrieval("ExampleRetriever", hit=False)
+        reg.record_vector_retrieval("KnowledgeRetriever", hit=False)
 
         snap = reg.snapshot()
         assert snap["vector_retrieval_hit_total"] == {"SchemaRetriever": 2}
         assert snap["vector_retrieval_miss_total"] == {
             "SchemaRetriever": 1,
-            "ExampleRetriever": 1,
+            "KnowledgeRetriever": 1,
         }
 
 

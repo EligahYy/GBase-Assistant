@@ -1,4 +1,4 @@
-"""AgentState — LangGraph 共享状态定义。v3 ReAct Multi-Agent。
+"""LangGraph collaborative Agent state definitions.
 
 使用 TypedDict 定义，兼容 LangGraph StateGraph 的 state schema。
 所有字段 total=False，Agent 只读写自己的 namespace。
@@ -9,41 +9,31 @@ from typing import Annotated, TypedDict
 from langgraph.graph.message import add_messages
 
 
-class ReActState(TypedDict, total=False):
-    """State for a single ReAct agent's internal loop.
-
-    Used by the custom build_react_agent() factory. Each agent gets its own
-    ReActState instance scoped to its subgraph.
-    """
-
-    messages: Annotated[list, add_messages]
-    step_index: int  # Current step number in the ReAct loop
-    finished: bool  # True when agent is done (final answer or error)
-    agent_name: str  # Name of this agent (for event emission)
-    max_iterations: int  # Hard limit on tool-calling iterations
-
-
 class SupervisorState(TypedDict, total=False):
     """Supervisor-specific state."""
 
-    delegated_agent: str | None
-    delegation_history: list[dict]
-    needs_clarification: str | None
+    pending_tasks: list[dict]
+    completed_tasks: list[dict]
+    active_task: dict | None
 
 
 class SQLAgentState(TypedDict, total=False):
     """SQL Agent-specific state."""
 
     generated_sql: str | None
+    grounded_schemas: list
+    validation: dict | None
     query_result: dict | None
     execution_error: str | None
-    chart_config: dict | None
+    retry_count: int
+    phase: str
 
 
 class KnowledgeAgentState(TypedDict, total=False):
     """Knowledge Agent-specific state."""
 
     knowledge_sources: list[str]
+    answer: str | None
 
 
 class AgentState(TypedDict, total=False):
@@ -59,21 +49,10 @@ class AgentState(TypedDict, total=False):
     sql: SQLAgentState
     knowledge: KnowledgeAgentState
     final_response: str | None
-    delegation_count: int  # Guard against infinite delegation loops
     supervisor_step: int   # Iteration counter for supervisor agent
     supervisor_finished: bool  # Per-agent finish flag
     sql_step: int          # Iteration counter for SQL agent
     sql_finished: bool     # Per-agent finish flag
-    knowledge_step: int    # Iteration counter for knowledge agent
-    knowledge_finished: bool  # Per-agent finish flag
     general_step: int       # Iteration counter for general agent
     general_finished: bool  # Per-agent finish flag
-    conversation_id: str
     db_connection_id: str | None
-    model: str
-    history: list[dict]
-
-
-# Backward-compatible aliases
-V3AgentState = AgentState
-AgentStateType = AgentState

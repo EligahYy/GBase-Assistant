@@ -1,14 +1,14 @@
 """Schema Knowledge Graph 单元测试。"""
 
-import tempfile
 import os
-from pathlib import Path
+import tempfile
 
 from app.agents.schema_graph import (
-    DDLParser, ColumnMeta, TableMeta, RelationInferrer, SchemaGraph,
-    get_schema_graph, build_schema_graph_from_connection,
+    DDLParser,
+    RelationInferrer,
+    SchemaGraph,
+    get_schema_graph,
 )
-
 
 SAMPLE_DDL_ORDER = """CREATE TABLE order_main (
   order_id BIGINT PRIMARY KEY COMMENT '订单ID',

@@ -5,7 +5,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import create_app
 

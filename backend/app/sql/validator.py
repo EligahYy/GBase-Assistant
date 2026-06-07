@@ -71,21 +71,6 @@ def validate_sql(sql: str, schemas: list[TableSchema] | None = None) -> Validati
     )
 
 
-def extract_sql_from_markdown(text: str) -> str | None:
-    """从 LLM 输出的 markdown 文本中提取 SQL 代码块。"""
-    # 匹配 ```sql ... ``` 或 ``` ... ```
-    pattern = r"```(?:sql)?\s*\n?([\s\S]*?)```"
-    match = re.search(pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    # 如果没有代码块，尝试直接提取（以 SELECT/INSERT/UPDATE/DELETE/CREATE 开头）
-    sql_pattern = r"((?:SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH)\b[\s\S]+?)(?:\n\n|$)"
-    match = re.search(sql_pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return None
-
-
 def _check_dialect_compliance(statement: exp.Expression) -> list[str]:
     """遍历 AST，检查 GBase 8a 不支持的特性。"""
     errors = []

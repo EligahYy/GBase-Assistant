@@ -8,12 +8,11 @@ import pytest
 
 from app.dependencies import (
     FallbackRetriever,
-    get_example_retriever,
     get_knowledge_retriever,
     get_llm_client,
     get_schema_retriever,
 )
-from app.knowledge.loader import DbSchemaRetriever, FileExampleRetriever
+from app.knowledge.loader import DbSchemaRetriever
 from app.llm.client import LiteLLMClientImpl
 
 
@@ -68,30 +67,6 @@ class TestSchemaRetrieverFallback:
         # 应该回退到 DbSchemaRetriever，返回解析后的 schema
         assert len(result) >= 1
         assert result[0].table_name == "t"
-
-
-class TestExampleRetrieverFallback:
-    def test_returns_file_retriever_when_qdrant_unavailable(self):
-        """Qdrant 不可用时直接返回 FileExampleRetriever。"""
-        retriever = get_example_retriever()
-        assert retriever is not None
-        assert isinstance(retriever, FileExampleRetriever)
-
-    def test_returns_wrapper_when_qdrant_available(self):
-        with patch("app.vector.client.is_qdrant_available", return_value=True):
-            retriever = get_example_retriever()
-            assert retriever is not None
-            assert not isinstance(retriever, FileExampleRetriever)
-            assert isinstance(retriever, FallbackRetriever)
-
-    @pytest.mark.anyio
-    async def test_fallback_returns_file_examples(self):
-        """Qdrant 失败后回退到 FileExampleRetriever。"""
-        fallback = FileExampleRetriever()
-        wrapper = FallbackRetriever(primary=None, fallback=fallback, name="ExampleRetriever")
-        result = await wrapper.retrieve("查询用户", top_k=3)
-        assert isinstance(result, list)
-        assert len(result) <= 3
 
 
 class TestKnowledgeRetrieverFallback:

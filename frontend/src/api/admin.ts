@@ -33,19 +33,10 @@ export interface FeedbackStats {
   accepted: number
   rejected: number
   modified: number
-  enriched: number
-  pending: number
 }
 
 export async function getFeedbackStats(token: string): Promise<FeedbackStats> {
   const { data } = await apiClient.get<FeedbackStats>('/admin/feedback-stats', {
-    headers: { 'X-Admin-Token': token },
-  })
-  return data
-}
-
-export async function triggerEnrichFeedback(token: string): Promise<{ added: number; skipped: number; failed: number }> {
-  const { data } = await apiClient.post('/admin/enrich-feedback', {}, {
     headers: { 'X-Admin-Token': token },
   })
   return data

@@ -21,6 +21,6 @@ class Folder(Base):
         DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
     )
 
-    conversations: Mapped[list["Conversation"]] = relationship(  # noqa: F821
+    conversations: Mapped[list[Conversation]] = relationship(  # noqa: F821
         "Conversation", back_populates="folder", lazy="selectin"
     )

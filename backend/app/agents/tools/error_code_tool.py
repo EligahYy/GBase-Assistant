@@ -1,6 +1,6 @@
 """LookupErrorCodeTool — searches GBase 8a error codes in Qdrant.
 
-Converted from closure _make_query_error_code_tool() in semantic_mapper.py.
+Used by the SQL specialist to interpret database errors.
 """
 
 from __future__ import annotations

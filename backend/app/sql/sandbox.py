@@ -16,7 +16,6 @@ import re
 from typing import TYPE_CHECKING
 
 import sqlglot
-from sqlglot import exp
 
 from app.observability import metrics
 
@@ -46,11 +45,6 @@ class SQLSandboxError(Exception):
 
 class SQLSandbox:
     """SQL 执行沙箱 — 三层验证 + 超时 + 行数限制。"""
-
-    @staticmethod
-    def _validate_readonly(sql: str) -> None:
-        """Layer 1: Fast string-level first-word whitelist check (backward-compat alias)."""
-        SQLSandbox._validate_first_word(sql)
 
     @staticmethod
     def _validate_first_word(sql: str) -> None:

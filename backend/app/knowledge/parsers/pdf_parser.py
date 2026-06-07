@@ -7,7 +7,7 @@ import logging
 import re
 from pathlib import Path
 
-from app.knowledge.parsers.interface import DocumentParser, ParsedDocument, Section
+from app.knowledge.parsers.interface import ParsedDocument, Section
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,6 @@ class PdfParser:
         self._toc_path = toc_path
 
     async def parse(self, file_path: Path) -> ParsedDocument:
-        import pdfplumber
 
         toc_entries = self._load_toc(file_path)
         sections = await asyncio.to_thread(self._extract_with_toc, file_path, toc_entries)

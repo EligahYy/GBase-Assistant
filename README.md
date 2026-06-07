@@ -17,21 +17,26 @@
 ```
 Vue 3 Chat UI ←── AG-UI SSE ──→ FastAPI Gateway
                                      │
-                            LangGraph ReAct Multi-Agent (v3)
+                         LangGraph Hybrid Multi-Agent (v3)
+                                     │
+                              Planner Agent
+                           (多任务计划 + 调度队列)
                                      │
                     ┌────────────────┼────────────────┐
                     │                │                │
-             Supervisor Agent   SQL Agent      Knowledge Agent
-             (ReAct + 5 tools) (ReAct + 7 tools) (ReAct + 2 tools)
-                    │                │                │
-              动态委托路由    探索→生成→校验→执行→纠错  RAG 多步检索
+             SQL Specialist   Knowledge Pipeline  General Agent
+             探索→submit_sql    Hybrid RAG→回答       通用对话
+                    │
+             Validate Gate → Execute Gate
 ```
 
-**v3 ReAct 多智能体架构**（当前版本）：
-- **3 个 Agent**：Supervisor（动态路由）+ SQL Specialist（端到端 NL2SQL）+ Knowledge Specialist（RAG 问答）
-- **11 个标准化 Tool**：`search_schemas`、`get_table_profile`、`find_join_path`、`query_glossary`、`validate_sql`、`execute_sql`、`lookup_error`、`search_knowledge`、`get_database_status`、`delegate_to_sql_specialist`、`delegate_to_knowledge_specialist`
+**v3 混合多智能体架构**（当前版本）：
+- **Planner + Specialist 协作队列**：Planner 可一次规划多个任务，框架顺序调度 SQL / Knowledge / General Specialist
+- **确定性 SQL Gate**：SQL Specialist 只能通过 `submit_sql` 提交候选 SQL；只读安全、方言/Schema 验证通过后才允许执行
+- **结构化状态**：SQL、验证结果、查询结果、知识来源写入 AgentState namespace，并通过 AG-UI `STATE_DELTA` 推送
+- **可靠 RAG 管线**：Knowledge 使用 Hybrid Retrieval + RRF 的确定性检索回答流程
 - **AG-UI 完整事件**：`RUN_STARTED` → `STEP_STARTED` → `THINKING_START/CONTENT/END` → `TOOL_CALL_START/RESULT/END` → `TEXT_MESSAGE_CONTENT` → `STEP_FINISHED` → `RUN_FINISHED`
-- **自定义 ReAct 图**：替代 `langgraph.prebuilt.create_react_agent`，每个 Agent 的 tool 调用全过程流式可见
+- **混合协作图**：Planner 负责多任务编排，SQL Specialist 使用受控 ReAct，验证和执行由确定性 Gate 接管
 - **Schema Knowledge Graph**：DDL 语义解析 → 列角色推断 → JOIN 关系图 → 多策略检索
 
 ## 技术栈
@@ -42,7 +47,7 @@ Vue 3 Chat UI ←── AG-UI SSE ──→ FastAPI Gateway
 | 后端 | Python 3.12 + FastAPI + LangGraph |
 | 数据库 | SQLite（aiosqlite）+ Alembic 迁移 |
 | LLM | LiteLLM（支持 DeepSeek / Qwen / OpenAI 等多模型 fallback） |
-| 向量数据库 | Qdrant（schemas / knowledge / sql_examples） |
+| 向量数据库 | Qdrant（schemas / knowledge / error_codes） |
 | SQL 解析 | sqlglot + 自定义 GBase 8a 方言 + 沙箱执行 |
 | 知识库 | GBase 8a 官方产品手册 V9.5.3（PDF 章节切片） |
 
@@ -113,17 +118,15 @@ gbase8a-assistant/
 │   │   ├── graph.py          # v3 ReAct 图 + Agent Runner
 │   │   ├── schema_graph.py   # Schema Knowledge Graph（DDL 解析+检索）
 │   │   ├── agents/           # 🆕 Agent 实现
-│   │   │   ├── react_agent.py    # 自定义 ReAct 工厂（流式事件发射）
-│   │   │   ├── supervisor.py     # Supervisor Agent（动态路由）
-│   │   │   ├── sql_agent.py      # SQL Agent（7 tools）
-│   │   │   ├── knowledge_agent.py # Knowledge Agent（2 tools）
+│   │   │   ├── supervisor.py     # Planner Agent（多任务规划）
+│   │   │   ├── sql_agent.py      # SQL Specialist 工具集
+│   │   │   ├── general_agent.py  # General Specialist
 │   │   │   └── prompts.py        # System prompts
-│   │   └── tools/            # 🆕 标准化 Tool 接口
-│   │       ├── base.py           # AgentTool Protocol + ToolRegistry
+│   │   └── tools/            # Specialist 工具
+│   │       ├── base.py           # ToolParameter 元数据
 │   │       ├── schema_tools.py   # SearchSchemas / GetTableProfile / FindJoinPath
-│   │       ├── sql_tools.py      # ValidateSQL / ExecuteSQL
+│   │       ├── sql_tools.py      # SubmitSQL / ExecuteSQL
 │   │       ├── glossary_tool.py  # QueryGlossary
-│   │       ├── knowledge_tools.py # SearchKnowledge
 │   │       ├── error_code_tool.py # LookupErrorCode
 │   │       ├── status_tool.py    # GetDatabaseStatus
 │   │       └── delegate_tools.py # DelegateToSQL / DelegateToKnowledge
@@ -133,8 +136,7 @@ gbase8a-assistant/
 │   ├── services/             # 后台服务（健康检查、聊天、会话）
 │   ├── llm/
 │   │   ├── client.py         # LiteLLM 客户端
-│   │   ├── adapter.py        # LiteLLM → LangChain 适配器
-│   │   └── prompts.py        # 提示模板
+│   │   └── adapter.py        # LiteLLM → LangChain 适配器
 │   ├── sql/                  # SQL 验证器 + 沙箱
 │   ├── vector/               # Qdrant 客户端 + 检索器 + 索引
 │   ├── knowledge/            # 知识加载器 + PDF 文档切片器
@@ -143,8 +145,7 @@ gbase8a-assistant/
 │   ├── composables/          # useSSE / useAGUIClient / useTheme
 │   ├── stores/               # Pinia 状态管理（含 ReAct streaming state）
 │   ├── components/chat/
-│   │   ├── ThinkingSection.vue  # 🆕 思考折叠区
-│   │   ├── ToolCallCard.vue     # 🆕 Tool 调用卡片
+│   │   ├── AgentActivity.vue    # 思考和工具调用时间线
 │   │   └── MessageBubble.vue    # 消息气泡（含 Agent step indicator）
 │   └── api/                  # API 客户端
 ├── knowledge/                # 官方产品手册 PDF
@@ -169,12 +170,12 @@ make migration msg="xxx"  # 生成迁移脚本
 
 | 维度 | v2 | v3 |
 |------|-----|-----|
-| Agent 数量 | 7 个硬编码节点 | 3 个 ReAct Agent |
-| 图节点 | 10 个 | 4 个（含 2 个 SubGraph） |
-| 路由 | 关键词 `if/else` | LLM ReAct 动态 tool 选择 |
-| Tool 接口 | 闭包工厂函数 | 标准化 `AgentTool` Protocol + `ToolRegistry` |
-| SQL 路径 | 5 节点 pipeline（不可逆） | 1 Agent + 7 tools（自主循环） |
-| 失败处理 | 硬 gate 阻断 + 盲重试 | Agent observe→diagnose→retry |
+| Agent 数量 | 7 个硬编码节点 | Planner + 3 类 Specialist |
+| 图节点 | 10 个 | 协作调度队列 + Specialist + 确定性 Gate |
+| 路由 | 关键词 `if/else` | Planner 多任务计划 |
+| Tool 管理 | 闭包工厂函数 | Specialist 显式工具集 |
+| SQL 路径 | 5 节点 pipeline（不可逆） | Specialist 探索/纠错 + 确定性验证执行 |
+| 失败处理 | 硬 gate 阻断 + 盲重试 | Gate 返回结构化错误，Specialist 定向修复 |
 | 流式可见性 | 仅文本流 | 完整思考链 + Tool 调用 + Agent 步骤 |
 
 ## 许可证

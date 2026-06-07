@@ -8,14 +8,15 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.protocols import DatabaseConnector
+    pass
+
+from sqlalchemy import select
 
 from app.api.connections import _to_connection_config
 from app.database import async_session_factory
 from app.db_connectors.connector_factory import get_connector
 from app.models.connection import DbConnection
 from app.services.connection_cache import get_cached_status, reset_cache_for_tests, set_cached_status
-from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class ConnectionHealthChecker:
                 connector.test(config),
                 timeout=self._test_timeout + 1,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             ok = False
         except Exception:
             ok = False

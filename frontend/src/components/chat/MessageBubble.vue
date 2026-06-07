@@ -4,7 +4,7 @@ import SqlBlock from './SqlBlock.vue'
 import AgentActivity from './AgentActivity.vue'
 import ChartRenderer from './ChartRenderer.vue'
 import { parseContent } from '@/composables/useContentParser'
-import type { ChartConfig, Message, StreamEvent } from '@/stores/chat'
+import type { Message } from '@/stores/chat'
 
 const props = defineProps<{ message: Message }>()
 const isUser = computed(() => props.message.role === 'user')
@@ -53,19 +53,6 @@ const sourceList = computed(() => {
     .map((line) => line.replace(/^[\s\-•·]+/, '').trim())
     .filter(Boolean)
 })
-
-function legacyEvents(msg: Message): StreamEvent[] {
-  const events: StreamEvent[] = []
-  if (msg.thinking) {
-    events.push({ type: 'thinking', timestamp: 0, thinking: msg.thinking })
-  }
-  if (msg.toolCalls) {
-    for (const tc of msg.toolCalls) {
-      events.push({ type: 'tool_call', timestamp: 0, toolCall: tc })
-    }
-  }
-  return events
-}
 
 function escapeHtml(text: string): string {
   return text
@@ -169,12 +156,6 @@ function renderInline(text: string): string {
           :events="message.streamEvents"
           :is-streaming="message.isStreaming || false"
         />
-        <AgentActivity
-          v-else-if="(message.thinking || (message.toolCalls && message.toolCalls.length > 0))"
-          :events="legacyEvents(message)"
-          :is-streaming="message.isStreaming || false"
-        />
-
         <div v-if="isTyping" class="thinking">
           <div class="thinking-inner">
             <span class="dot" /><span class="dot" /><span class="dot" />

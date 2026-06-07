@@ -1,4 +1,4 @@
-"""General Agent — simple chat response (used by Supervisor's respond_general tool)."""
+"""General Specialist prompt."""
 
 from __future__ import annotations
 

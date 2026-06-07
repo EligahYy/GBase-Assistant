@@ -39,7 +39,7 @@ def _verify_admin_token(request: Request) -> bool:
 
 @router.post("/reindex", response_model=ReindexResponse)
 async def reindex(request: Request, body: ReindexRequest | None = None) -> ReindexResponse:
-    """强制全量重建 Qdrant 向量索引（FAQ / SQL 示例 / 错误码）。
+    """强制全量重建 Qdrant 向量索引（FAQ / Schema / 错误码）。
     需要 X-Admin-Token 请求头或 debug 模式。"""
     if not _verify_admin_token(request):
         raise HTTPException(status_code=403, detail="需要管理权限")
@@ -76,9 +76,8 @@ async def reindex_web(request: Request) -> ReindexWebResponse:
     if not _verify_admin_token(request):
         raise HTTPException(status_code=403, detail="需要管理权限")
 
-    from app.vector.client import is_qdrant_available
-    from app.vector.embedder import get_embedder
     from app.knowledge.document_chunker import build_knowledge_from_md_dir
+    from app.vector.client import is_qdrant_available
 
     if not is_qdrant_available():
         raise HTTPException(status_code=503, detail="Qdrant 不可用")
@@ -118,6 +117,7 @@ async def reindex_pdf(request: Request) -> ReindexPDFResponse:
         raise HTTPException(status_code=503, detail="Qdrant 不可用")
 
     import asyncio
+
     from app.knowledge.document_chunker import build_knowledge_from_pdf
 
     async def _run():
@@ -149,34 +149,9 @@ async def feedback_stats(
     accepted = await db.scalar(select(func.count()).where(SQLFeedback.action == "accepted"))
     rejected = await db.scalar(select(func.count()).where(SQLFeedback.action == "rejected"))
     modified = await db.scalar(select(func.count()).where(SQLFeedback.action == "modified"))
-    enriched = await db.scalar(select(func.count()).where(SQLFeedback.enriched_at.is_not(None)))  # noqa: E712
-    pending = (total or 0) - (enriched or 0)
-
     return {
         "total": total or 0,
         "accepted": accepted or 0,
         "rejected": rejected or 0,
         "modified": modified or 0,
-        "enriched": enriched or 0,
-        "pending": pending,
     }
-
-
-@router.post("/enrich-feedback")
-async def enrich_feedback(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, int]:
-    """手动触发 SQL 反馈 enrich。"""
-    if not _verify_admin_token(request):
-        raise HTTPException(status_code=403, detail="需要管理权限")
-
-    from app.jobs.feedback_enricher import enrich_feedback_examples
-
-    try:
-        result = await enrich_feedback_examples(db, max_items=50)
-        logger.info("手动 enrich feedback 完成: %s", result)
-        return result
-    except Exception as e:
-        logger.error("Enrich feedback 失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"Enrich 失败: {e}") from e

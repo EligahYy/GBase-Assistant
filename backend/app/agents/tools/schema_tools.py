@@ -1,6 +1,6 @@
 """Schema search tool implementations — SearchSchemasTool, GetTableProfileTool, FindJoinPathTool.
 
-Converted from closure-style tool factories in semantic_mapper.py to standard AgentTool classes.
+These tools expose schema retrieval and graph inspection to the SQL specialist.
 """
 
 from __future__ import annotations

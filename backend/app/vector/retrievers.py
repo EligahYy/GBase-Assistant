@@ -1,4 +1,4 @@
-"""Qdrant 向量检索实现：Schema / Example / Knowledge / ErrorCode。"""
+"""Qdrant 向量检索实现：Schema / Knowledge / ErrorCode。"""
 
 from __future__ import annotations
 
@@ -7,11 +7,7 @@ import logging
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from app.config import get_settings
-from app.protocols import (
-    KnowledgeChunk,
-    SQLExample,
-    TableSchema,
-)
+from app.protocols import KnowledgeChunk, TableSchema
 from app.vector.client import get_qdrant_manager
 from app.vector.embedder import get_embedder
 
@@ -28,12 +24,13 @@ class QdrantSchemaRetriever:
 
         try:
             embeddings = await embedder.embed([query])
-            results = await qdrant.search(
+            response = await qdrant.query_points(
                 collection_name=collection,
-                query_vector=embeddings[0],
+                query=embeddings[0],
                 query_filter=Filter(must=[FieldCondition(key="db_id", match=MatchValue(value=db_id))]),
                 limit=10,
             )
+            results = response.points if response else []
             schemas = []
             for r in results:
                 payload = r.payload or {}
@@ -55,43 +52,6 @@ class QdrantSchemaRetriever:
         return []
 
 
-class QdrantExampleRetriever:
-    """ExampleRetriever Phase 3 实现：基于向量相似度动态检索 SQL 示例。"""
-
-    async def retrieve(self, query: str, top_k: int = 5) -> list[SQLExample]:
-        embedder = get_embedder()
-        qdrant = get_qdrant_manager().client
-        collection = get_settings().models_config.get("collections", {}).get("sql_examples", "sql_examples")
-
-        try:
-            embeddings = await embedder.embed([query])
-            results = await qdrant.search(
-                collection_name=collection,
-                query_vector=embeddings[0],
-                limit=top_k,
-            )
-            examples = []
-            for r in results:
-                payload = r.payload or {}
-                examples.append(
-                    SQLExample(
-                        question=payload.get("question", ""),
-                        sql=payload.get("sql", ""),
-                        tables=payload.get("tables", []),
-                        pattern=payload.get("pattern", ""),
-                        difficulty=payload.get("difficulty", "medium"),
-                    )
-                )
-            if examples:
-                logger.info("Few-shot 检索: 返回 %d 条相关示例", len(examples))
-                return examples
-        except Exception as e:
-            logger.warning("QdrantExampleRetriever 失败: %s", e)
-
-        # 降级：返回空列表（调用方应回退到 FileExampleRetriever）
-        return []
-
-
 class QdrantKnowledgeRetriever:
     """KnowledgeRetriever Phase 3 实现：基于向量相似度的 RAG 检索。"""
 
@@ -106,19 +66,20 @@ class QdrantKnowledgeRetriever:
             if category:
                 search_filter = Filter(must=[FieldCondition(key="category", match=MatchValue(value=category))])
 
-            results = await qdrant.search(
+            response = await qdrant.query_points(
                 collection_name=collection,
-                query_vector=embeddings[0],
+                query=embeddings[0],
                 query_filter=search_filter,
                 limit=5,
             )
+            results = response.points if response else []
             chunks = []
             for r in results:
                 payload = r.payload or {}
                 chunks.append(
                     KnowledgeChunk(
                         content=payload.get("content", ""),
-                        source=payload.get("source", ""),
+                        source=payload.get("title") or payload.get("source_file") or payload.get("source", ""),
                         category=payload.get("category", ""),
                     )
                 )

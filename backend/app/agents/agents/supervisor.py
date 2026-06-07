@@ -15,12 +15,12 @@ from typing import Any
 from app.agents.agents.prompts import SUPERVISOR_SYSTEM
 
 
-def get_supervisor_tools(db_connection_id: str = "") -> list[Any]:
+def get_supervisor_tools() -> list[Any]:
     """Get the Supervisor agent's tool set — only delegation tools."""
     from app.agents.tools.delegate_tools import (
-        DelegateToSQLAgent,
-        DelegateToKnowledgeAgent,
         DelegateToGeneralAgent,
+        DelegateToKnowledgeAgent,
+        DelegateToSQLAgent,
     )
 
     return [

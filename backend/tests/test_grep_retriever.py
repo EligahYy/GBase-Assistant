@@ -1,6 +1,7 @@
 # backend/tests/test_grep_retriever.py
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -89,6 +90,17 @@ class TestGrepRetriever:
             assert r.source
 
     @pytest.mark.anyio
+    async def test_random_distribution_question_prioritizes_create_table_context(self, knowledge_dir):
+        from app.agents.graph import _expand_knowledge_query
+        from app.vector.grep_retriever import GrepRetriever
+
+        query = _expand_knowledge_query("如何创建随机分布表？")
+        results = await GrepRetriever(knowledge_dir).retrieve(query)
+
+        assert results
+        assert "默认为随机分布表" in results[0].content[:3000]
+
+    @pytest.mark.anyio
     async def test_empty_query_returns_empty(self, knowledge_dir):
         from app.vector.grep_retriever import GrepRetriever
 
@@ -121,3 +133,26 @@ class TestGrepRetriever:
             results = await retriever.retrieve("nonexistent_xyz_123")
 
         assert results == []
+
+    def test_extracts_meaningful_chinese_ngrams(self, tmp_path):
+        from app.vector.grep_retriever import GrepRetriever
+
+        retriever = GrepRetriever(tmp_path)
+
+        assert "随机分布" in retriever._extract_keywords("如何创建随机分布表？")[:5]
+
+    @pytest.mark.anyio
+    async def test_large_pdf_cache_returns_match_context_not_entire_json(self, tmp_path):
+        from app.vector.grep_retriever import GrepRetriever
+
+        content = "前置内容" * 400 + "随机分布表通过 CREATE TABLE 创建。" + "后置内容" * 400
+        (tmp_path / "manual.pages.json").write_text(
+            json.dumps({"100": content}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        results = await GrepRetriever(tmp_path).retrieve("如何创建随机分布表？")
+
+        assert results
+        assert any("随机分布表" in result.content for result in results)
+        assert all(len(result.content) < len(content) for result in results)

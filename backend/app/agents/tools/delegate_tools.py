@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.agents.tools.base import AgentTool, ToolParameter
+from app.agents.tools.base import ToolParameter
 
 
 class DelegateToSQLAgent:
@@ -17,7 +17,7 @@ class DelegateToSQLAgent:
         return (
             "Delegate a data query request to the SQL specialist agent. "
             "The SQL agent will autonomously: explore the database schema, "
-            "generate GBase 8a SQL, validate it, execute it, and return results. "
+            "generate GBase 8a SQL, then submit it to deterministic validation and execution gates. "
             "Use for: data queries, statistics, reports, chart data, monitoring queries."
         )
 
@@ -100,102 +100,6 @@ class DelegateToKnowledgeAgent:
                         "query": {"type": "string", "description": "The user's technical question"},
                     },
                     "required": ["query"],
-                },
-            },
-        }
-
-
-class RespondGeneralTool:
-    """Direct text response for casual conversation."""
-
-    @property
-    def name(self) -> str:
-        return "respond_general"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Send a direct conversational response to the user. "
-            "Use for: greetings, casual chat, topics outside GBase 8a scope, "
-            "or when the user needs guidance on what they can ask."
-        )
-
-    @property
-    def parameters(self) -> list[ToolParameter]:
-        return [
-            ToolParameter(
-                name="message",
-                type="string",
-                description="The message to send to the user (in Chinese)",
-            ),
-        ]
-
-    async def execute(self, message: str = "", **kwargs) -> str:
-        return message or kwargs.get("message", "")
-
-    def format_result(self, result: str) -> dict:
-        return {"summary": result, "detail": None, "truncated": False}
-
-    def to_openai_schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "message": {"type": "string", "description": "Response message to send to user"},
-                    },
-                    "required": ["message"],
-                },
-            },
-        }
-
-
-class AskUserClarificationTool:
-    """Ask the user for clarification when intent is unclear."""
-
-    @property
-    def name(self) -> str:
-        return "ask_user_clarification"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Ask the user for clarification when their request is ambiguous. "
-            "Use when: the intent is unclear, multiple interpretations are possible, "
-            "or required information is missing (e.g., no database selected)."
-        )
-
-    @property
-    def parameters(self) -> list[ToolParameter]:
-        return [
-            ToolParameter(
-                name="question",
-                type="string",
-                description="The clarification question to ask the user",
-            ),
-        ]
-
-    async def execute(self, question: str = "", **kwargs) -> str:
-        return question or kwargs.get("question", "")
-
-    def format_result(self, result: str) -> dict:
-        return {"summary": result, "detail": None, "truncated": False}
-
-    def to_openai_schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "question": {"type": "string", "description": "Clarification question to ask"},
-                    },
-                    "required": ["question"],
                 },
             },
         }

@@ -34,4 +34,4 @@ class Conversation(Base):
         "Message", back_populates="conversation", cascade="all, delete-orphan", lazy="selectin"
     )
 
-    folder: Mapped["Folder | None"] = relationship("Folder", back_populates="conversations")  # noqa: F821
+    folder: Mapped[Folder | None] = relationship("Folder", back_populates="conversations")  # noqa: F821

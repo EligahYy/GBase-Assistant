@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { NInput, NButton, NSelect, NEmpty, NTag, useMessage, useDialog } from 'naive-ui'
+import { NInput, NButton, NSelect, NEmpty, useMessage, useDialog } from 'naive-ui'
 import { useConnectionStore } from '@/stores/connection'
 import { listConnections, createConnection, updateConnection, deleteConnection, getSchemaTables, testConnection, syncSchema, type ConnectionCreate, type TableSchemaItem } from '@/api/connections'
 import { listModels, type ModelInfo } from '@/api/models'
 import {
   ArrowBackOutline, ServerOutline, TrashOutline, CreateOutline, RefreshOutline,
-  CheckmarkCircleOutline, CloseCircleOutline, WarningOutline,
   CubeOutline, PulseOutline, BarChartOutline, KeyOutline, LayersOutline, AddOutline, CloseOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { useRouter } from 'vue-router'
-import { getHealthStatus, triggerReindex, getFeedbackStats, triggerEnrichFeedback, type HealthStatus, type FeedbackStats } from '@/api/admin'
+import { getHealthStatus, triggerReindex, getFeedbackStats, type HealthStatus, type FeedbackStats } from '@/api/admin'
 
 const router = useRouter()
 const connStore = useConnectionStore()
@@ -45,7 +44,6 @@ const reindexResult = ref<string | null>(null)
 // ── Feedback stats ──
 const feedbackStats = ref<FeedbackStats | null>(null)
 const feedbackLoading = ref(false)
-const enrichLoading = ref(false)
 
 // ── Connection actions ──
 const testingConn = ref<Set<string>>(new Set())
@@ -101,16 +99,6 @@ async function handleReindex() {
     naiveMsg.error(msg)
     reindexResult.value = `失败：${msg}`
   } finally { reindexLoading.value = false }
-}
-
-async function handleEnrichFeedback() {
-  if (!adminToken.value.trim()) { naiveMsg.warning('请输入管理 Token'); return }
-  enrichLoading.value = true
-  try {
-    const resp = await triggerEnrichFeedback(adminToken.value)
-    naiveMsg.success(`Enrich 完成：新增 ${resp.added} 条，跳过 ${resp.skipped} 条`)
-    await loadFeedbackStats()
-  } catch (e: any) { naiveMsg.error(e?.message || 'Enrich 失败') } finally { enrichLoading.value = false }
 }
 
 watch(adminToken, async (val) => {
@@ -480,25 +468,7 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
                 <span class="feedback-value" style="color: var(--error)">{{ feedbackStats.rejected }}</span>
                 <span class="feedback-label">已拒绝</span>
               </div>
-              <div class="feedback-stat">
-                <span class="feedback-value" style="color: var(--accent)">{{ feedbackStats.enriched }}</span>
-                <span class="feedback-label">已入库</span>
-              </div>
-              <div class="feedback-stat">
-                <span class="feedback-value">{{ feedbackStats.pending }}</span>
-                <span class="feedback-label">待处理</span>
-              </div>
             </div>
-            <n-button
-              v-if="feedbackStats.pending > 0"
-              size="small"
-              type="primary"
-              :loading="enrichLoading"
-              style="margin-top: 16px; width: 100%"
-              @click="handleEnrichFeedback"
-            >
-              将 {{ feedbackStats.pending }} 条反馈 enrich 到 Few-shot 库
-            </n-button>
           </div>
         </section>
       </main>

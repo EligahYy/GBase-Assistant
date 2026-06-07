@@ -57,6 +57,7 @@ STOPWORDS = frozenset({
 })
 
 SEARCH_GLOBS = ["*.md", "*.yaml", "*.json", "*.jsonl"]
+MAX_MATCH_CONTEXT = 1200
 
 
 class GrepRetriever:
@@ -90,16 +91,27 @@ class GrepRetriever:
                 logger.warning("ripgrep 搜索失败 (keyword=%s): %s", kw, e)
                 continue
 
-        return self._dedup_by_source(all_chunks)[:10]
+        return self._rank_and_dedup(all_chunks, keywords)[:10]
 
     def _extract_keywords(self, query: str) -> list[str]:
         """从 query 中提取有区分度的关键词。"""
         tokens = re.split(r"[\s,，。！？：、；\(\)\[\]{}]+", query)
-        keywords = []
+        direct_keywords: list[str] = []
+        derived_keywords: list[str] = []
         for t in tokens:
             t = t.strip().strip("`\"'")
-            if len(t) > 1 and t.lower() not in STOPWORDS:
-                keywords.append(t)
+            if not t:
+                continue
+            if re.fullmatch(r"[\u4e00-\u9fff]+", t) and len(t) > 4:
+                # 中文没有空格分词。优先搜索 4/3/2 字连续词组，避免把整句当成一个关键词。
+                for size in (4, 3, 2):
+                    for i in range(len(t) - size + 1):
+                        part = t[i : i + size]
+                        if part not in STOPWORDS:
+                            derived_keywords.append(part)
+            elif len(t) > 1 and t.lower() not in STOPWORDS:
+                direct_keywords.append(t)
+        keywords = direct_keywords + derived_keywords
         if not keywords:
             keywords.append(query.strip())
         return list(dict.fromkeys(keywords))
@@ -175,7 +187,17 @@ class GrepRetriever:
                     current_lines = []
                 text = lines_info.get("text", "")
                 if text:
-                    current_lines.append(text.rstrip("\n"))
+                    if etype == "match" and len(text) > MAX_MATCH_CONTEXT:
+                        raw = text.encode("utf-8")
+                        for submatch in data.get("submatches", []):
+                            # ripgrep reports byte offsets, not Python character offsets.
+                            start = max(0, int(submatch.get("start", 0)) - MAX_MATCH_CONTEXT // 2)
+                            end = min(len(raw), int(submatch.get("end", 0)) + MAX_MATCH_CONTEXT // 2)
+                            excerpt = raw[start:end].decode("utf-8", errors="ignore")
+                            excerpt = excerpt.replace("\\n", "\n").replace('\\"', '"')
+                            current_lines.append(excerpt.rstrip("\n"))
+                    elif len(text) <= MAX_MATCH_CONTEXT:
+                        current_lines.append(text.rstrip("\n"))
 
         if current_file and current_lines:
             chunks.append(self._build_chunk(current_file, current_lines))
@@ -203,16 +225,21 @@ class GrepRetriever:
             return "dialect"
         if "ops_" in file_path:
             return "ops"
-        if "sql_examples" in file_path:
-            return "example"
         return "general"
 
-    def _dedup_by_source(self, chunks: list[KnowledgeChunk]) -> list[KnowledgeChunk]:
-        """按 source 去重，保留首次出现的 chunk，按匹配行数降序排列。"""
+    def _rank_and_dedup(self, chunks: list[KnowledgeChunk], keywords: list[str]) -> list[KnowledgeChunk]:
+        """按关键词相关度排序并去重，保留同一文档中的不同命中上下文。"""
         seen: set[str] = set()
         result: list[KnowledgeChunk] = []
-        for c in sorted(chunks, key=lambda c: len(c.content.split("\n")), reverse=True):
-            key = c.source
+        lowered_keywords = [keyword.lower() for keyword in keywords]
+
+        def relevance(chunk: KnowledgeChunk) -> tuple[int, int]:
+            content = chunk.content.lower()
+            score = sum(len(keyword) ** 2 for keyword in lowered_keywords if keyword in content)
+            return score, -len(chunk.content)
+
+        for c in sorted(chunks, key=relevance, reverse=True):
+            key = f"{c.source}|{' '.join(c.content.split())[:240]}"
             if key not in seen:
                 seen.add(key)
                 result.append(c)
