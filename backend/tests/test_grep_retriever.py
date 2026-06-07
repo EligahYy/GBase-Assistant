@@ -91,10 +91,10 @@ class TestGrepRetriever:
 
     @pytest.mark.anyio
     async def test_random_distribution_question_prioritizes_create_table_context(self, knowledge_dir):
-        from app.agents.graph import _expand_knowledge_query
+        from app.agents.agents.knowledge_agent import expand_knowledge_query
         from app.vector.grep_retriever import GrepRetriever
 
-        query = _expand_knowledge_query("如何创建随机分布表？")
+        query = expand_knowledge_query("如何创建随机分布表？")
         results = await GrepRetriever(knowledge_dir).retrieve(query)
 
         assert results

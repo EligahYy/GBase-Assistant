@@ -6,7 +6,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from app.agents.graph import _build_conversation_messages, _expand_knowledge_query, build_graph
+from app.agents.agents.knowledge_agent import expand_knowledge_query
+from app.agents.graph import _build_conversation_messages, build_graph
 from app.protocols import KnowledgeChunk
 
 
@@ -62,7 +63,7 @@ def test_build_conversation_messages_includes_history_without_duplicate_current_
 
 
 def test_knowledge_query_expansion_matches_terms_inside_natural_language():
-    expanded = _expand_knowledge_query("如何创建随机分布表？")
+    expanded = expand_knowledge_query("如何创建随机分布表？")
 
     assert "随机分布" in expanded
     assert "DISTRIBUTED" in expanded

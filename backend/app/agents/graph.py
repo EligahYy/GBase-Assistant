@@ -17,6 +17,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.agents.general_agent import get_general_agent_prompt
+from app.agents.agents.knowledge_agent import make_knowledge_node
 from app.agents.agents.sql_agent import get_sql_agent_prompt, get_sql_agent_tools
 from app.agents.agents.supervisor import get_supervisor_prompt, get_supervisor_tools
 from app.agents.state import AgentState
@@ -308,151 +309,6 @@ def _make_tools_node(tools: list[Any], agent_name: str):
 
     return node_fn
 
-
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Knowledge Agent — search→answer pipeline (NOT ReAct, no tools for LLM)
-# ═══════════════════════════════════════════════════════════════════════════════════
-
-# ── Knowledge retrieval prompt ─────────────────────────────────────────────────────
-
-V3_QA_SYSTEM = """你是 GBase 8a 数据库专家助手。根据以下知识库内容回答用户问题。
-
-## 知识库内容
-{knowledge_section}
-
-## 回答规则
-
-1. **基于知识库回答**：只使用上方"知识库内容"中的信息。如果相关内容充分，直接回答。
-2. **注明来源**：每条信息注明来自哪个文档（[文档名称]）。
-3. **代码示例**：用 ```sql 代码块格式化。
-4. **部分相关**：如果知识库内容部分相关，指出哪些有依据、哪些是推测。
-5. **不相关**：如果知识库内容与问题无关或信息不足，诚实说"知识库中未找到该信息"。
-6. **严禁编造**：不要编造知识库中没有的功能、语法、版本号或参数。
-7. **多段引用**：如果多个来源回答了问题的不同方面，综合呈现。
-8. **保持简洁**：直接回答问题，不需要额外说明搜索过程。
-"""
-
-
-_KNOWLEDGE_QUERY_EXPANSIONS = {
-    "创建": "table_options CREATE TABLE 随机分布表 DDL 建表语句",
-    "分布": "分布表 分布方式 DISTRIBUTED 随机分布 HASH",
-    "分区": "分区表 分区键 PARTITION CREATE TABLE",
-    "随机": "随机分布 RANDOM DISTRIBUTION 分布表",
-    "hash": "HASH 哈希 分布键 分布表 随机分布",
-}
-
-
-def _expand_knowledge_query(query: str) -> str:
-    """Append domain terms found inside a natural-language query."""
-    lowered = query.lower()
-    expansions = [
-        expansion
-        for term, expansion in _KNOWLEDGE_QUERY_EXPANSIONS.items()
-        if term in lowered
-    ]
-    return f"{query} {' '.join(expansions)}".strip() if expansions else query
-
-
-def _merge_knowledge_chunks(*groups: list[Any], limit: int = 5) -> list[Any]:
-    merged = []
-    seen = set()
-    for group in groups:
-        for chunk in group:
-            key = f"{chunk.source}|{' '.join(chunk.content.split())[:240]}"
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(chunk)
-            if len(merged) >= limit:
-                return merged
-    return merged
-
-
-def _make_knowledge_node(model: Any):
-    """Knowledge agent: auto-search → LLM formats answer (v3 approach).
-
-    Design:
-    - HybridKnowledgeRetriever: Qdrant vector + ripgrep + RRF fusion
-    - Keyword fallback: auto-extract domain terms and retry if results sparse
-    - Better prompt: source citation, multi-source synthesis, clear fallback
-    - No tool calls exposed to LLM, no ReAct loop
-    """
-
-    async def node_fn(state: AgentState) -> dict:
-        from app.dependencies import get_knowledge_retriever
-
-        _emit("step_started", {"agent_name": "knowledge_agent", "step_index": 0})
-
-        msgs = state.get("messages", [])
-        user_msg = None
-        for m in reversed(msgs):
-            if isinstance(m, HumanMessage):
-                user_msg = m.content if hasattr(m, "content") else str(m)
-                break
-        if not user_msg:
-            user_msg = str(msgs[-1].content) if msgs else ""
-
-        # ── Phase 1: Auto-search with v3 hybrid retriever ──
-        _emit("thinking_start", {})
-        _emit("thinking_delta", "检索 GBase 8a 知识库")
-        _emit("thinking_end", {})
-
-        retriever = get_knowledge_retriever()
-        chunks = await retriever.retrieve(user_msg)
-
-        # Domain expansion improves exact fallback and gives vector retrieval extra GBase terminology.
-        expanded_query = _expand_knowledge_query(str(user_msg))
-        if expanded_query != user_msg:
-            expanded_chunks = await retriever.retrieve(expanded_query)
-            chunks = _merge_knowledge_chunks(expanded_chunks, chunks)
-
-        _emit("tool_call_start", {"name": "search_knowledge", "args": {"query": str(user_msg)[:100]}, "agent_name": "knowledge_agent"})
-        _emit("tool_call_result", {"name": "search_knowledge", "result": {"summary": f"检索到 {len(chunks)} 条相关文档"}})
-        _emit("tool_call_end", {"name": "search_knowledge"})
-
-        # ── Phase 2: Build knowledge context ──
-        knowledge_lines = []
-        source_names: list[str] = []
-        if chunks:
-            seen_sources = set()
-            for i, chunk in enumerate(chunks[:5]):
-                src = chunk.source or "未知来源"
-                dedup_key = chunk.content[:80]
-                if dedup_key in seen_sources:
-                    continue
-                seen_sources.add(dedup_key)
-                if src not in source_names:
-                    source_names.append(src)
-                content = chunk.content[:3000] if chunk.content else ""
-                if content:
-                    knowledge_lines.append(f"**来源 {i+1}: [{src}]**\n{content}\n")
-        knowledge_section = "\n".join(knowledge_lines) if knowledge_lines else "（未找到相关文档）"
-
-        # ── Phase 3: Build grounded answer prompt ──
-        prompt_text = V3_QA_SYSTEM.format(knowledge_section=knowledge_section)
-        prompt_text += f"\n## 用户问题\n{user_msg}"
-
-        messages = [HumanMessage(content=prompt_text)]
-
-        try:
-            response = await _call_llm(model, messages, None)
-            _, text = _parse_tool_calls(response)
-            answer = text or "知识库中未找到相关信息，建议查阅 GBase 8a 官方手册。"
-        except Exception as e:
-            logger.error("Knowledge agent LLM call failed: %s", e)
-            answer = f"知识检索处理出错: {e}"
-
-        _emit("delta", answer)
-        _emit("state_delta", {"path": "sources", "value": {"sources": source_names}})
-        _emit("step_finished", {"agent_name": "knowledge_agent"})
-        return {
-            "knowledge": {"knowledge_sources": source_names, "answer": answer},
-            "messages": [AIMessage(content=answer)],
-        }
-
-    return node_fn
-
-
 def _make_sql_validation_node():
     """Create the deterministic SQL validation gate."""
 
@@ -589,7 +445,7 @@ def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGr
     builder.add_node("sql_execute", _make_sql_execution_node(db_connection_id))
 
     # Knowledge Agent: auto-search → LLM formats answer (NOT ReAct — no tools, no loop)
-    builder.add_node("knowledge_agent", _make_knowledge_node(knowledge_llm))
+    builder.add_node("knowledge_agent", make_knowledge_node(knowledge_llm))
 
     builder.add_node("general_agent", _make_agent_node(
         general_llm, _get_no_tools, get_general_agent_prompt, "general_agent", "general_step", "general_finished",
