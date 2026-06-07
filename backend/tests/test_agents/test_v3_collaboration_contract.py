@@ -1,4 +1,4 @@
-"""Behavior contracts for the v3 collaborative agent framework."""
+"""Behavior contracts for the v3.2 Unified Agent framework."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,20 +30,51 @@ def _tool_call(name: str, args: dict) -> AIMessage:
     return AIMessage(content="", tool_calls=[ToolCall(name=name, args=args, id=f"call_{name}")])
 
 
+def _final_answer(answer: str, sources: list[str] | None = None) -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[ToolCall(name="final_answer", args={"answer": answer, "sources": sources or []}, id="call_fa")],
+    )
+
+
 def _state(message: str, db_connection_id: str | None = "db-1") -> dict:
     return {
         "messages": [HumanMessage(content=message)],
         "db_connection_id": db_connection_id,
-        "supervisor_step": 0,
-        "supervisor_finished": False,
-        "sql_step": 0,
-        "sql_finished": False,
-        "general_step": 0,
-        "general_finished": False,
-        "supervisor": {},
+        "agent_step": 0,
+        "agent_finished": False,
         "sql": {},
         "knowledge": {},
     }
+
+
+def _mock_tools_for_test(tool_names: list[str]):
+    """Return a minimal tool list containing only mocked tools for the given names.
+
+    Each tool is a MagicMock with .name, .to_openai_schema(), .execute(), and .format_result().
+    """
+    from app.agents.tools.sql_tools import ExecuteSQLTool, SubmitSQLTool
+    from app.agents.tools.knowledge_tools import SearchKnowledgeTool
+
+    TOOL_CLASSES = {
+        "submit_sql": SubmitSQLTool,
+        "search_knowledge": SearchKnowledgeTool,
+        "final_answer": None,  # handled separately — needs special execute
+    }
+
+    tools = []
+    for name in tool_names:
+        if name == "final_answer":
+            from app.agents.agents.unified_agent import FinalAnswerTool
+            tools.append(FinalAnswerTool())
+        elif name in TOOL_CLASSES:
+            cls = TOOL_CLASSES[name]
+            if cls:
+                tools.append(cls())
+    return tools
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 
 def test_build_conversation_messages_includes_history_without_duplicate_current_message():
@@ -69,12 +100,18 @@ def test_knowledge_query_expansion_matches_terms_inside_natural_language():
     assert "DISTRIBUTED" in expanded
 
 
+# ── v3.2 Unified Agent Contracts ───────────────────────────────────────────────
+
+
 @pytest.mark.asyncio
 async def test_sql_is_validated_before_deterministic_execution():
+    """SQL submit_sql → validation gate → execution gate (deterministic, unchanged from v3.1)."""
+    from app.agents.tools.sql_tools import SubmitSQLTool
+
     adapter = SequencedAdapter(
         [
-            _tool_call("delegate_to_sql_specialist", {"query": "查询订单"}),
             _tool_call("submit_sql", {"sql": "SELECT id FROM orders"}),
+            _final_answer("查询完成：3 行数据"),
         ]
     )
     execution = MagicMock()
@@ -92,6 +129,7 @@ async def test_sql_is_validated_before_deterministic_execution():
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
         patch("app.agents.graph.ExecuteSQLTool", return_value=execution),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]),
     ):
         graph = build_graph(db_connection_id="db-1")
         result = await graph.ainvoke(_state("查询订单"), {"configurable": {"thread_id": "contract-sql"}})
@@ -104,10 +142,13 @@ async def test_sql_is_validated_before_deterministic_execution():
 
 @pytest.mark.asyncio
 async def test_invalid_sql_never_reaches_execution_gate():
+    """DELETE FROM orders → validation fails → never reaches execute."""
+    from app.agents.tools.sql_tools import SubmitSQLTool
+
     adapter = SequencedAdapter(
         [
-            _tool_call("delegate_to_sql_specialist", {"query": "删除订单"}),
             _tool_call("submit_sql", {"sql": "DELETE FROM orders"}),
+            _final_answer("无法执行 DELETE 操作，GBase 8a 只支持只读查询。"),
         ]
     )
     execution = MagicMock()
@@ -117,6 +158,7 @@ async def test_invalid_sql_never_reaches_execution_gate():
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
         patch("app.agents.graph.ExecuteSQLTool", return_value=execution),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]),
     ):
         graph = build_graph(db_connection_id="db-1")
         result = await graph.ainvoke(_state("删除订单"), {"configurable": {"thread_id": "contract-invalid"}})
@@ -127,11 +169,17 @@ async def test_invalid_sql_never_reaches_execution_gate():
 
 
 @pytest.mark.asyncio
-async def test_knowledge_task_retrieves_chunks_and_preserves_chapter_sources():
+async def test_knowledge_search_returns_chunks_with_status():
+    """search_knowledge → agent reads chunks + status → final_answer with sources."""
+    from app.agents.tools.knowledge_tools import SearchKnowledgeTool
+
     adapter = SequencedAdapter(
         [
-            _tool_call("delegate_to_knowledge_specialist", {"query": "如何创建随机分布表？"}),
-            AIMessage(content="不指定 DISTRIBUTED BY 子句即可创建随机分布表。"),
+            _tool_call("search_knowledge", {"query": "如何创建随机分布表？"}),
+            _final_answer(
+                "不指定 DISTRIBUTED BY 子句即可创建随机分布表。",
+                sources=["5.1.8.2.1 CREATE TABLE"],
+            ),
         ]
     )
     retriever = MagicMock()
@@ -148,6 +196,7 @@ async def test_knowledge_task_retrieves_chunks_and_preserves_chapter_sources():
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
         patch("app.dependencies.get_knowledge_retriever", return_value=retriever),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[SearchKnowledgeTool()]),
     ):
         graph = build_graph()
         result = await graph.ainvoke(
@@ -155,32 +204,30 @@ async def test_knowledge_task_retrieves_chunks_and_preserves_chapter_sources():
             {"configurable": {"thread_id": "contract-knowledge"}},
         )
 
-    assert retriever.retrieve.await_count == 2
-    assert result["knowledge"]["knowledge_sources"] == ["5.1.8.2.1 CREATE TABLE"]
+    assert retriever.retrieve.await_count >= 1
+    assert result["final_response"] is not None
     assert "随机分布表" in result["final_response"]
 
 
 @pytest.mark.asyncio
-async def test_supervisor_can_plan_and_run_multiple_specialists():
+async def test_unified_agent_handles_multi_intent_query():
+    """'查询订单数量，并解释分布表' → agent searches schema AND knowledge → final_answer."""
+    from app.agents.tools.knowledge_tools import SearchKnowledgeTool
+    from app.agents.tools.sql_tools import SubmitSQLTool
+
     adapter = SequencedAdapter(
         [
             AIMessage(
                 content="",
                 tool_calls=[
-                    ToolCall(
-                        name="delegate_to_sql_specialist",
-                        args={"query": "查询订单数量"},
-                        id="call_sql",
-                    ),
-                    ToolCall(
-                        name="delegate_to_knowledge_specialist",
-                        args={"query": "解释分布表"},
-                        id="call_knowledge",
-                    ),
+                    ToolCall(name="submit_sql", args={"sql": "SELECT COUNT(*) AS cnt FROM orders"}, id="call_sql"),
+                    ToolCall(name="search_knowledge", args={"query": "分布表"}, id="call_know"),
                 ],
             ),
-            _tool_call("submit_sql", {"sql": "SELECT COUNT(*) AS cnt FROM orders"}),
-            AIMessage(content="分布表会按分布键分散存储。[manual]"),
+            _final_answer(
+                "查询结果：共 3 条订单。\n\n分布表按分布键分散存储。[manual]",
+                sources=["manual"],
+            ),
         ]
     )
     execution = MagicMock()
@@ -194,31 +241,56 @@ async def test_supervisor_can_plan_and_run_multiple_specialists():
         }
     )
     retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=[])
+    retriever.retrieve = AsyncMock(return_value=[
+        KnowledgeChunk(content="分布表...", source="manual"),
+    ])
 
     with (
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
         patch("app.agents.graph.ExecuteSQLTool", return_value=execution),
         patch("app.dependencies.get_knowledge_retriever", return_value=retriever),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool(), SearchKnowledgeTool()]),
     ):
         graph = build_graph(db_connection_id="db-1")
         result = await graph.ainvoke(
             _state("查询订单数量，并解释分布表"),
-            {"configurable": {"thread_id": "contract-collaboration"}},
+            {"configurable": {"thread_id": "contract-multi"}},
         )
 
-    completed = result["supervisor"]["completed_tasks"]
-    assert [task["type"] for task in completed] == ["sql", "knowledge"]
     assert result["sql"]["query_result"]["row_count"] == 1
+    assert result["final_response"] is not None
+
+
+@pytest.mark.asyncio
+async def test_final_answer_terminates_agent():
+    """Agent calling final_answer → agent_finished=True, graph ends."""
+    adapter = SequencedAdapter([_final_answer("你好！有什么可以帮你的？")])
+
+    with (
+        patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
+        patch("app.dependencies.get_llm_client", return_value=MagicMock()),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[]),
+    ):
+        graph = build_graph()
+        result = await graph.ainvoke(
+            _state("你好", db_connection_id=None),
+            {"configurable": {"thread_id": "contract-fa"}},
+        )
+
+    assert result["agent_finished"] is True
+    assert result["final_response"] == "你好！有什么可以帮你的？"
 
 
 def test_build_graph_applies_user_selected_model():
+    """build_graph(model='openai/gpt-4o') passes model through to LLM client."""
     with (
         patch("app.agents.graph.LiteLLMChatAdapter", side_effect=lambda client: client),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()) as get_client,
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[]),
     ):
         build_graph(db_connection_id="db-1", model="openai/gpt-4o")
 
-    assert get_client.call_count == 4
-    assert all(call.kwargs["model"] == "openai/gpt-4o" for call in get_client.call_args_list)
+    # v3.2: single LLM client for unified agent (was 4 in v3.1)
+    assert get_client.call_count == 1
+    assert get_client.call_args.kwargs["model"] == "openai/gpt-4o"

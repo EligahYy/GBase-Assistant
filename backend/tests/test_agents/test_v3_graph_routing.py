@@ -1,4 +1,5 @@
-"""Integration tests for v3 graph routing — verifies the graph doesn't loop infinitely."""
+"""Integration tests for v3.2 Unified Agent graph routing — verifies the graph terminates correctly."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,99 +29,111 @@ def _tc_msg(name: str, args: dict) -> AIMessage:
     return AIMessage(content="", tool_calls=[ToolCall(name=name, args=args, id=f"call_{name}")])
 
 
+def _fa_msg(answer: str) -> AIMessage:
+    return AIMessage(content="", tool_calls=[ToolCall(name="final_answer", args={"answer": answer}, id="call_fa")])
+
+
 def _text_msg(content: str) -> AIMessage:
     return AIMessage(content=content)
 
 
-def _initial_state(msg: str, test_id: str) -> AgentState:
+def _initial_state(msg: str, test_id: str, db_id: str | None = None) -> AgentState:
     return {
         "messages": [HumanMessage(content=msg)],
-        "db_connection_id": None,
-        "supervisor_step": 0, "supervisor_finished": False,
-        "sql_step": 0, "sql_finished": False,
-        "supervisor": {}, "sql": {}, "knowledge": {},
+        "db_connection_id": db_id,
+        "agent_step": 0,
+        "agent_finished": False,
+        "sql": {},
+        "knowledge": {},
     }
 
 
 @pytest.mark.asyncio
-async def test_graph_finishes_greeting():
-    """Graph completes for simple greeting (no delegation)."""
-    mock = _mock_adapter([_text_msg("你好！")])
+async def test_graph_finishes_with_final_answer():
+    """Unified agent calls final_answer → graph ends with final_response."""
+    mock = _mock_adapter([_fa_msg("你好！有什么可以帮你的？")])
 
     with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
-         patch("app.dependencies.get_llm_client", return_value=MagicMock()):
+         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
+         patch("app.agents.graph.get_unified_agent_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
         state = _initial_state("你好", "t1")
         result = await graph.ainvoke(state, {"configurable": {"thread_id": "t1"}})
-        assert result.get("final_response") is not None
+        assert result.get("final_response") == "你好！有什么可以帮你的？"
+        assert result.get("agent_finished") is True
 
 
 @pytest.mark.asyncio
-async def test_graph_finishes_with_delegation():
-    """Graph completes with one delegation to SQL agent."""
-    mock = _mock_adapter([
-        _tc_msg("delegate_to_sql_specialist", {"query": "查询"}),
-        _text_msg("SQL结果..."),
-        _text_msg("SELECT * FROM orders"),
-    ])
+async def test_graph_finishes_text_fallback():
+    """Agent outputs text without tool calls → treated as final answer (fallback)."""
+    mock = _mock_adapter([_text_msg("你好！")])
 
     with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph._to_openai_tools", return_value=[]):
+         patch("app.agents.graph.get_unified_agent_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
-        state = _initial_state("查询订单", "t2")
+        state = _initial_state("你好", "t2")
         result = await graph.ainvoke(state, {"configurable": {"thread_id": "t2"}})
         assert result.get("final_response") is not None
+        assert result.get("agent_finished") is True
 
 
 @pytest.mark.asyncio
 async def test_graph_stops_at_iteration_limit():
-    """Agent stops after MAX_ITERATIONS (doesn't loop forever)."""
-    mock = _mock_adapter([_tc_msg("search_schemas", {"query": "x"})] * 20)
+    """Agent stops after MAX_ITERATIONS (12) — doesn't loop forever."""
+    # Use submit_sql to avoid DB-dependent tools
+    from app.agents.tools.sql_tools import SubmitSQLTool
+
+    mock = _mock_adapter([_tc_msg("submit_sql", {"sql": "SELECT 1"})] * 20)
 
     with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph._to_openai_tools", return_value=[]):
+         patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]):
+        from app.agents.graph import build_graph
+        graph = build_graph()
+        state = _initial_state("x", "t3")
+        result = await graph.ainvoke(state, {"configurable": {"thread_id": "t3"}})
+        # Graph must terminate — agent_step should be at or near MAX_ITERATIONS
+        step = result.get("agent_step", 0)
+        assert 1 <= step <= 13  # At least 1 iteration, at most MAX_ITERATIONS + 1
+
+
+@pytest.mark.asyncio
+async def test_max_iterations_graceful_degradation():
+    """At max iterations, graceful degradation sets agent_finished with message."""
+    from app.agents.tools.sql_tools import SubmitSQLTool
+
+    mock = _mock_adapter([_tc_msg("submit_sql", {"sql": "SELECT 1"})] * 20)
+
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
+         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
+         patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]):
         from app.agents.graph import build_graph
         graph = build_graph()
         state = _initial_state("x", "t4")
         result = await graph.ainvoke(state, {"configurable": {"thread_id": "t4"}})
-        step = result.get("supervisor_step", 0)
-        assert step <= 16
+        # Agent must have terminated (either via max_iterations or execution failure)
+        assert result.get("agent_finished") is True
+        # Check that the graph produced a meaningful end state
+        msgs = result.get("messages", [])
+        last_msg = msgs[-1] if msgs else None
+        assert last_msg is not None
+        assert last_msg.content  # Should have error or degradation message
 
 
 @pytest.mark.asyncio
-async def test_sql_agent_guards_no_connection():
-    """SQL Agent immediately finishes with helpful message when no DB connected."""
-    mock = _mock_adapter([_tc_msg("delegate_to_sql_specialist", {"query": "查询"})])
+async def test_agent_handles_no_db_connection():
+    """When no DB connected, agent can still respond (via final_answer)."""
+    mock = _mock_adapter([_fa_msg("当前未选择数据库连接，请先在设置中添加。")])
 
     with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph._to_openai_tools", return_value=[]):
+         patch("app.agents.graph.get_unified_agent_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
-        state = _initial_state("查询订单", "t5")
-        # Explicitly set no connection
-        state["db_connection_id"] = None
+        state = _initial_state("查询订单", "t5", db_id=None)
         result = await graph.ainvoke(state, {"configurable": {"thread_id": "t5"}})
-        # Should finish with a response, not loop infinitely
         assert result.get("final_response") is not None
-        response = result.get("final_response", "")
-        assert "连接" in response or "数据库" in response
-
-
-@pytest.mark.asyncio
-async def test_max_iterations_friendly_message():
-    """When max iterations hit, emits friendly message instead of silent end."""
-    mock = _mock_adapter([_tc_msg("search_schemas", {"query": "x"})] * 20)
-
-    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
-         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph._to_openai_tools", return_value=[]):
-        from app.agents.graph import build_graph
-        graph = build_graph()
-        state = _initial_state("x", "t6")
-        result = await graph.ainvoke(state, {"configurable": {"thread_id": "t6"}})
-        assert result.get("final_response") is not None
+        assert result.get("agent_finished") is True

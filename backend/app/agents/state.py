@@ -1,7 +1,7 @@
-"""LangGraph collaborative Agent state definitions.
+"""LangGraph collaborative Agent state definitions — v3.2 Unified Agent.
 
-使用 TypedDict 定义，兼容 LangGraph StateGraph 的 state schema。
-所有字段 total=False，Agent 只读写自己的 namespace。
+Uses TypedDict for LangGraph StateGraph compatibility.
+All fields total=False — agents only read/write their own namespace.
 """
 
 from typing import Annotated, TypedDict
@@ -9,16 +9,8 @@ from typing import Annotated, TypedDict
 from langgraph.graph.message import add_messages
 
 
-class SupervisorState(TypedDict, total=False):
-    """Supervisor-specific state."""
-
-    pending_tasks: list[dict]
-    completed_tasks: list[dict]
-    active_task: dict | None
-
-
 class SQLAgentState(TypedDict, total=False):
-    """SQL Agent-specific state."""
+    """SQL Agent-specific state — shared between unified agent and SQL gates."""
 
     generated_sql: str | None
     grounded_schemas: list
@@ -26,33 +18,29 @@ class SQLAgentState(TypedDict, total=False):
     query_result: dict | None
     execution_error: str | None
     retry_count: int
-    phase: str
+    phase: str  # idle → proposed → validated → completed | validation_failed | execution_failed
 
 
 class KnowledgeAgentState(TypedDict, total=False):
-    """Knowledge Agent-specific state."""
+    """Knowledge pipeline state."""
 
     knowledge_sources: list[str]
     answer: str | None
+    status: str  # found | partial | not_found
 
 
 class AgentState(TypedDict, total=False):
-    """Top-level Agent state — namespace-isolated per-agent state.
+    """Top-level Agent state — v3.2 unified fields.
 
-    Supervisor writes to state["supervisor"], SQL Agent to state["sql"],
-    Knowledge Agent to state["knowledge"]. Cross-agent communication
-    happens via messages, not direct state mutation.
+    Unified agent reads/writes to state["messages"] and state["sql"].
+    Knowledge pipeline writes to state["knowledge"].
+    Cross-agent communication via messages, not direct state mutation.
     """
 
     messages: Annotated[list, add_messages]
-    supervisor: SupervisorState
     sql: SQLAgentState
     knowledge: KnowledgeAgentState
     final_response: str | None
-    supervisor_step: int   # Iteration counter for supervisor agent
-    supervisor_finished: bool  # Per-agent finish flag
-    sql_step: int          # Iteration counter for SQL agent
-    sql_finished: bool     # Per-agent finish flag
-    general_step: int       # Iteration counter for general agent
-    general_finished: bool  # Per-agent finish flag
+    agent_step: int       # Unified iteration counter
+    agent_finished: bool  # Unified finish flag (set by final_answer or termination)
     db_connection_id: str | None

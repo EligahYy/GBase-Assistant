@@ -13,7 +13,7 @@
 
 | 层 | 技术 |
 |---|---|
-| 编排 | **LangGraph** StateGraph + AgentState（Planner-Specialist 模式） |
+| 编排 | **LangGraph** StateGraph + AgentState（Unified ReAct Agent 模式） |
 | 事件协议 | **AG-UI** 标准 SSE（单 FastAPI 进程，无需 Node.js 中间层） |
 | 后端 | Python 3.12 + FastAPI + SQLAlchemy async + SQLite |
 | LLM | LiteLLM（DeepSeek/Qwen/GPT-4o fallback） |
@@ -26,41 +26,50 @@
 ```
 Vue 3 Chat UI ←── AG-UI SSE ──→ FastAPI Gateway
                                      │
-                        LangGraph Hybrid Multi-Agent (v3)
+                         LangGraph Unified ReAct Agent (v3.2)
                                      │
-                               Planner Agent
-                        (多任务计划 + 顺序调度队列)
-                                     │
-                    ┌────────────────┼────────────────┐
-                    │                │                │
-             SQL Specialist   Knowledge Pipeline  General Agent
-             探索→submit_sql    Hybrid RAG→回答       通用对话
-                    │
-             Validate Gate → Execute Gate
+                    统一 Agent（全工具集，自主决策路由）
+                     │                              │
+                     │  submit_sql            final_answer
+                     ↓                              ↓
+              Validate Gate → Execute Gate        END
 ```
 
-**v3 混合多智能体架构：** Planner 负责任务分解与调度，Specialist 负责领域推理，SQL 验证和执行由确定性 Gate 接管。上下文通过 `AgentState` TypedDict namespace 隔离。
+**v3.2 统一 Agent 架构：** 无独立 Supervisor/router。统一 Agent 持有全部 10 个工具，Prompt + Tools 即为路由机制。`final_answer` 工具提供显式终止信号防无限循环。循环检测 + 三级终止策略（温和提醒 → 紧急提示 → 优雅降级）确保健壮终止。
 
-**v3 核心特性：**
-- **Planner + Specialist 队列**：一次规划多个任务，框架顺序调度 SQL / Knowledge / General
+**v3.2 核心特性：**
+- **统一 ReAct Agent**：单个 Agent 持有全部工具（Schema 探索 / SQL 提交 / 知识检索 / 监控 / final_answer），模型自主决策调用顺序
+- **无路由错误**：不依赖 LLM 分类路由，模型根据完整上下文 + 工具描述自行判断
+- **天然多意图**：Agent 可在同一轮调用 schema 工具 + knowledge 工具，解决 "查数据并解释概念" 类复合请求
+- **final_answer 显式终止**：Agent 必须调用 `final_answer` 结束，避免"不知道何时停止"的循环问题
+- **循环检测**：检测同一工具 + 同一参数的重复调用，注入停止提示
+- **三级终止策略**：L1 温和提醒(8轮) → L2 紧急提示(10轮) → L3 优雅降级(12轮)
 - **确定性 SQL Gate**：候选 SQL 必须通过只读安全、方言和 Schema 验证后才允许执行
-- **监控快速路径**：数据库状态查询直接短路，绕过 NL2SQL pipeline
-- **项目文件夹**：对话分组管理 + 批量操作（归档/删除/移动）
-- **多轮对话**：`build_context()` 加载历史消息，支持上下文连贯问答
+- **监控快速路径**：数据库状态查询直接短路，绕过 Agent 图
+- **Anti-Hallucination**：search_knowledge 返回 status (found/partial/not_found)，Prompt 强制 LLM 遵守
 - **AG-UI STATE_DELTA**：SQL/结果/图表配置通过标准 SSE 事件实时推送前端
-- **LiteLLM Chat Adapter**：`_LiteLLMChatAdapter` 将 `LiteLLMClientImpl` 封装为 LangChain `BaseChatModel`
 
 ## 项目结构
 
 ```
 gbase8a-assistant/
 ├── backend/app/
-│   ├── agents/             # LangGraph v3 混合多智能体
+│   ├── agents/             # LangGraph v3.2 统一 Agent
 │   │   ├── state.py        # AgentState TypedDict（namespace 隔离）
-│   │   ├── agents/         # Planner / SQL / General Specialist
-│   │   ├── tools/          # Specialist 显式工具集
+│   │   ├── agents/         # Agent 定义
+│   │   │   ├── unified_agent.py  # 统一 Agent（prompt + 10 工具注册 + FinalAnswerTool）
+│   │   │   ├── knowledge_agent.py # Knowledge Pipeline（search→answer，非 ReAct）
+│   │   │   └── prompts.py        # 旧 prompt 占位（已迁移到各 agent 模块）
+│   │   ├── tools/          # 统一 Agent 工具集
+│   │   │   ├── schema_tools.py   # SearchSchemas / GetTableProfile / FindJoinPath
+│   │   │   ├── sql_tools.py      # SubmitSQL / ExecuteSQL
+│   │   │   ├── knowledge_tools.py # SearchKnowledgeTool
+│   │   │   ├── glossary_tool.py  # QueryGlossary
+│   │   │   ├── error_code_tool.py # LookupErrorCode
+│   │   │   ├── status_tool.py    # GetDatabaseStatus
+│   │   │   └── base.py           # ToolParameter 元数据
 │   │   ├── schema_graph.py # Schema Knowledge Graph（DDL解析+角色+关系+检索）
-│   │   └── graph.py        # 协作调度图 + 确定性 Gate + AG-UI Runner
+│   │   └── graph.py        # v3.2 图（5节点）+ AG-UI Runner
 │   ├── gateway/
 │   │   └── ag_ui_encoder.py # AG-UI 8 种标准 SSE 事件编码
 │   ├── api/
@@ -87,20 +96,22 @@ gbase8a-assistant/
 
 ## 核心链路
 
-### NL2SQL（v3 混合多智能体）
+### NL2SQL（v3.2 统一 Agent）
 
 ```
-用户输入 → Planner(任务计划) → SQL Specialist(工具探索 → submit_sql)
+用户输入 → 统一 Agent(工具自主探索 → submit_sql)
   → Validate Gate(只读安全 + 方言 + Schema)
-  → 失败则返回结构化错误并定向修复 → Execute Gate(沙箱) → AG-UI SSE 响应
+  → 失败则返回结构化错误并定向修复(最多3轮) → Execute Gate(沙箱)
+  → Agent 调用 final_answer 输出结果 → AG-UI SSE 响应
 ```
 
 ### 知识问答
 
 ```
-用户输入 → Planner(知识任务) → Knowledge Pipeline
-  → HybridKnowledgeRetriever(精确ripgrep+语义Qdrant+RRF融合)
-  → LiteLLM 生成回答 → AG-UI SSE 响应
+用户输入 → 统一 Agent(调用 search_knowledge)
+  → HybridKnowledgeRetriever(精确ripgrep+语义Qdrant+RRF融合+关键词扩展回退)
+  → 返回 chunks + status(found/partial/not_found) → Agent 基于 status 决定回答策略
+  → final_answer 输出（注明来源/标记推测/诚实说不知道）→ AG-UI SSE 响应
 ```
 
 ## 运行命令
@@ -153,7 +164,7 @@ QDRANT_URL=http://localhost:6333
 
 - `TESTING=1` 跳过 Qdrant/Embedding 初始化
 - 涉及 LLM API 的测试必须 Mock
-- 163 个后端测试，覆盖 agents / API / validator / sandbox / crypto
+- 182 个后端测试，覆盖 agents / API / validator / sandbox / crypto
 
 ## 安全边界
 

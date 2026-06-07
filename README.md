@@ -4,8 +4,8 @@
 
 ## 核心功能
 
-- **Text-to-SQL**：自然语言 → ReAct Agent 自主探索 Schema → 生成 SQL → 校验 → 沙箱执行
-- **知识问答**：基于官方产品手册（向量检索 + RRF 融合）的精准答疑
+- **Text-to-SQL**：统一 Agent 自主探索 Schema → 生成 SQL → 校验 → 沙箱执行
+- **知识问答**：基于官方产品手册（向量检索 + RRF 融合 + Anti-Hallucination）的精准答疑
 - **连接管理**：GBase 数据库连接状态实时监测（SSE 推送，零延迟感知）
 - **数据库监控**：连接数/活跃SQL/运行时间/表概况一键查询
 - **项目文件夹**：对话分组管理 + 批量操作（归档/删除/移动到文件夹）
@@ -17,26 +17,22 @@
 ```
 Vue 3 Chat UI ←── AG-UI SSE ──→ FastAPI Gateway
                                      │
-                         LangGraph Hybrid Multi-Agent (v3)
+                         LangGraph Unified ReAct Agent (v3.2)
                                      │
-                              Planner Agent
-                           (多任务计划 + 调度队列)
-                                     │
-                    ┌────────────────┼────────────────┐
-                    │                │                │
-             SQL Specialist   Knowledge Pipeline  General Agent
-             探索→submit_sql    Hybrid RAG→回答       通用对话
-                    │
-             Validate Gate → Execute Gate
+                    统一 Agent（全工具集，10 tools）
+                     │                              │
+                     │  submit_sql            final_answer
+                     ↓                              ↓
+              Validate Gate → Execute Gate        END
 ```
 
-**v3 混合多智能体架构**（当前版本）：
-- **Planner + Specialist 协作队列**：Planner 可一次规划多个任务，框架顺序调度 SQL / Knowledge / General Specialist
-- **确定性 SQL Gate**：SQL Specialist 只能通过 `submit_sql` 提交候选 SQL；只读安全、方言/Schema 验证通过后才允许执行
-- **结构化状态**：SQL、验证结果、查询结果、知识来源写入 AgentState namespace，并通过 AG-UI `STATE_DELTA` 推送
-- **可靠 RAG 管线**：Knowledge 使用 Hybrid Retrieval + RRF 的确定性检索回答流程
+**v3.2 统一 Agent 架构**（当前版本）：
+- **统一 ReAct Agent**：单个 Agent 持有全部工具，模型根据完整上下文自主决策调用哪些工具、以什么顺序。无独立 Supervisor/router——Prompt + Tools 即为路由机制
+- **final_answer 显式终止**：Agent 必须调用 `final_answer` 工具结束，配合循环检测（同一工具+同参数 ≤ 2次）和三级终止策略（温和提醒→紧急提示→优雅降级），杜绝无限循环
+- **Anti-Hallucination 知识检索**：`search_knowledge` 返回 status（found/partial/not_found），Prompt 强制 LLM 遵守——not_found 时严禁编造
+- **确定性 SQL Gate**：`submit_sql` 提交后经过只读安全、方言和 Schema 三层验证，通过后才允许执行
+- **天然多意图支持**：Agent 可在同一轮调用 Schema 工具 + Knowledge 工具，解决"查数据并解释概念"类复合请求
 - **AG-UI 完整事件**：`RUN_STARTED` → `STEP_STARTED` → `THINKING_START/CONTENT/END` → `TOOL_CALL_START/RESULT/END` → `TEXT_MESSAGE_CONTENT` → `STEP_FINISHED` → `RUN_FINISHED`
-- **混合协作图**：Planner 负责多任务编排，SQL Specialist 使用受控 ReAct，验证和执行由确定性 Gate 接管
 - **Schema Knowledge Graph**：DDL 语义解析 → 列角色推断 → JOIN 关系图 → 多策略检索
 
 ## 技术栈
@@ -115,21 +111,20 @@ gbase8a-assistant/
 ├── backend/app/
 │   ├── agents/
 │   │   ├── state.py          # AgentState（namespace 隔离）
-│   │   ├── graph.py          # v3 ReAct 图 + Agent Runner
+│   │   ├── graph.py          # v3.2 统一 Agent 图（5节点）+ Runner
 │   │   ├── schema_graph.py   # Schema Knowledge Graph（DDL 解析+检索）
-│   │   ├── agents/           # 🆕 Agent 实现
-│   │   │   ├── supervisor.py     # Planner Agent（多任务规划）
-│   │   │   ├── sql_agent.py      # SQL Specialist 工具集
-│   │   │   ├── general_agent.py  # General Specialist
-│   │   │   └── prompts.py        # System prompts
-│   │   └── tools/            # Specialist 工具
+│   │   ├── agents/           # Agent 定义
+│   │   │   ├── unified_agent.py   # 统一 Agent（prompt + 10工具 + FinalAnswerTool）
+│   │   │   ├── knowledge_agent.py # Knowledge Pipeline（search→answer，非 ReAct）
+│   │   │   └── prompts.py        # 旧 prompt 占位
+│   │   └── tools/            # 统一 Agent 工具集
 │   │       ├── base.py           # ToolParameter 元数据
 │   │       ├── schema_tools.py   # SearchSchemas / GetTableProfile / FindJoinPath
 │   │       ├── sql_tools.py      # SubmitSQL / ExecuteSQL
+│   │       ├── knowledge_tools.py # SearchKnowledgeTool
 │   │       ├── glossary_tool.py  # QueryGlossary
 │   │       ├── error_code_tool.py # LookupErrorCode
-│   │       ├── status_tool.py    # GetDatabaseStatus
-│   │       └── delegate_tools.py # DelegateToSQL / DelegateToKnowledge
+│   │       └── status_tool.py    # GetDatabaseStatus
 │   ├── gateway/
 │   │   └── ag_ui_encoder.py  # AG-UI 事件编码器（THINKING/TOOL_CALL/STEP）
 │   ├── api/                  # FastAPI 路由
@@ -165,18 +160,6 @@ make lint            # 代码检查
 make migrate         # 执行数据库迁移
 make migration msg="xxx"  # 生成迁移脚本
 ```
-
-## v2 → v3 架构迁移
-
-| 维度 | v2 | v3 |
-|------|-----|-----|
-| Agent 数量 | 7 个硬编码节点 | Planner + 3 类 Specialist |
-| 图节点 | 10 个 | 协作调度队列 + Specialist + 确定性 Gate |
-| 路由 | 关键词 `if/else` | Planner 多任务计划 |
-| Tool 管理 | 闭包工厂函数 | Specialist 显式工具集 |
-| SQL 路径 | 5 节点 pipeline（不可逆） | Specialist 探索/纠错 + 确定性验证执行 |
-| 失败处理 | 硬 gate 阻断 + 盲重试 | Gate 返回结构化错误，Specialist 定向修复 |
-| 流式可见性 | 仅文本流 | 完整思考链 + Tool 调用 + Agent 步骤 |
 
 ## 许可证
 
