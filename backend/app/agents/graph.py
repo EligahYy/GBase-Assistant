@@ -285,6 +285,85 @@ def _make_tools_node(tools: list[Any], agent_name: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
+# Knowledge Agent — search→answer pipeline (NOT ReAct, no tools for LLM)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+KNOWLEDGE_ANSWER_PROMPT = """你是 GBase 8a 知识专家。根据以下知识库检索结果回答用户问题。
+
+## 规则
+- 如果检索结果中有相关信息：基于结果回答，注明来源文档名称
+- 如果检索结果不足以回答：诚实说明"知识库中未找到相关信息"，建议查阅官方手册
+- 如有代码示例，用 ```sql 代码块格式化
+- **严禁编造知识库中没有的功能、语法或参数**
+- 用中文回答，保持专业简洁
+"""
+
+
+def _make_knowledge_node(model: Any):
+    """Create a knowledge agent node that auto-searches then calls LLM to format answer.
+
+    Unlike other agents, this does NOT use ReAct. The search happens automatically
+    before the LLM is called. The LLM only formats the answer from given results.
+    """
+
+    async def node_fn(state: AgentState) -> dict:
+        _emit("step_started", {"agent_name": "knowledge_agent", "step_index": 0})
+
+        msgs = state.get("messages", [])
+        # Extract user's original question (first HumanMessage, due to isolate_context)
+        user_msg = None
+        for m in msgs:
+            if isinstance(m, HumanMessage):
+                user_msg = m.content if hasattr(m, "content") else str(m)
+                break
+        if not user_msg:
+            user_msg = str(msgs[-1].content) if msgs else ""
+
+        # ── Phase 1: Auto-search knowledge base (not LLM-decided) ──
+        _emit("thinking_start", {})
+        _emit("thinking_delta", "检索 GBase 8a 知识库")
+        _emit("thinking_end", {})
+
+        from app.agents.tools.knowledge_tools import SearchKnowledgeTool
+        search_tool = SearchKnowledgeTool()
+        search_results = await search_tool.execute(query=str(user_msg))
+
+        formatted = search_tool.format_result(search_results)
+        _emit("tool_call_start", {"name": "search_knowledge", "args": {"query": str(user_msg)[:100]}, "agent_name": "knowledge_agent"})
+        _emit("tool_call_result", {"name": "search_knowledge", "result": formatted})
+        _emit("tool_call_end", {"name": "search_knowledge"})
+
+        # Build knowledge context from results
+        knowledge_text = ""
+        if search_results:
+            for i, chunk in enumerate(search_results[:5]):
+                src = chunk.source if hasattr(chunk, "source") and chunk.source else "未知来源"
+                content = chunk.content[:800] if hasattr(chunk, "content") and chunk.content else ""
+                if content:
+                    knowledge_text += f"\n### 来源: {src}\n{content}\n"
+
+        if not knowledge_text:
+            knowledge_text = "（知识库中未找到相关文档）"
+
+        # ── Phase 2: LLM formats answer from search results ──
+        prompt = KNOWLEDGE_ANSWER_PROMPT + f"\n\n## 知识库检索结果\n{knowledge_text}\n\n## 用户问题\n{user_msg}\n\n请基于以上检索结果回答用户问题。"
+
+        try:
+            response = await _call_llm(model, [HumanMessage(content=prompt)], None)
+            _, text = _parse_tool_calls(response)
+            answer = text or "知识库中未找到相关信息，建议查阅 GBase 8a 官方手册。"
+        except Exception as e:
+            logger.error("Knowledge agent LLM call failed: %s", e)
+            answer = f"知识检索处理出错: {e}"
+
+        _emit("delta", answer)
+        _emit("step_finished", {"agent_name": "knowledge_agent"})
+        return {"knowledge_finished": True, "messages": [AIMessage(content=answer)]}
+
+    return node_fn
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
 # Graph builder
 # ═══════════════════════════════════════════════════════════════════════════════════
 
@@ -334,11 +413,8 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     ))
     builder.add_node("sql_tools", _make_tools_node(_get_sql_tools(), "sql_agent"))
 
-    builder.add_node("knowledge_agent", _make_agent_node(
-        specialist_llm, _get_knowledge_tools, get_knowledge_agent_prompt, "knowledge_agent", "knowledge_step", "knowledge_finished",
-        isolate_context=True,
-    ))
-    builder.add_node("knowledge_tools", _make_tools_node(_get_knowledge_tools(), "knowledge_agent"))
+    # Knowledge Agent: auto-search → LLM formats answer (NOT ReAct — no tools, no loop)
+    builder.add_node("knowledge_agent", _make_knowledge_node(specialist_llm))
 
     builder.add_node("general_agent", _make_agent_node(
         supervisor_llm, _get_no_tools, get_general_agent_prompt, "general_agent", "general_step", "general_finished",
@@ -430,12 +506,8 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     })
     builder.add_edge("sql_tools", "sql_agent")
 
-    # Knowledge Agent loop → counter → supervisor on finish
-    builder.add_conditional_edges("knowledge_agent", route_knowledge_agent, {
-        "tools": "knowledge_tools",
-        "end": "_specialist_return",
-    })
-    builder.add_edge("knowledge_tools", "knowledge_agent")
+    # Knowledge Agent → direct to formatter (search→answer pipeline, no ReAct)
+    builder.add_edge("knowledge_agent", "response_formatter")
 
     # General Agent → always goes to response_formatter (no tools, straight answer)
     builder.add_conditional_edges("general_agent", route_general_agent, {
