@@ -102,6 +102,29 @@ async def _call_llm(
         return _make_ai_message(content or "", tool_calls_data)
 
 
+def _thinking_summary(agent_name: str, tool_names: list[str]) -> str:
+    """Generate a natural-language thinking summary based on agent and tools."""
+    # Map tool names to human-readable actions for thinking display
+    TOOL_THINKING: dict[str, str] = {
+        "search_schemas": "搜索相关数据库表",
+        "get_table_profile": "查看表字段详情",
+        "find_join_path": "查找表关联关系",
+        "query_glossary": "查询业务术语映射",
+        "validate_sql": "验证 SQL 语法",
+        "execute_sql": "执行 SQL 查询",
+        "lookup_error": "查询错误码含义",
+        "search_knowledge": "检索 GBase 8a 知识库",
+        "get_database_status": "获取数据库运行状态",
+        "delegate_to_sql_specialist": "委托 SQL 专家处理查询",
+        "delegate_to_knowledge_specialist": "委托知识专家检索文档",
+        "delegate_to_general": "处理对话",
+    }
+    actions = [TOOL_THINKING.get(n, n) for n in tool_names]
+    if len(actions) == 1:
+        return actions[0]
+    return "、".join(actions)
+
+
 def _to_openai_tools(tools: list[Any]) -> list[dict]:
     """Convert tool objects to OpenAI function-calling schema."""
     schemas = []
@@ -190,7 +213,9 @@ def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_ke
             _emit("thinking_end", {})
 
         _emit("thinking_start", {})
-        _emit("thinking_delta", f"调用 {len(tool_calls)} 个工具: {', '.join(tc['name'] for tc in tool_calls)}")
+        # Natural-language thinking summary
+        tool_names = [tc['name'] for tc in tool_calls]
+        _emit("thinking_delta", _thinking_summary(agent_name, tool_names))
         _emit("thinking_end", {})
         return {step_key: step_idx + 1, "messages": [response]}
 

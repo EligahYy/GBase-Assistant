@@ -150,19 +150,6 @@ function renderInline(text: string): string {
           <span class="msg-badge">AI</span>
         </div>
 
-        <!-- Agent Step Indicator -->
-        <div v-if="message.activeAgent" class="agent-step-indicator">
-          <span class="agent-icon">{{
-            message.activeAgent === 'sql_agent' ? '🤖' :
-            message.activeAgent === 'knowledge_agent' ? '📚' : '🧠'
-          }}</span>
-          <span class="agent-label">{{
-            message.activeAgent === 'sql_agent' ? 'SQL Agent' :
-            message.activeAgent === 'knowledge_agent' ? 'Knowledge Agent' :
-            message.activeAgent
-          }}</span>
-          <span class="agent-status">处理中...</span>
-        </div>
 
         <!-- Stream Events Timeline (interleaved thinking + tool calls + text) -->
         <template v-if="message.streamEvents && message.streamEvents.length > 0">
@@ -465,23 +452,6 @@ function renderInline(text: string): string {
   color: var(--text-3);
   font-weight: 500;
   font-family: var(--font-mono);
-}
-
-.agent-step-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: var(--text-2);
-}
-.agent-icon { font-size: 14px; }
-.agent-label { font-weight: 600; }
-.agent-status {
-  font-size: 11px;
-  color: var(--text-4);
-  font-style: italic;
 }
 
 /* Query Result Table */

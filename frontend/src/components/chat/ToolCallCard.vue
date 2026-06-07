@@ -1,90 +1,96 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
 import type { ToolCallEntry } from '@/stores/chat'
 
 const props = defineProps<{
   toolCall: ToolCallEntry
 }>()
 
-const expanded = ref(false)
-
-const statusIcon: Record<string, string> = {
-  running: '🔄',
-  done: '✅',
-  error: '❌',
-  pending: '⏳',
+// Human-readable labels — no raw tool names visible to users
+const TOOL_LABELS: Record<string, { icon: string; action: string }> = {
+  search_schemas: { icon: '🔍', action: '搜索数据库表结构' },
+  get_table_profile: { icon: '📋', action: '查看表字段详情' },
+  find_join_path: { icon: '🔗', action: '查找表关联关系' },
+  query_glossary: { icon: '📖', action: '查询业务术语映射' },
+  validate_sql: { icon: '✅', action: '验证 SQL 语法' },
+  execute_sql: { icon: '⚡', action: '执行 SQL 查询' },
+  lookup_error: { icon: '🐛', action: '查询错误码含义' },
+  search_knowledge: { icon: '📚', action: '检索 GBase 8a 知识库' },
+  get_database_status: { icon: '📊', action: '获取数据库运行状态' },
+  delegate_to_sql_specialist: { icon: '🤖', action: '调用 SQL 专家处理' },
+  delegate_to_knowledge_specialist: { icon: '📚', action: '调用知识专家处理' },
+  delegate_to_general: { icon: '💬', action: '处理对话' },
 }
 
-const statusText: Record<string, string> = {
-  running: '执行中',
-  done: '完成',
-  error: '失败',
-  pending: '等待',
-}
+const label = computed(() =>
+  TOOL_LABELS[props.toolCall.name] || { icon: '🔧', action: props.toolCall.name }
+)
+
+const resultSummary = computed(() => {
+  if (props.toolCall.status === 'error') return props.toolCall.error || '执行失败'
+  if (props.toolCall.status === 'done' && props.toolCall.result) return props.toolCall.result
+  return ''
+})
 </script>
 
 <template>
-  <div class="tool-call-card" :class="`status-${toolCall.status}`">
-    <button class="tool-call-header" @click="expanded = !expanded">
-      <span class="tool-status">{{ statusIcon[toolCall.status] }}</span>
-      <span class="tool-name">{{ toolCall.name }}</span>
-      <span class="tool-status-text">{{ statusText[toolCall.status] }}</span>
-      <span class="tool-chevron">{{ expanded ? '▾' : '▸' }}</span>
-    </button>
-    <div v-if="expanded" class="tool-call-detail">
-      <div v-if="Object.keys(toolCall.args).length" class="tool-args">
-        <span class="detail-label">参数:</span>
-        <code>{{ JSON.stringify(toolCall.args, null, 2) }}</code>
-      </div>
-      <div v-if="toolCall.result" class="tool-result">
-        <span class="detail-label">结果:</span>
-        <span>{{ toolCall.result }}</span>
-      </div>
-      <div v-if="toolCall.error" class="tool-error">
-        <span class="detail-label">错误:</span>
-        <span>{{ toolCall.error }}</span>
-      </div>
-    </div>
+  <div class="tool-call" :class="`status-${toolCall.status}`">
+    <span class="tool-icon">{{ label.icon }}</span>
+    <span class="tool-action">{{ label.action }}</span>
+    <span v-if="toolCall.status === 'running'" class="tool-spinner" />
+    <span v-else-if="toolCall.status === 'error'" class="tool-status-mark error-mark">✗</span>
+    <span v-else class="tool-status-mark done-mark">✓</span>
+    <span v-if="resultSummary" class="tool-result">{{ resultSummary }}</span>
   </div>
 </template>
 
 <style scoped>
-.tool-call-card {
-  margin: 4px 0 4px 24px;
-  font-size: 12px;
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-.tool-call-header {
+.tool-call {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  width: 100%;
-  background: var(--bg-panel);
-  border: none;
-  cursor: pointer;
-  font-family: var(--font-sans);
+  padding: 2px 0;
   font-size: 12px;
+  color: var(--text-3);
+  margin-left: 8px;
+}
+.tool-call.status-error {
+  color: var(--error);
+}
+.tool-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.tool-action {
+  font-weight: 500;
   color: var(--text-2);
 }
-.tool-call-header:hover { background: var(--bg-hover); }
-.tool-name { font-family: var(--font-mono); color: var(--text-1); font-weight: 500; }
-.tool-status-text { color: var(--text-4); font-size: 11px; margin-left: auto; }
-.tool-chevron { font-size: 10px; color: var(--text-4); }
-.tool-call-detail { padding: 4px 8px 8px; background: var(--bg-deep); }
-.tool-args code, .tool-result, .tool-error {
-  font-family: var(--font-mono);
+.tool-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--seam-2);
+  border-top-color: var(--text-2);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.tool-status-mark {
+  font-size: 10px;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.done-mark { color: var(--success); }
+.error-mark { color: var(--error); }
+.tool-result {
+  color: var(--text-4);
   font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  display: block;
-  margin-top: 2px;
-  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+  margin-left: 2px;
 }
-.tool-error { color: var(--error); }
-.detail-label { color: var(--text-4); font-size: 10px; text-transform: uppercase; }
-.status-error { border-color: var(--error); }
-.status-done { border-color: var(--success); }
 </style>
