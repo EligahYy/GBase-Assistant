@@ -159,8 +159,24 @@ export const useChatStore = defineStore('chat', () => {
     const msg = messages.value.find((m) => m.id === id)
     if (msg) {
       msg.isStreaming = false
+      // Persist streamEvents to localStorage so they survive conversation switches
+      if (msg.streamEvents && msg.streamEvents.length > 0) {
+        try {
+          localStorage.setItem(`stream_events:${id}`, JSON.stringify(msg.streamEvents))
+        } catch { /* storage full — ignore */ }
+      }
     }
     currentConversationId.value = conversationId
+  }
+
+  function _restoreStreamEvents(msg: Message): Message {
+    try {
+      const raw = localStorage.getItem(`stream_events:${msg.id}`)
+      if (raw) {
+        msg.streamEvents = JSON.parse(raw)
+      }
+    } catch { /* ignore parse errors */ }
+    return msg
   }
 
   async function loadConversations(folderId?: string | null) {
@@ -183,15 +199,18 @@ export const useChatStore = defineStore('chat', () => {
         getConversationSummary(id).catch(() => null),
       ])
       currentConversationId.value = id
-      messages.value = conv.messages.map((m) => ({
-        id: m.id,
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-        sql: m.sql_generated,
-        messageType: m.message_type,
-        queryResult: m.query_result as QueryResult | null,
-        chartConfig: m.chart_config as ChartConfig | null,
-      }))
+      messages.value = conv.messages.map((m) => {
+        const msg: Message = {
+          id: m.id,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          sql: m.sql_generated,
+          messageType: m.message_type,
+          queryResult: m.query_result as QueryResult | null,
+          chartConfig: m.chart_config as ChartConfig | null,
+        }
+        return _restoreStreamEvents(msg)
+      })
       conversationSummary.value = summary
     } finally {
       isLoading.value = false
