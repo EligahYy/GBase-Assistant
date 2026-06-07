@@ -288,13 +288,39 @@ def _make_tools_node(tools: list[Any], agent_name: str):
 # Knowledge Agent — search→answer pipeline (NOT ReAct, no tools for LLM)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-def _make_knowledge_node(model: Any):
-    """Knowledge agent: auto-search → LLM formats answer (no ReAct, no tools for LLM).
+# ── v3 Knowledge Agent prompt (better than v2 QA_SYSTEM: RRF fusion aware + keyword fallback + source citation) ──
 
-    Uses the same retrieval + prompt pattern as v2's proven knowledge_specialist_node.
+V3_QA_SYSTEM = """你是 GBase 8a 数据库专家助手。根据以下知识库内容回答用户问题。
+
+## 知识库内容
+{knowledge_section}
+
+## 回答规则
+
+1. **基于知识库回答**：只使用上方"知识库内容"中的信息。如果相关内容充分，直接回答。
+2. **注明来源**：每条信息注明来自哪个文档（[文档名称]）。
+3. **代码示例**：用 ```sql 代码块格式化。
+4. **部分相关**：如果知识库内容部分相关，指出哪些有依据、哪些是推测。
+5. **不相关**：如果知识库内容与问题无关或信息不足，诚实说"知识库中未找到该信息"。
+6. **严禁编造**：不要编造知识库中没有的功能、语法、版本号或参数。
+7. **多段引用**：如果多个来源回答了问题的不同方面，综合呈现。
+8. **保持简洁**：直接回答问题，不需要额外说明搜索过程。
+"""
+
+
+def _make_knowledge_node(model: Any):
+    """Knowledge agent: auto-search → LLM formats answer (v3 approach).
+
+    v3 advantages over v2:
+    - HybridKnowledgeRetriever: Qdrant vector + ripgrep + RRF fusion
+    - Keyword fallback: auto-extract domain terms and retry if results sparse
+    - Better prompt: source citation, multi-source synthesis, clear fallback
+    - No tool calls exposed to LLM, no ReAct loop
     """
 
     async def node_fn(state: AgentState) -> dict:
+        from app.dependencies import get_knowledge_retriever
+
         _emit("step_started", {"agent_name": "knowledge_agent", "step_index": 0})
 
         msgs = state.get("messages", [])
@@ -306,22 +332,58 @@ def _make_knowledge_node(model: Any):
         if not user_msg:
             user_msg = str(msgs[-1].content) if msgs else ""
 
-        # ── Phase 1: Search knowledge base (same retriever as v2) ──
+        # ── Phase 1: Auto-search with v3 hybrid retriever ──
         _emit("thinking_start", {})
         _emit("thinking_delta", "检索 GBase 8a 知识库")
         _emit("thinking_end", {})
 
-        from app.dependencies import get_knowledge_retriever
         retriever = get_knowledge_retriever()
         chunks = await retriever.retrieve(user_msg)
+
+        # Keyword fallback: if results are too sparse, expand known domain terms and retry
+        if len(chunks) < 2:
+            import re
+            terms = re.findall(r'[一-鿿]{2,4}', user_msg)
+            domain_expansions = {
+                "分布": "分布表 分布方式 DISTRIBUTED 随机分布 HASH",
+                "分区": "分区表 分区键 PARTITION CREATE TABLE",
+                "随机": "随机分布 RANDOM DISTRIBUTION 分布表",
+                "创建": "创建 分布表 随机分布 DDL 建表语句",
+                "Hash": "HASH 哈希 分布键 分布表 随机分布",
+                "表": "创建表 建表 表结构 分布表 随机分布 HASH 分布",
+            }
+            for term in terms:
+                if term in domain_expansions:
+                    alt = domain_expansions[term]
+                    alt_chunks = await retriever.retrieve(alt)
+                    if len(alt_chunks) > len(chunks):
+                        chunks = alt_chunks
+                        break
 
         _emit("tool_call_start", {"name": "search_knowledge", "args": {"query": str(user_msg)[:100]}, "agent_name": "knowledge_agent"})
         _emit("tool_call_result", {"name": "search_knowledge", "result": {"summary": f"检索到 {len(chunks)} 条相关文档"}})
         _emit("tool_call_end", {"name": "search_knowledge"})
 
-        # ── Phase 2: Use v2's proven QA prompt pattern ──
-        from app.llm.prompts import build_qa_prompt
-        messages = build_qa_prompt(message=user_msg, knowledge_chunks=chunks, history=state.get("history", []))
+        # ── Phase 2: Build knowledge context ──
+        knowledge_lines = []
+        if chunks:
+            seen_sources = set()
+            for i, chunk in enumerate(chunks[:5]):
+                src = chunk.source or "未知来源"
+                dedup_key = chunk.content[:80]
+                if dedup_key in seen_sources:
+                    continue
+                seen_sources.add(dedup_key)
+                content = chunk.content[:1000] if chunk.content else ""
+                if content:
+                    knowledge_lines.append(f"**来源 {i+1}: [{src}]**\n{content}\n")
+        knowledge_section = "\n".join(knowledge_lines) if knowledge_lines else "（未找到相关文档）"
+
+        # ── Phase 3: Build prompt (v3 style, not v2 build_qa_prompt) ──
+        prompt_text = V3_QA_SYSTEM.format(knowledge_section=knowledge_section)
+        prompt_text += f"\n## 用户问题\n{user_msg}"
+
+        messages = [HumanMessage(content=prompt_text)]
 
         try:
             response = await _call_llm(model, messages, None)
