@@ -1,4 +1,12 @@
-"""Supervisor Agent — ReAct agent that routes user requests to specialists."""
+"""Supervisor Agent — pure router. Delegates all user requests to specialists.
+
+The Supervisor is NOT an answer producer. It has exactly 3 tools:
+- delegate_to_sql_specialist
+- delegate_to_knowledge_specialist
+- delegate_to_general
+
+It must ALWAYS call one of these tools. It never produces user-visible text.
+"""
 
 from __future__ import annotations
 
@@ -8,21 +16,17 @@ from app.agents.agents.prompts import SUPERVISOR_SYSTEM
 
 
 def get_supervisor_tools(db_connection_id: str = "") -> list[Any]:
-    """Get the Supervisor agent's tool set (5 tools)."""
+    """Get the Supervisor agent's tool set — only delegation tools."""
     from app.agents.tools.delegate_tools import (
         DelegateToSQLAgent,
         DelegateToKnowledgeAgent,
-        RespondGeneralTool,
-        AskUserClarificationTool,
+        DelegateToGeneralAgent,
     )
-    from app.agents.tools.status_tool import GetDatabaseStatusTool
 
     return [
         DelegateToSQLAgent(),
         DelegateToKnowledgeAgent(),
-        GetDatabaseStatusTool(db_connection_id=db_connection_id),
-        RespondGeneralTool(),
-        AskUserClarificationTool(),
+        DelegateToGeneralAgent(),
     ]
 
 

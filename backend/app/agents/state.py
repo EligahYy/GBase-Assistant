@@ -66,6 +66,8 @@ class AgentState(TypedDict, total=False):
     sql_finished: bool     # Per-agent finish flag
     knowledge_step: int    # Iteration counter for knowledge agent
     knowledge_finished: bool  # Per-agent finish flag
+    general_step: int       # Iteration counter for general agent
+    general_finished: bool  # Per-agent finish flag
     conversation_id: str
     db_connection_id: str | None
     model: str

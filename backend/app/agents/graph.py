@@ -20,6 +20,7 @@ from app.agents.state import AgentState
 from app.agents.agents.supervisor import get_supervisor_tools, get_supervisor_prompt
 from app.agents.agents.sql_agent import get_sql_agent_tools, get_sql_agent_prompt
 from app.agents.agents.knowledge_agent import get_knowledge_agent_tools, get_knowledge_agent_prompt
+from app.agents.agents.general_agent import get_general_agent_prompt
 from app.llm.adapter import LiteLLMChatAdapter
 from app.gateway.ag_ui_encoder import EventEncoder
 
@@ -266,6 +267,9 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
     def _get_knowledge_tools():
         return get_knowledge_agent_tools()
 
+    def _get_no_tools():
+        return []  # General agent has no tools
+
     # ── Add nodes ──
 
     builder.add_node("supervisor_agent", _make_agent_node(
@@ -284,6 +288,11 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
         isolate_context=True,
     ))
     builder.add_node("knowledge_tools", _make_tools_node(_get_knowledge_tools(), "knowledge_agent"))
+
+    builder.add_node("general_agent", _make_agent_node(
+        supervisor_llm, _get_no_tools, get_general_agent_prompt, "general_agent", "general_step", "general_finished",
+        isolate_context=True,
+    ))
 
     builder.add_node("response_formatter", _response_formatter_node)
 
@@ -321,15 +330,20 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
                             return "sql_agent"
                         if name == "delegate_to_knowledge_specialist":
                             return "knowledge_agent"
-                    # Non-delegate tools: loop back to supervisor agent for follow-up
+                        if name == "delegate_to_general":
+                            return "general_agent"
                     break
-        return "supervisor_agent"
+        return "response_formatter"
 
     def route_sql_agent(state: AgentState) -> str:
         return _route_agent(state, "sql_step", "sql_finished")
 
     def route_knowledge_agent(state: AgentState) -> str:
         return _route_agent(state, "knowledge_step", "knowledge_finished")
+
+    def route_general_agent(state: AgentState) -> str:
+        # General agent has no tools — always returns text, never loops
+        return "end"
 
     # ── Edges ──
 
@@ -341,9 +355,10 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
         "end": "response_formatter",
     })
     builder.add_conditional_edges("supervisor_tools", route_supervisor_tools, {
-        "supervisor_agent": "supervisor_agent",
         "sql_agent": "sql_agent",
         "knowledge_agent": "knowledge_agent",
+        "general_agent": "general_agent",
+        "response_formatter": "response_formatter",
     })
 
     # Increment delegation counter and reset state when specialists return
@@ -370,6 +385,11 @@ def build_graph(db_connection_id: str = "") -> StateGraph:
         "end": "_specialist_return",
     })
     builder.add_edge("knowledge_tools", "knowledge_agent")
+
+    # General Agent → always goes to response_formatter (no tools, straight answer)
+    builder.add_conditional_edges("general_agent", route_general_agent, {
+        "end": "response_formatter",
+    })
 
     # Specialists produce the final answer — route directly to formatter.
     # The Supervisor is a router, not a re-answerer.
@@ -426,6 +446,16 @@ _MONITORING_PATTERNS = [
     "多少连接", "活跃查询", "表概况", "运行时间",
 ]
 
+# Simple greetings that don't need any agent processing
+_GREETING_PATTERNS = ["你好", "您好", "hi", "hello", "嗨", "在吗", "谢谢", "感谢", "再见", "拜拜"]
+
+
+async def _greeting_fast_path(conversation_id: str) -> AsyncIterator[str]:
+    """Respond to simple greetings directly without invoking any agent."""
+    yield EventEncoder.run_started(conversation_id)
+    yield EventEncoder.text_delta("你好！我是 GBase 8a 数据库助手。有什么可以帮你的？")
+    yield EventEncoder.run_finished()
+
 
 async def _monitoring_fast_path(db_connection_id: str | None) -> AsyncIterator[str]:
     """Execute database status query directly, bypassing the Agent graph."""
@@ -474,6 +504,12 @@ async def run_agent_with_ag_ui(
     db_connection_id: str | None = None,
 ) -> AsyncIterator[str]:
     """运行 v3 ReAct Agent 并以 AG-UI SSE 流式输出。"""
+
+    # ── 问候快速路径：简单问候直接回复，不经过 Agent ──
+    if any(user_message.strip().lower().startswith(p) or user_message.strip() == p for p in _GREETING_PATTERNS):
+        async for event in _greeting_fast_path(conversation_id):
+            yield event
+        return
 
     # ── 监控快速路径：关键词匹配直接查询数据库状态，跳过 Agent 图 ──
     if any(p in user_message for p in _MONITORING_PATTERNS):

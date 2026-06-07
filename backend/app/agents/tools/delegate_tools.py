@@ -199,3 +199,52 @@ class AskUserClarificationTool:
                 },
             },
         }
+
+
+class DelegateToGeneralAgent:
+    """Delegate general/ambiguous queries to the General Agent. Used by Supervisor for
+    greetings, casual chat, unclear intent — anything that doesn't need SQL or Knowledge."""
+
+    @property
+    def name(self) -> str:
+        return "delegate_to_general"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Delegate to the General agent for greetings, casual chat, unclear intent, "
+            "or any request that doesn't need SQL generation or knowledge base search."
+        )
+
+    @property
+    def parameters(self) -> list[ToolParameter]:
+        return [
+            ToolParameter(
+                name="query",
+                type="string",
+                description="The user's message to respond to",
+            ),
+        ]
+
+    async def execute(self, query: str = "", **kwargs) -> dict:
+        q = query or kwargs.get("query", "")
+        return {"status": "delegated", "query": q}
+
+    def format_result(self, result: dict) -> dict:
+        return {"summary": "委托 General Agent 处理", "detail": result, "truncated": False}
+
+    def to_openai_schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The user's message"},
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
