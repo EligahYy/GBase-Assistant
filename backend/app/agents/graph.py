@@ -133,6 +133,22 @@ def _make_agent_node(model: Any, get_tools, get_prompt, agent_name: str, step_ke
         system_prompt = get_prompt()
         step_idx = state.get(step_key, 0)
 
+        # ── Guard: SQL Agent requires a database connection ──
+        if agent_name == "sql_agent" and step_idx == 0:
+            db_id = state.get("db_connection_id")
+            if not db_id:
+                msg = "当前未选择数据库连接。请先在左侧设置中添加并选择一个 GBase 8a 数据库连接，然后再进行数据查询。"
+                _emit("delta", msg)
+                _emit("step_finished", {"agent_name": agent_name})
+                return {step_key: 1, finished_key: True, "messages": [AIMessage(content=msg)]}
+
+        # ── Guard: iteration limit reached ──
+        if step_idx >= MAX_ITERATIONS:
+            msg = "处理超时：当前任务超过了最大处理次数，请尝试简化您的问题或换个方式描述。"
+            _emit("delta", msg)
+            _emit("step_finished", {"agent_name": agent_name})
+            return {step_key: step_idx + 1, finished_key: True, "messages": [AIMessage(content=msg)]}
+
         if step_idx == 0:
             _emit("step_started", {"agent_name": agent_name, "step_index": 0})
 

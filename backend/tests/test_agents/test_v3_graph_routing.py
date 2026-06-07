@@ -109,3 +109,38 @@ async def test_graph_stops_at_iteration_limit():
         result = await graph.ainvoke(state, {"configurable": {"thread_id": "t4"}})
         step = result.get("supervisor_step", 0)
         assert step <= 16
+
+
+@pytest.mark.asyncio
+async def test_sql_agent_guards_no_connection():
+    """SQL Agent immediately finishes with helpful message when no DB connected."""
+    mock = _mock_adapter([_tc_msg("delegate_to_sql_specialist", {"query": "查询"})])
+
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
+         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
+         patch("app.agents.graph._to_openai_tools", return_value=[]):
+        from app.agents.graph import build_graph
+        graph = build_graph()
+        state = _initial_state("查询订单", "t5")
+        # Explicitly set no connection
+        state["db_connection_id"] = None
+        result = await graph.ainvoke(state, {"configurable": {"thread_id": "t5"}})
+        # Should finish with a response, not loop infinitely
+        assert result.get("final_response") is not None
+        response = result.get("final_response", "")
+        assert "连接" in response or "数据库" in response
+
+
+@pytest.mark.asyncio
+async def test_max_iterations_friendly_message():
+    """When max iterations hit, emits friendly message instead of silent end."""
+    mock = _mock_adapter([_tc_msg("search_schemas", {"query": "x"})] * 20)
+
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
+         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
+         patch("app.agents.graph._to_openai_tools", return_value=[]):
+        from app.agents.graph import build_graph
+        graph = build_graph()
+        state = _initial_state("x", "t6")
+        result = await graph.ainvoke(state, {"configurable": {"thread_id": "t6"}})
+        assert result.get("final_response") is not None
