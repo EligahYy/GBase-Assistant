@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue'
 import SqlBlock from './SqlBlock.vue'
-import ThinkingSection from './ThinkingSection.vue'
-import ToolCallCard from './ToolCallCard.vue'
+import AgentActivity from './AgentActivity.vue'
 import ChartRenderer from './ChartRenderer.vue'
 import { parseContent } from '@/composables/useContentParser'
-import type { ChartConfig, Message } from '@/stores/chat'
+import type { ChartConfig, Message, StreamEvent } from '@/stores/chat'
 
 const props = defineProps<{ message: Message }>()
 const isUser = computed(() => props.message.role === 'user')
@@ -54,6 +53,19 @@ const sourceList = computed(() => {
     .map((line) => line.replace(/^[\s\-•·]+/, '').trim())
     .filter(Boolean)
 })
+
+function legacyEvents(msg: Message): StreamEvent[] {
+  const events: StreamEvent[] = []
+  if (msg.thinking) {
+    events.push({ type: 'thinking', timestamp: 0, thinking: msg.thinking })
+  }
+  if (msg.toolCalls) {
+    for (const tc of msg.toolCalls) {
+      events.push({ type: 'tool_call', timestamp: 0, toolCall: tc })
+    }
+  }
+  return events
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -151,32 +163,17 @@ function renderInline(text: string): string {
         </div>
 
 
-        <!-- Stream Events Timeline (interleaved thinking + tool calls + text) -->
-        <template v-if="message.streamEvents && message.streamEvents.length > 0">
-          <template v-for="(evt, i) in message.streamEvents" :key="i">
-            <ThinkingSection
-              v-if="evt.type === 'thinking'"
-              :thinking="evt.thinking || ''"
-              :is-thinking="false"
-            />
-            <ToolCallCard
-              v-else-if="evt.type === 'tool_call' && evt.toolCall"
-              :tool-call="evt.toolCall"
-            />
-          </template>
-        </template>
-        <!-- Fallback: old-style display for messages without streamEvents -->
-        <template v-else>
-          <ThinkingSection
-            :thinking="message.thinking || ''"
-            :is-thinking="message.isThinking || false"
-          />
-          <ToolCallCard
-            v-for="tc in message.toolCalls || []"
-            :key="tc.id"
-            :tool-call="tc"
-          />
-        </template>
+        <!-- Agent Activity: unified thinking + tool calls in a collapsible block -->
+        <AgentActivity
+          v-if="message.streamEvents && message.streamEvents.length > 0"
+          :events="message.streamEvents"
+          :is-streaming="message.isStreaming || false"
+        />
+        <AgentActivity
+          v-else-if="(message.thinking || (message.toolCalls && message.toolCalls.length > 0))"
+          :events="legacyEvents(message)"
+          :is-streaming="message.isStreaming || false"
+        />
 
         <div v-if="isTyping" class="thinking">
           <div class="thinking-inner">

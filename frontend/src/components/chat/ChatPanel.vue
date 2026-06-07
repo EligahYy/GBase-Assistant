@@ -171,6 +171,7 @@ async function sendMessage() {
     if (syncedId) finalAsstId = syncedId
   }
 
+  chatStore.setThinkingDone(streamingId)
   chatStore.finalizeStreamMessage(finalAsstId, serverConversationId ?? conversationId ?? crypto.randomUUID())
   chatStore.activeFolderId = null
   await chatStore.loadConversations()
