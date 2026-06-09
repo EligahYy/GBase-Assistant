@@ -487,7 +487,12 @@ def _make_sql_validation_node():
 
 
 def _make_sql_execution_node(db_connection_id: str):
-    """Create the deterministic SQL execution gate."""
+    """Create the deterministic SQL execution gate.
+
+    On success: returns result to the agent so it can call final_answer.
+    On error: returns feedback to the agent so it can fix and retry (up to 3x total).
+    Only sets agent_finished when retries are exhausted.
+    """
 
     async def node_fn(state: AgentState) -> dict:
         sql_state = {**state.get("sql", {})}
@@ -502,13 +507,23 @@ def _make_sql_execution_node(db_connection_id: str):
                 "retry_count": retry_count,
                 "execution_error": str(result["error"]),
             })
-            error_msg = (
+            if retry_count >= 3:
+                diagnostics = (
+                    f"SQL 执行在 3 次尝试后仍然失败。\n"
+                    f"错误：{result['error']}\n"
+                    f"生成的 SQL：\n```sql\n{sql}\n```\n"
+                    f"建议：请检查数据库连接和表结构是否正确。"
+                )
+                _emit("delta", diagnostics)
+                return {"sql": sql_state, "agent_finished": True, "messages": [AIMessage(content=diagnostics)]}
+            feedback = (
                 f"SQL 执行失败：{result['error']}\n"
-                f"请检查 SQL 语法并重试。已尝试 {retry_count} 次。"
+                f"生成的 SQL：\n```sql\n{sql}\n```\n"
+                f"请修正后重新调用 submit_sql。已尝试 {retry_count}/3 次。"
             )
-            _emit("delta", error_msg)
-            return {"sql": sql_state, "agent_finished": True, "messages": [AIMessage(content=error_msg)]}
+            return {"sql": sql_state, "messages": [HumanMessage(content=feedback)]}
 
+        # Success — return result to agent for final_answer, DON'T terminate
         sql_state.update({
             "phase": "completed",
             "query_result": result,
@@ -520,7 +535,7 @@ def _make_sql_execution_node(db_connection_id: str):
             f"查询完成：共 {result.get('row_count', 0)} 行，耗时 {result.get('execution_time_ms', 0)}ms。"
         )
         _emit("delta", result_msg)
-        return {"sql": sql_state, "agent_finished": True, "messages": [AIMessage(content=result_msg)]}
+        return {"sql": sql_state, "messages": [AIMessage(content=result_msg)]}
 
     return node_fn
 
