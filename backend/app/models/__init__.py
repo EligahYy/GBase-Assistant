@@ -10,6 +10,13 @@ from app.models.knowledge_document import KnowledgeDocument
 from app.models.message import Message
 from app.models.sql_feedback import SQLFeedback
 from app.models.user_pattern import UserPattern
+from app.semantic.models import (
+    SemanticDimension,
+    SemanticJoin,
+    SemanticMember,
+    SemanticMetric,
+    SemanticModel,
+)
 
 __all__ = [
     "DbConnection",
@@ -20,4 +27,9 @@ __all__ = [
     "Message",
     "SQLFeedback",
     "UserPattern",
+    "SemanticDimension",
+    "SemanticJoin",
+    "SemanticMember",
+    "SemanticMetric",
+    "SemanticModel",
 ]
