@@ -1,10 +1,11 @@
-"""LangGraph 图构建和运行 — v3.2 Unified ReAct Agent + token 级流式输出。
+"""LangGraph v3.3 — Three-Phase Circuit Breaker ReAct Agent.
 
-v3.2 架构: 统一 Agent（全工具集，submit_sql 原子化）
-- 无独立 Supervisor/router —— Prompt + Tools 本身就是路由机制
-- submit_sql 内部完成 validate+execute，结果直返 Agent
-- final_answer 工具提供显式终止信号（防无限循环）
-- 循环检测 + 三级终止策略（防硬终止丢失进展）
+Phases:
+  1. explore_agent ⇄ explore_tools  — schema discovery
+  2. sql_agent ⇄ submit_sql         — SQL gen + retry
+  3. answer_agent → final_answer    — mandatory termination
+
+Circuit breaker rules are graph-level (deterministic), not Prompt-based.
 """
 
 from __future__ import annotations
@@ -19,52 +20,56 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.agents.unified_agent import get_unified_agent_prompt, get_unified_agent_tools
+from app.agents.agents.unified_agent import (
+    ANSWER_AGENT_PROMPT,
+    EXPLORE_AGENT_PROMPT,
+    SQL_AGENT_PROMPT,
+    get_answer_tools,
+    get_explore_tools,
+    get_sql_tools,
+)
 from app.agents.state import AgentState
 from app.gateway.ag_ui_encoder import EventEncoder
 from app.llm.adapter import LiteLLMChatAdapter
 
 logger = logging.getLogger(__name__)
 
-MAX_ITERATIONS = 12  # Reduced from 15 — with final_answer the agent terminates earlier
-LOOP_DETECTION_WINDOW = 6  # Look at last N tool calls for loop detection
-MILD_WARNING_AT = 8  # Inject mild reminder
-URGENT_WARNING_AT = 10  # Inject urgent wrap-up instruction
+# ── Circuit breaker constants ──
+MAX_EXPLORE_STEPS = 5
+MAX_SCHEMA_EMPTY_SEARCHES = 3
+MAX_SQL_RETRIES = 3
+MAX_TOTAL_STEPS = 15
+MAX_EMPTY_RESPONSES = 2
+MAX_SAME_TOOL_CALLS = 2
+
+# ── Step-level warning thresholds (only injection that remains) ──
+MILD_WARNING_AT = 10
+URGENT_WARNING_AT = 13
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _emit(key: str, value: Any) -> None:
-    """Emit a custom event through LangGraph's stream writer."""
     try:
-        writer = get_stream_writer()
-        writer([{key: value}])
+        get_stream_writer()([{key: value}])
     except RuntimeError:
         pass
 
 
 def _parse_tool_calls(msg) -> tuple[list[dict] | None, str | None]:
-    """Extract tool_calls and/or text from a message."""
     tool_calls = None
     text = None
-
     if hasattr(msg, "tool_calls") and msg.tool_calls:
         tool_calls = []
         for tc in msg.tool_calls:
-            tool_calls.append({
-                "id": tc.get("id", f"call_{len(tool_calls)}"),
-                "name": tc.get("name", ""),
-                "args": tc.get("args", {}),
-            })
-
+            tool_calls.append({"id": tc.get("id", f"call_{len(tool_calls)}"), "name": tc.get("name", ""), "args": tc.get("args", {})})
     if hasattr(msg, "content") and msg.content:
         content = msg.content
         if isinstance(content, str) and content.strip():
             text = content.strip()
         elif isinstance(content, list):
-            # Some LLMs return content as a list of blocks — join text blocks
             parts = []
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
@@ -74,26 +79,10 @@ def _parse_tool_calls(msg) -> tuple[list[dict] | None, str | None]:
             joined = "".join(parts).strip()
             if joined:
                 text = joined
-
     return tool_calls, text
 
 
-def _make_ai_message(content: str, tool_calls_data: list[dict] | None = None) -> AIMessage:
-    """Build an AIMessage, optionally with tool_calls."""
-    if tool_calls_data:
-        from langchain_core.messages import ToolCall as LCToolCall
-        lc_tool_calls = [
-            LCToolCall(name=tc["name"], args=tc.get("args", {}), id=tc.get("id", f"call_{i}"))
-            for i, tc in enumerate(tool_calls_data)
-        ]
-        return AIMessage(content=content, tool_calls=lc_tool_calls)
-    return AIMessage(content=content)
-
-
-async def _call_llm(
-    model: Any, messages: list[BaseMessage], tool_schemas: list[dict] | None
-) -> AIMessage:
-    """Call the LLM and return an AIMessage with tool_calls if present."""
+async def _call_llm(model: Any, messages: list[BaseMessage], tool_schemas: list[dict] | None) -> AIMessage:
     if hasattr(model, "_agenerate"):
         kwargs: dict = {}
         if tool_schemas:
@@ -109,48 +98,27 @@ async def _call_llm(
             if hasattr(m, "type"):
                 role = "assistant" if m.type == "ai" else ("system" if m.type == "system" else "user")
             dict_msgs.append({"role": role, "content": str(m.content)})
-        content, _, tool_calls_data = await model.llm_client.complete(
-            dict_msgs, tools=tool_schemas if tool_schemas else None
-        )
+        content, _, tool_calls_data = await model.llm_client.complete(dict_msgs, tools=tool_schemas if tool_schemas else None)
         return _make_ai_message(content or "", tool_calls_data)
 
 
-def _thinking_summary(agent_name: str, tool_names: list[str]) -> str:
-    """Generate a natural-language thinking summary based on agent and tools."""
-    TOOL_THINKING: dict[str, str] = {
-        "search_schemas": "搜索相关数据库表",
-        "get_table_profile": "查看表字段详情",
-        "find_join_path": "查找表关联关系",
-        "query_glossary": "查询业务术语映射",
-        "execute_sql": "执行 SQL 查询",
-        "lookup_error": "查询错误码含义",
-        "search_knowledge": "检索 GBase 8a 知识库",
-        "get_database_status": "获取数据库运行状态",
-        "submit_sql": "提交 SQL 验证和执行",
-        "final_answer": "整理最终回答",
-    }
-    actions = [TOOL_THINKING.get(n, n) for n in tool_names]
-    if len(actions) == 1:
-        return actions[0]
-    return "、".join(actions)
+def _make_ai_message(content: str, tool_calls_data: list[dict] | None = None) -> AIMessage:
+    if tool_calls_data:
+        from langchain_core.messages import ToolCall as LCToolCall
+        lc = [LCToolCall(name=t["name"], args=t.get("args", {}), id=t.get("id", f"call_{i}")) for i, t in enumerate(tool_calls_data)]
+        return AIMessage(content=content, tool_calls=lc)
+    return AIMessage(content=content)
 
 
 def _to_openai_tools(tools: list[Any]) -> list[dict]:
-    """Convert tool objects to OpenAI function-calling schema."""
-    schemas = []
-    for t in tools:
-        if hasattr(t, "to_openai_schema"):
-            schemas.append(t.to_openai_schema())
-    return schemas
+    return [t.to_openai_schema() for t in tools if hasattr(t, "to_openai_schema")]
 
 
 def _build_messages(system_prompt: str, state_msgs: list) -> list[BaseMessage]:
-    """Build message list: system prompt + existing conversation."""
     return [SystemMessage(content=system_prompt)] + list(state_msgs)
 
 
 def _build_conversation_messages(history: list[dict], current_message: str) -> list[BaseMessage]:
-    """Convert persisted history to LangChain messages and append the current turn once."""
     messages: list[BaseMessage] = []
     for item in history:
         content = str(item.get("content", "")).strip()
@@ -158,161 +126,201 @@ def _build_conversation_messages(history: list[dict], current_message: str) -> l
             continue
         role = item.get("role")
         messages.append(AIMessage(content=content) if role == "assistant" else HumanMessage(content=content))
-
     if not messages or not isinstance(messages[-1], HumanMessage) or messages[-1].content != current_message:
         messages.append(HumanMessage(content=current_message))
     return messages
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Loop detection & graceful degradation
-# ═══════════════════════════════════════════════════════════════════════════════════
-
-def _detect_loop(state: AgentState) -> bool:
-    """Detect if the agent is calling the same tool with similar args repeatedly."""
-    msgs = state.get("messages", [])
-    recent_calls: list[tuple[str, str]] = []
-    for msg in reversed(msgs):
-        tcs, _ = _parse_tool_calls(msg)
-        if tcs:
-            for tc in tcs:
-                name = tc.get("name", "")
-                # Normalize args for comparison — truncate to catch similar queries
-                args_str = json.dumps(tc.get("args", {}), ensure_ascii=False, sort_keys=True)[:80]
-                recent_calls.append((name, args_str))
-        if len(recent_calls) >= LOOP_DETECTION_WINDOW:
-            break
-
-    if len(recent_calls) < 3:
-        return False
-
-    # All calls are the same tool → likely loop
-    names = {c[0] for c in recent_calls}
-    if len(names) == 1:
-        return True
-
-    # Same tool + same args pattern (alternating between 2 tools with same args)
-    name_counts: dict[str, int] = {}
-    for name, args_str in recent_calls:
-        name_counts[f"{name}|{args_str}"] = name_counts.get(f"{name}|{args_str}", 0) + 1
-    if any(c >= 3 for c in name_counts.values()):
-        return True
-
-    return False
+def _thinking_summary(tool_names: list[str]) -> str:
+    TOOL_THINKING = {
+        "search_schemas": "搜索相关数据库表", "get_table_profile": "查看表字段详情",
+        "find_join_path": "查找表关联关系", "query_glossary": "查询业务术语映射",
+        "submit_sql": "执行 SQL 查询", "search_knowledge": "检索 GBase 8a 知识库",
+        "get_database_status": "获取数据库运行状态", "final_answer": "整理最终回答",
+    }
+    actions = [TOOL_THINKING.get(n, n) for n in tool_names]
+    return actions[0] if len(actions) == 1 else "、".join(actions)
 
 
-def _extract_partial_results(state: AgentState) -> str:
-    """Extract partial progress from the state for graceful degradation."""
-    parts: list[str] = []
-    sql_state = state.get("sql", {})
-    if sql_state.get("query_result"):
-        parts.append(f"已执行的 SQL 返回了 {sql_state['query_result'].get('row_count', 0)} 行数据。")
-    if sql_state.get("generated_sql"):
-        parts.append(f"生成的 SQL: `{sql_state['generated_sql'][:200]}`")
-    if sql_state.get("grounded_schemas"):
-        tables = [getattr(s, "table_name", str(s)) for s in sql_state["grounded_schemas"][:3]]
-        parts.append(f"已识别的表: {', '.join(tables)}")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Circuit Breaker (graph-level, deterministic)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    # Check for knowledge results in messages
-    msgs = state.get("messages", [])
-    for msg in reversed(msgs):
-        if isinstance(msg, ToolMessage) and "search_knowledge" in str(msg.content)[:50]:
-            parts.append("已检索知识库但未能充分回答。")
-            break
-
-    return "\n".join(parts) if parts else "处理未能完成。"
+def _cb_init() -> dict:
+    """Initialize CB state for a new run."""
+    return {
+        "explore": {"tables_found": [], "schema_search_count": 0, "last_search_empty": False, "steps": 0},
+        "sql": {"generated_sql": None, "status": None, "errors": [], "retry_count": 0, "last_result": None},
+        "total_steps": 0, "empty_response_count": 0,
+        "last_tool_name": None, "last_tool_args": None, "same_tool_count": 0,
+        "current_phase": "explore", "cb_reason": None,
+    }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Unified Agent node
-# ═══════════════════════════════════════════════════════════════════════════════════
+def _cb_update(cb: dict, tool_name: str | None = None, tool_args: dict | None = None) -> dict:
+    """Update CB counters after each step. Mutates and returns cb."""
+    cb["total_steps"] = cb.get("total_steps", 0) + 1
 
-def _make_unified_agent_node(model: Any, get_tools, get_prompt):
-    """Create the unified ReAct agent node with final_answer support.
+    if tool_name:
+        args_str = json.dumps(tool_args or {}, ensure_ascii=False, sort_keys=True)[:80]
+        if cb.get("last_tool_name") == tool_name and cb.get("last_tool_args") == args_str:
+            cb["same_tool_count"] = cb.get("same_tool_count", 0) + 1
+        else:
+            cb["same_tool_count"] = 1
+        cb["last_tool_name"] = tool_name
+        cb["last_tool_args"] = args_str
+    else:
+        cb["same_tool_count"] = 0
+        cb["last_tool_name"] = None
+        cb["last_tool_args"] = None
 
-    Key differences from generic _make_agent_node:
-    - Detects final_answer tool call → emits answer as delta, signals finish
-    - Graduated termination: mild warning → urgent warning → graceful degradation
-    - Loop detection: injects wrap-up hint when repeating tools
-    """
+    return cb
+
+
+def _cb_explore_update(cb: dict, tool_name: str, result: Any) -> dict:
+    """Update explore-specific CB counters. Mutates and returns cb."""
+    explore = {**cb.get("explore", {})}
+    explore["steps"] = explore.get("steps", 0) + 1
+
+    if tool_name == "search_schemas":
+        explore["schema_search_count"] = explore.get("schema_search_count", 0) + 1
+        explore["last_search_empty"] = not bool(result)
+        if result:
+            tables = [getattr(r, "table_name", str(r)) for r in (result if isinstance(result, list) else [result])]
+            explore["tables_found"] = list(dict.fromkeys(explore.get("tables_found", []) + tables))[:20]
+
+    cb["explore"] = explore
+    return cb
+
+
+def _cb_sql_update(cb: dict, result: dict) -> dict:
+    """Update SQL-specific CB counters from submit_sql result. Mutates and returns cb."""
+    sql_state = {**cb.get("sql", {})}
+
+    if isinstance(result, dict):
+        sql_state["status"] = result.get("status", "execution_failed")
+        sql_state["generated_sql"] = result.get("sql", sql_state.get("generated_sql"))
+        if sql_state["status"] == "completed":
+            sql_state["last_result"] = result
+            sql_state["retry_count"] = sql_state.get("retry_count", 0)  # keep, don't increment
+        else:
+            sql_state["retry_count"] = sql_state.get("retry_count", 0) + 1
+            errors = sql_state.get("errors", [])
+            error_msg = result.get("error", "") or ";".join(result.get("errors", []))
+            if error_msg and error_msg not in errors:
+                errors.append(error_msg)
+            sql_state["errors"] = errors
+
+    cb["sql"] = sql_state
+    return cb
+
+
+def _cb_check(state: dict, phase: str) -> str | None:
+    """Check circuit breaker rules. Returns cb_reason string or None if OK."""
+    cb = state.get("cb", {})
+    explore = cb.get("explore", {})
+    sql = cb.get("sql", {})
+
+    # ── Global ──
+    if cb.get("total_steps", 0) >= MAX_TOTAL_STEPS:
+        return "total_steps_exceeded"
+    if cb.get("empty_response_count", 0) >= MAX_EMPTY_RESPONSES:
+        return "empty_response"
+    if cb.get("same_tool_count", 0) >= MAX_SAME_TOOL_CALLS:
+        return "duplicate_tool"
+
+    # ── Explore phase ──
+    if phase == "explore":
+        if explore.get("steps", 0) >= MAX_EXPLORE_STEPS:
+            return "explore_max_steps"
+        if explore.get("schema_search_count", 0) >= MAX_SCHEMA_EMPTY_SEARCHES and explore.get("last_search_empty"):
+            return "search_exhausted"
+
+    # ── SQL phase ──
+    if phase == "sql":
+        if sql.get("retry_count", 0) >= MAX_SQL_RETRIES:
+            return "sql_max_retries"
+
+    return None
+
+
+def _cb_degradation_message(state: dict) -> str:
+    """Build graceful degradation message based on cb_reason."""
+    cb = state.get("cb", {})
+    reason = cb.get("cb_reason", "unknown")
+    explore = cb.get("explore", {})
+    sql = cb.get("sql", {})
+
+    if reason == "total_steps_exceeded":
+        tables = ", ".join(explore.get("tables_found", []) or ["无"])
+        return f"处理步骤达到上限。已识别的表: {tables}。如需更完整的结果，请尝试缩小查询范围。"
+    if reason == "search_exhausted":
+        tables = ", ".join(explore.get("tables_found", []) or ["无"])
+        return f"已尝试多种关键词搜索数据库 Schema，未找到完全匹配的表。已识别的相关表: {tables}。"
+    if reason == "explore_max_steps":
+        tables = ", ".join(explore.get("tables_found", []) or ["无"])
+        return f"探索阶段达到上限。已识别的表: {tables}。建议提供更具体的查询条件。"
+    if reason == "sql_max_retries":
+        errors = sql.get("errors", [])
+        last_sql = sql.get("generated_sql", "")
+        err_str = "；".join(errors[-3:]) if errors else "未知错误"
+        return f"SQL 经过 3 次尝试仍然失败。错误: {err_str}\n最后生成的 SQL:\n```sql\n{last_sql}\n```"
+    if reason == "empty_response":
+        return "处理完成。以下是已获取的信息。如有其他问题，请继续提问。"
+    if reason == "duplicate_tool":
+        return "检测到重复的工具调用，已安全停止。请尝试不同的方式描述您的问题。"
+    # normal
+    return ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent node factory
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _make_agent_node(model: Any, get_tools, get_prompt, phase: str):
+    """Create a single-pass ReAct agent node for one phase."""
 
     async def node_fn(state: AgentState) -> dict:
         tools = get_tools()
         system_prompt = get_prompt()
-        step_idx = state.get("agent_step", 0)
+        cb = state.get("cb", _cb_init())
+        step_idx = cb.get("total_steps", 0)
 
-        # ── Guard: DB connection required ──
-        if step_idx == 0:
-            db_id = state.get("db_connection_id")
-            if not db_id:
-                # No DB connected — still answer, but warn about SQL limitation
-                pass  # Let the agent handle it via final_answer
+        # ── Step-level warnings (only Prompt injection retained) ──
+        msgs = list(state.get("messages", []))
+        if step_idx == MILD_WARNING_AT:
+            msgs.append(HumanMessage(content="系统提示：已执行多轮操作，请尽快给出结果。"))
+        elif step_idx == URGENT_WARNING_AT:
+            msgs.append(HumanMessage(content="系统提示：即将达到处理上限，请立即基于已有信息输出。"))
 
-        # ── Level 3: Hard termination with graceful degradation ──
-        if step_idx >= MAX_ITERATIONS:
-            partial = _extract_partial_results(state)
-            msg = (
-                f"处理已达最大轮次 ({MAX_ITERATIONS})。以下是基于当前进展的部分结果：\n\n{partial}\n\n"
-                "如需更完整的结果，请尝试简化问题或分步提问。"
-            )
-            _emit("delta", msg)
-            _emit("step_finished", {"agent_name": "unified_agent"})
-            return {"agent_step": step_idx + 1, "agent_finished": True, "final_response": msg,
-                    "messages": [AIMessage(content=msg)]}
-
-        # ── Level 2: Urgent wrap-up warning ──
-        if step_idx == URGENT_WARNING_AT:
-            urgent_hint = HumanMessage(content=(
-                "系统提示：你已执行多轮操作，请立即基于当前已收集的信息调用 final_answer 输出结果。"
-                "不要继续探索或调用更多工具。"
-            ))
-            msgs = list(state.get("messages", [])) + [urgent_hint]
-            state = {**state, "messages": msgs}
-
-        # ── Level 1: Mild reminder ──
-        elif step_idx == MILD_WARNING_AT:
-            mild_hint = HumanMessage(content=(
-                "系统提示：已执行多轮操作。如果已有部分结果，可以考虑调用 final_answer 输出，"
-                "并说明哪些部分还需要进一步确认。"
-            ))
-            msgs = list(state.get("messages", [])) + [mild_hint]
-            state = {**state, "messages": msgs}
-
-        # ── Loop detection ──
-        if step_idx > 2 and _detect_loop(state):
-            loop_hint = HumanMessage(content=(
-                "系统提示：检测到你多次调用相同工具。请停止重复探索，"
-                "基于已有信息调用 final_answer 输出结果。"
-            ))
-            msgs = list(state.get("messages", [])) + [loop_hint]
-            state = {**state, "messages": msgs}
+        # ── Build degradation context for answer phase ──
+        if phase == "answer":
+            reason = cb.get("cb_reason", "normal")
+            if reason and reason != "normal":
+                degradation_msg = _cb_degradation_message(state)
+                system_prompt += f"\n\n## 中断原因: {reason}\n{degradation_msg}\n\n请基于以上信息调用 final_answer 输出最好的回答。"
 
         if step_idx == 0:
-            _emit("step_started", {"agent_name": "unified_agent", "step_index": 0})
+            _emit("step_started", {"agent_name": f"{phase}_agent", "phase": phase})
 
-        msgs = state.get("messages", [])
         messages = _build_messages(system_prompt, msgs)
         tool_schemas = _to_openai_tools(tools)
 
         try:
             response = await _call_llm(model, messages, tool_schemas if tool_schemas else None)
         except Exception as e:
-            logger.error("Unified agent LLM call failed: %s", e)
+            logger.error("Agent %s LLM call failed: %s", phase, e)
             _emit("delta", f"\n处理出错: {e}")
-            return {"agent_step": step_idx + 1, "agent_finished": True, "messages": [AIMessage(content=f"处理出错: {e}")]}
+            return {"cb": _cb_init(), "messages": [AIMessage(content=f"处理出错: {e}")]}
 
         tool_calls, text = _parse_tool_calls(response)
 
-        # ── final_answer detected → extract answer, emit as delta, finish ──
+        # ── final_answer → emit delta, finish ──
         if tool_calls and any(tc["name"] == "final_answer" for tc in tool_calls):
             fa_tc = next(tc for tc in tool_calls if tc["name"] == "final_answer")
             answer = fa_tc.get("args", {}).get("answer", "")
-            sources = fa_tc.get("args", {}).get("sources", [])
             if answer:
                 _emit("delta", answer)
-            if sources:
-                _emit("state_delta", {"path": "sources", "value": {"sources": sources}})
-            # Emit thinking for any text that preceded final_answer
             if text:
                 _emit("thinking_start", {})
                 _emit("thinking_delta", text)
@@ -320,79 +328,46 @@ def _make_unified_agent_node(model: Any, get_tools, get_prompt):
             _emit("thinking_start", {})
             _emit("thinking_delta", "整理最终回答")
             _emit("thinking_end", {})
-            _emit("step_finished", {"agent_name": "unified_agent"})
-            return {
-                "agent_step": step_idx + 1,
-                "agent_finished": True,
-                "final_response": answer,
-                "messages": [response],
-            }
+            _emit("step_finished", {"agent_name": f"{phase}_agent", "phase": phase})
+            cb_done = {**cb}
+            # Don't overwrite CB reason if circuit breaker already set one
+            if not cb_done.get("cb_reason"):
+                cb_done["cb_reason"] = "normal"
+            return {"cb": cb_done, "final_response": answer, "messages": [response]}
 
-        # ── No tool calls — fallback: treat as final answer if there's text ──
+        # ── No tool calls: advance phase (fallback) ──
         if not tool_calls:
             if text:
                 _emit("delta", text)
-                _emit("step_finished", {"agent_name": "unified_agent"})
-                return {
-                    "agent_step": step_idx + 1,
-                    "agent_finished": True,
-                    "final_response": text,
-                    "messages": [response],
-                }
-            # Empty response (no tool_calls, no text) — retry LLM call with guidance
-            # This prevents silent termination when the LLM returns nothing
-            logger.warning("Unified agent returned empty response at step %d — retrying with prompt", step_idx)
-            retry_prompt = HumanMessage(content="请调用 final_answer 工具输出你的回答。如果你已经获得了查询结果，请总结结果；如果遇到错误，请说明发生了什么。")
-            try:
-                retry_messages = messages + [response, retry_prompt]
-                response2 = await _call_llm(model, retry_messages, tool_schemas if tool_schemas else None)
-                tc2, text2 = _parse_tool_calls(response2)
-                if text2:
-                    _emit("delta", text2)
-                _emit("step_finished", {"agent_name": "unified_agent"})
-                return {
-                    "agent_step": step_idx + 1,
-                    "agent_finished": True,
-                    "final_response": text2 or "",
-                    "messages": [response, response2],
-                }
-            except Exception:
-                # If retry also fails, terminate gracefully
-                fallback = "处理完成。如有其他问题，请继续提问。"
-                _emit("delta", fallback)
-                _emit("step_finished", {"agent_name": "unified_agent"})
-                return {
-                    "agent_step": step_idx + 1,
-                    "agent_finished": True,
-                    "final_response": fallback,
-                    "messages": [response],
-                }
+            _emit("step_finished", {"agent_name": f"{phase}_agent", "phase": phase})
+            cb_next = _cb_update({**cb}, None, None)
+            cb_next["current_phase"] = _next_phase(phase)
+            return {"cb": cb_next, "messages": [response]}
 
-        # ── Has tool calls (not final_answer) → emit thinking, continue ──
+        # ── Has tool calls → emit thinking, route to tools ──
         if text:
             _emit("thinking_start", {})
             _emit("thinking_delta", text)
             _emit("thinking_end", {})
-
         _emit("thinking_start", {})
-        tool_names = [tc["name"] for tc in tool_calls]
-        _emit("thinking_delta", _thinking_summary("unified_agent", tool_names))
+        _emit("thinking_delta", _thinking_summary([tc["name"] for tc in tool_calls]))
         _emit("thinking_end", {})
-        return {"agent_step": step_idx + 1, "messages": [response]}
+
+        return {"messages": [response]}
 
     return node_fn
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
+def _next_phase(current: str) -> str:
+    return {"explore": "sql", "sql": "answer", "answer": "answer"}.get(current, "explore")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Tools node
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def _make_unified_tools_node(tools: list[Any]):
-    """Create a tool execution node for the unified agent.
-
-    Reads tool_calls from the last message, executes, emits events.
-    For submit_sql, emits STATE_DELTA with SQL/result for frontend display.
-    """
+def _make_tools_node(tools: list[Any], phase: str):
+    """Execute tool calls, emit events, update CB state."""
 
     tool_map = {t.name: t for t in tools if hasattr(t, "name")}
 
@@ -400,27 +375,26 @@ def _make_unified_tools_node(tools: list[Any]):
         msgs = state.get("messages", [])
         if not msgs:
             return {"messages": []}
-
         last_msg = msgs[-1]
         tool_calls, _ = _parse_tool_calls(last_msg)
         if not tool_calls:
             return {"messages": []}
 
+        cb = {**state.get("cb", _cb_init())}
         tool_messages = []
-        state_update: dict[str, Any] = {}
+        explore_update = cb.get("explore", {})
+        sql_update = cb.get("sql", {})
+
         for tc in tool_calls:
             tool_name = tc["name"]
             tool_args = tc.get("args", {})
-
-            _emit("tool_call_start", {"name": tool_name, "args": tool_args, "agent_name": "unified_agent"})
+            _emit("tool_call_start", {"name": tool_name, "args": tool_args, "agent_name": f"{phase}_agent"})
 
             tool = tool_map.get(tool_name)
             if tool is None:
                 _emit("tool_call_result", {"name": tool_name, "error": f"Tool '{tool_name}' not found"})
                 _emit("tool_call_end", {"name": tool_name})
-                tool_messages.append(ToolMessage(
-                    content=json.dumps({"error": f"Tool '{tool_name}' not found"}), tool_call_id=tc["id"]
-                ))
+                tool_messages.append(ToolMessage(content=json.dumps({"error": f"Tool '{tool_name}' not found"}), tool_call_id=tc["id"]))
                 continue
 
             try:
@@ -428,76 +402,63 @@ def _make_unified_tools_node(tools: list[Any]):
                 formatted = tool.format_result(result) if hasattr(tool, "format_result") else {"summary": str(result)[:200]}
                 _emit("tool_call_result", {"name": tool_name, "result": formatted})
 
-                # Emit STATE_DELTA for submit_sql results (frontend needs structured data)
-                if tool_name == "submit_sql" and isinstance(result, dict):
-                    sql = result.get("sql", "")
-                    status = result.get("status", "")
-                    if status == "completed":
-                        _emit("state_delta", {"path": "sql", "value": {
-                            "sql": sql, "validation": {"valid": True, "errors": [], "warnings": []}
-                        }})
-                        _emit("state_delta", {"path": "result", "value": {
-                            "columns": result.get("columns", []),
-                            "rows": result.get("rows", []),
-                            "row_count": result.get("row_count", 0),
-                            "execution_time_ms": result.get("execution_time_ms", 0),
-                            "truncated": result.get("truncated", False),
-                        }})
-                    elif status == "validation_failed":
-                        _emit("state_delta", {"path": "sql", "value": {
-                            "sql": sql, "validation": {
-                                "valid": False,
-                                "errors": result.get("errors", []),
-                                "warnings": result.get("warnings", []),
-                            }
-                        }})
+                # ── CB: update explore counters ──
+                if phase == "explore":
+                    cb = _cb_explore_update(cb, tool_name, result)
+                    explore_update = cb.get("explore", {})
 
-                # Save schema grounding result for state
-                if tool_name == "search_schemas":
-                    sql_state = {**state.get("sql", {})}
-                    sql_state["grounded_schemas"] = result
-                    state_update["sql"] = sql_state
+                # ── CB: update SQL counters ──
+                if tool_name == "submit_sql":
+                    cb = _cb_sql_update(cb, result)
+                    sql_update = cb.get("sql", {})
+                    # Emit STATE_DELTA for frontend
+                    if isinstance(result, dict):
+                        if result.get("status") == "completed":
+                            _emit("state_delta", {"path": "sql", "value": {"sql": result.get("sql", ""), "validation": {"valid": True, "errors": [], "warnings": []}}})
+                            _emit("state_delta", {"path": "result", "value": {"columns": result.get("columns", []), "rows": result.get("rows", []), "row_count": result.get("row_count", 0)}})
+                        elif result.get("status") == "validation_failed":
+                            _emit("state_delta", {"path": "sql", "value": {"sql": result.get("sql", ""), "validation": {"valid": False, "errors": result.get("errors", [])}}})
+
+                # ── CB: global counters ──
+                cb = _cb_update(cb, tool_name, tool_args)
 
                 # Build LLM context
                 llm_content = formatted.get("summary", str(result))
                 detail = formatted.get("detail")
                 if detail is not None:
                     try:
-                        import json as _json
-                        llm_content = llm_content + "\n\n" + _json.dumps(detail, ensure_ascii=False, default=str)
+                        llm_content = llm_content + "\n\n" + json.dumps(detail, ensure_ascii=False, default=str)
                     except Exception:
                         llm_content = llm_content + "\n\n" + str(detail)
-                tool_messages.append(ToolMessage(
-                    content=llm_content[:4000], tool_call_id=tc["id"]
-                ))
+                tool_messages.append(ToolMessage(content=llm_content[:4000], tool_call_id=tc["id"]))
             except Exception as e:
                 logger.error("Tool %s failed: %s", tool_name, e)
                 _emit("tool_call_result", {"name": tool_name, "error": str(e)})
-                tool_messages.append(ToolMessage(
-                    content=json.dumps({"error": str(e)}), tool_call_id=tc["id"]
-                ))
+                tool_messages.append(ToolMessage(content=json.dumps({"error": str(e)}), tool_call_id=tc["id"]))
 
             _emit("tool_call_end", {"name": tool_name})
 
-        return {"messages": tool_messages, **state_update}
+        cb["explore"] = explore_update
+        cb["sql"] = sql_update
+        return {"messages": tool_messages, "cb": cb}
 
     return node_fn
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Graph builder — v3.2 Unified Agent (atomic submit_sql)
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# Graph builder
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGraph:
-    """Build the v3.2 Unified ReAct Agent graph (atomic submit_sql).
+    """Build v3.3 three-phase ReAct graph with circuit breaker.
 
-    Graph structure (2 nodes):
-        START → unified_agent ⇄ unified_tools
-                   │
-                   └── final_answer / agent_finished → END
-
-    submit_sql is now atomic — validate + execute happen inside the tool.
-    No dedicated gate nodes needed.
+    START → explore_agent ⇄ explore_tools
+               │ (phase advance or CB trigger)
+               ▼
+            sql_agent ⇄ sql_tools
+               │
+               ▼
+           answer_agent → END
     """
     from app.dependencies import get_llm_client
 
@@ -505,87 +466,162 @@ def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGr
 
     agent_llm = LiteLLMChatAdapter(get_llm_client(model=model, task_type="default"))
 
-    def _get_tools():
-        return get_unified_agent_tools(db_id=db_connection_id)
+    # ── Node factories ──
+    def _get_explore_tools():
+        return get_explore_tools(db_id=db_connection_id)
+
+    def _get_sql_tools():
+        return get_sql_tools(db_id=db_connection_id)
+
+    def _get_answer_tools():
+        return get_answer_tools()
 
     # ── Nodes ──
-    builder.add_node("unified_agent", _make_unified_agent_node(
-        agent_llm, _get_tools, get_unified_agent_prompt,
-    ))
-    builder.add_node("unified_tools", _make_unified_tools_node(_get_tools()))
+    builder.add_node("explore_agent", _make_agent_node(agent_llm, _get_explore_tools, lambda: EXPLORE_AGENT_PROMPT, "explore"))
+    builder.add_node("explore_tools", _make_tools_node(_get_explore_tools(), "explore"))
+    builder.add_node("sql_agent", _make_agent_node(agent_llm, _get_sql_tools, lambda: SQL_AGENT_PROMPT, "sql"))
+    builder.add_node("sql_tools", _make_tools_node(_get_sql_tools(), "sql"))
+    builder.add_node("answer_agent", _make_agent_node(agent_llm, _get_answer_tools, lambda: ANSWER_AGENT_PROMPT, "answer"))
 
     # ── Routing ──
 
-    def route_unified_agent(state: AgentState) -> str:
-        """Route from agent: final_answer/finished → END, tool calls → tools_node."""
-        if state.get("agent_finished"):
-            return "end"
-
+    def _extract_tool_calls(state):
         msgs = state.get("messages", [])
         if not msgs:
+            return None
+        tcs, _ = _parse_tool_calls(msgs[-1])
+        return tcs
+
+    def route_explore_agent(state: AgentState) -> str:
+        """Explore agent: tools → tools_node, no tools → advance to sql or answer."""
+        cb = state.get("cb", {})
+        cb_reason = _cb_check(state, "explore")
+        if cb_reason:
+            cb["cb_reason"] = cb_reason
+            # If no tables found at all, skip to answer directly
+            explore = cb.get("explore", {})
+            if cb_reason in ("search_exhausted",) and not explore.get("tables_found"):
+                return "answer_direct"
+            return "advance_sql"
+
+        tcs = _extract_tool_calls(state)
+        if tcs:
+            return "tools"
+        # Agent produced no tool calls → ready to advance
+        cb["current_phase"] = "sql"
+        return "advance_sql"
+
+    def route_explore_tools(state: AgentState) -> str:
+        """After explore tools: check CB first, then back to explore agent."""
+        cb = state.get("cb", {})
+        cb_reason = _cb_check(state, "explore")
+        if cb_reason:
+            cb["cb_reason"] = cb_reason
+            explore = cb.get("explore", {})
+            if cb_reason in ("search_exhausted",) and not explore.get("tables_found"):
+                return "answer_direct"
+            if cb_reason == "explore_max_steps" and explore.get("tables_found"):
+                return "advance_sql"
+            return "answer_direct"
+        return "agent"
+
+    def route_sql_agent(state: AgentState) -> str:
+        """SQL agent: submit_sql → tools, no tools → advance, CB → answer."""
+        cb = state.get("cb", {})
+        cb_reason = _cb_check(state, "sql")
+        if cb_reason:
+            cb["cb_reason"] = cb_reason
+            return "answer"
+
+        tcs = _extract_tool_calls(state)
+        if tcs:
+            return "tools"
+        # Check if SQL was completed
+        sql_state = cb.get("sql", {})
+        if sql_state.get("status") == "completed":
+            cb["current_phase"] = "answer"
+            cb["cb_reason"] = "normal"
+            return "answer"
+        # No tool calls, no completion → advance
+        cb["current_phase"] = "answer"
+        return "answer"
+
+    def route_sql_tools(state: AgentState) -> str:
+        """After sql tools: check CB, then back to sql agent."""
+        cb = state.get("cb", {})
+        cb_reason = _cb_check(state, "sql")
+        if cb_reason:
+            cb["cb_reason"] = cb_reason
+            return "answer"
+        return "agent"
+
+    def route_answer_agent(state: AgentState) -> str:
+        """Answer agent: final_answer → END, no tools → END (force)."""
+        tcs = _extract_tool_calls(state)
+        if tcs and any(tc["name"] == "final_answer" for tc in tcs):
             return "end"
-
-        last = msgs[-1]
-        tcs, _ = _parse_tool_calls(last)
-
-        if not tcs:
-            return "end"
-
-        if any(tc["name"] == "final_answer" for tc in tcs):
-            return "end"
-
-        return "tools"
+        # Force end even without final_answer (safety net)
+        return "end"
 
     # ── Edges ──
-    builder.add_edge(START, "unified_agent")
+    builder.add_edge(START, "explore_agent")
 
-    builder.add_conditional_edges("unified_agent", route_unified_agent, {
-        "tools": "unified_tools",
-        "end": END,
+    builder.add_conditional_edges("explore_agent", route_explore_agent, {
+        "tools": "explore_tools",
+        "advance_sql": "sql_agent",
+        "answer_direct": "answer_agent",
+    })
+    builder.add_conditional_edges("explore_tools", route_explore_tools, {
+        "agent": "explore_agent",
+        "advance_sql": "sql_agent",
+        "answer_direct": "answer_agent",
     })
 
-    # Tools always loop back to agent — submit_sql now returns result directly
-    builder.add_edge("unified_tools", "unified_agent")
+    builder.add_conditional_edges("sql_agent", route_sql_agent, {
+        "tools": "sql_tools",
+        "answer": "answer_agent",
+    })
+    builder.add_conditional_edges("sql_tools", route_sql_tools, {
+        "agent": "sql_agent",
+        "answer": "answer_agent",
+    })
+
+    builder.add_conditional_edges("answer_agent", route_answer_agent, {
+        "end": END,
+    })
 
     return builder.compile(checkpointer=MemorySaver())
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # Agent Runner
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 _MONITORING_PATTERNS = [
     "连接状态", "连接数", "多少条", "sql在跑", "运行了多久",
     "数据库状态", "慢查询", "连接信息", "数据库连接",
     "多少连接", "活跃查询", "表概况", "运行时间",
 ]
-
 _GREETING_PATTERNS = ["你好", "您好", "hi", "hello", "嗨", "在吗", "谢谢", "感谢", "再见", "拜拜"]
 
 
 async def _greeting_fast_path(conversation_id: str) -> AsyncIterator[str]:
-    """Respond to simple greetings directly without invoking any agent."""
     yield EventEncoder.run_started(conversation_id)
     yield EventEncoder.text_delta("你好！我是 GBase 8a 数据库助手。有什么可以帮你的？")
     yield EventEncoder.run_finished()
 
 
 async def _monitoring_fast_path(db_connection_id: str | None) -> AsyncIterator[str]:
-    """Execute database status query directly, bypassing the Agent graph."""
     if not db_connection_id:
         yield EventEncoder.text_delta("当前未选择数据库连接。请先在左侧设置中添加并选择一个 GBase 8a 数据库连接。")
         yield EventEncoder.run_finished()
         return
-
-    import json
-
+    import json as _json
     from app.agents.tools.status_tool import GetDatabaseStatusTool
-
     tool = GetDatabaseStatusTool(db_connection_id=db_connection_id)
     raw_result = await tool.execute()
-
     try:
-        status_data = raw_result if isinstance(raw_result, dict) else json.loads(raw_result)
+        status_data = raw_result if isinstance(raw_result, dict) else _json.loads(raw_result)
         lines = ["**数据库状态概览**\n"]
         for label, data in status_data.items():
             if isinstance(data, dict) and "error" in data:
@@ -596,55 +632,44 @@ async def _monitoring_fast_path(db_connection_id: str | None) -> AsyncIterator[s
                 if len(cols) == 1 and data["row_count"] == 1:
                     line += f"\n{cols[0]}: **{data['rows'][0][0]}**"
                 else:
-                    line += f"\n| {' | '.join(cols)} |"
-                    line += f"\n|{'|'.join(['---' for _ in cols])}|"
+                    line += f"\n| {' | '.join(cols)} |\n|{'|'.join(['---' for _ in cols])}|"
                     for row in data["rows"][:20]:
                         line += f"\n| {' | '.join(str(c) for c in row)} |"
                 lines.append(line)
             else:
                 lines.append(f"### {label}\n> 无数据")
         formatted = "\n\n".join(lines)
-    except (json.JSONDecodeError, TypeError):
+    except (_json.JSONDecodeError, TypeError):
         formatted = f"数据库状态查询结果:\n{raw_result}"
-
     yield EventEncoder.text_delta(formatted)
     yield EventEncoder.run_finished()
 
 
 async def run_agent_with_ag_ui(
-    user_message: str,
-    conversation_id: str,
-    model: str,
+    user_message: str, conversation_id: str, model: str,
     db_connection_id: str | None = None,
 ) -> AsyncIterator[str]:
-    """运行 v3.2 Unified ReAct Agent 并以 AG-UI SSE 流式输出。"""
+    """运行 v3.3 Circuit Breaker ReAct Agent 并以 AG-UI SSE 流式输出。"""
 
-    # ── 问候快速路径 ──
     if any(user_message.strip().lower().startswith(p) or user_message.strip() == p for p in _GREETING_PATTERNS):
         async for event in _greeting_fast_path(conversation_id):
             yield event
         return
 
-    # ── 监控快速路径 ──
     if any(p in user_message for p in _MONITORING_PATTERNS):
         async for event in _monitoring_fast_path(db_connection_id):
             yield event
         return
 
-    # Load conversation history
     history = []
     if conversation_id:
         try:
             from sqlalchemy import select
-
             from app.database import async_session_factory
             from app.models.conversation import Conversation
             from app.services.conversation_service import build_context
-
             async with async_session_factory() as session:
-                result = await session.execute(
-                    select(Conversation).where(Conversation.id == conversation_id)
-                )
+                result = await session.execute(select(Conversation).where(Conversation.id == conversation_id))
                 conv = result.scalar_one_or_none()
                 if conv:
                     ctx = await build_context(session, conv)
@@ -657,20 +682,15 @@ async def run_agent_with_ag_ui(
     initial_state: AgentState = {
         "messages": _build_conversation_messages(history, user_message),
         "db_connection_id": db_connection_id,
-        "agent_step": 0,
-        "agent_finished": False,
-        "sql": {"retry_count": 0, "phase": "idle"},
+        "cb": _cb_init(),
     }
 
     yield EventEncoder.run_started(conversation_id)
-
     config = {"configurable": {"thread_id": conversation_id}}
     streamed_text = False
 
     try:
-        async for mode, events in graph.astream(
-            initial_state, config=config, stream_mode=["custom", "updates"]
-        ):
+        async for mode, events in graph.astream(initial_state, config=config, stream_mode=["custom", "updates"]):
             if mode == "custom":
                 for ev in events:
                     if isinstance(ev, dict):
@@ -688,9 +708,7 @@ async def run_agent_with_ag_ui(
                             yield EventEncoder.step_finished(info.get("agent_name", "unknown"))
                         elif "tool_call_start" in ev:
                             info = ev["tool_call_start"]
-                            yield EventEncoder.tool_call_start(
-                                info["name"], info.get("args"), info.get("agent_name", "")
-                            )
+                            yield EventEncoder.tool_call_start(info["name"], info.get("args"), info.get("agent_name", ""))
                         elif "tool_call_result" in ev:
                             info = ev["tool_call_result"]
                             result = info.get("result", {})
@@ -710,10 +728,8 @@ async def run_agent_with_ag_ui(
         final_state = await graph.aget_state(config)
         state_values = final_state.values if final_state else {}
         response = state_values.get("final_response", "") if state_values else ""
-
         if response and not streamed_text:
             yield EventEncoder.text_delta(response)
-
         yield EventEncoder.run_finished()
 
     except Exception as e:

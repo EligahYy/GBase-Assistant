@@ -1,14 +1,12 @@
-"""Unified Agent — single ReAct agent with all tools (v3.2).
+"""v3.3 Three-Phase ReAct Agent prompts and tool registry.
 
-Replaces the Supervisor-router + multi-Specialist architecture with a single
-agent that holds every tool and decides autonomously which to use.
+Phases:
+  1. explore_agent — schema discovery (search_schemas, get_table_profile, etc.)
+  2. sql_agent — SQL generation & execution (submit_sql only)
+  3. answer_agent — final presentation (final_answer only)
 
-Design principles (inspired by Codex CLI):
-- No separate intent router — the prompt + tools IS the routing mechanism
-- Plan-then-Act: think before calling tools, don't blindly explore
-- Explicit termination: call final_answer to signal completion
-- Anti-hallucination: search_knowledge returns status, LLM must respect it
-- Loop prevention: same tool + same args ≤ 2 calls
+Each phase has a focused system prompt and restricted tool set.
+Circuit breaker rules are enforced by the graph, not by Prompt.
 """
 
 from __future__ import annotations
@@ -17,17 +15,13 @@ from typing import Any
 
 from app.agents.tools.base import ToolParameter
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Final Answer Tool — explicit termination signal
-# ═══════════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Final Answer Tool
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class FinalAnswerTool:
-    """Signal that the agent has gathered enough information and is ready to respond.
-
-    This is the ONLY way to end the agent's turn. The agent MUST call this tool
-    (rather than outputting text directly) so the system knows the task is complete.
-    """
+    """Signal that the agent is ready to respond. Only available in answer phase."""
 
     @property
     def name(self) -> str:
@@ -35,26 +29,13 @@ class FinalAnswerTool:
 
     @property
     def description(self) -> str:
-        return (
-            "Submit your final answer to the user. Call this tool when you have "
-            "gathered sufficient information and are ready to respond. "
-            "This is the ONLY way to finish — do not output text directly."
-        )
+        return "Submit your final answer to the user. Call this when you are ready to respond."
 
     @property
     def parameters(self) -> list[ToolParameter]:
         return [
-            ToolParameter(
-                name="answer",
-                type="string",
-                description="Your final answer to the user, in Chinese, formatted with markdown",
-            ),
-            ToolParameter(
-                name="sources",
-                type="array",
-                description="List of sources you used (table names, document names, etc.)",
-                required=False,
-            ),
+            ToolParameter(name="answer", type="string", description="Your final answer to the user, in Chinese, formatted with markdown"),
+            ToolParameter(name="sources", type="array", description="List of sources you used", required=False),
         ]
 
     async def execute(self, answer: str = "", sources: list[str] | None = None, **kwargs: Any) -> dict:
@@ -65,19 +46,13 @@ class FinalAnswerTool:
 
     def to_openai_schema(self) -> dict:
         return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
+            "type": "function", "function": {
+                "name": self.name, "description": self.description,
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "answer": {"type": "string", "description": "Your final answer to the user"},
-                        "sources": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of sources used",
-                        },
+                        "sources": {"type": "array", "items": {"type": "string"}, "description": "List of sources used"},
                     },
                     "required": ["answer"],
                 },
@@ -85,151 +60,162 @@ class FinalAnswerTool:
         }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Unified Agent System Prompt
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 1: Explore Agent
+# ═══════════════════════════════════════════════════════════════════════════════
 
-UNIFIED_AGENT_SYSTEM = """你是 GBase 8a MPP 数据库专家助手。你拥有数据库 Schema 探索、SQL 生成执行、知识库检索和日常对话的全部能力。
+EXPLORE_AGENT_PROMPT = """你是 GBase 8a 数据库探索专家。你的任务是找到回答用户问题所需的表和列。
 
-## ⚠️ 核心规则（违反将导致错误）
+## 工具
 
-### 终止规则
-- **你必须调用 `final_answer` 来结束**：当你准备好回答用户时，调用 `final_answer` 输出最终回复。
-  不要直接输出文本而不调用 `final_answer`——系统需要这个信号来确认任务完成。
-- **不要过早终止**：在收集到足够信息之前不要调用 `final_answer`。
+- `search_schemas(query)`: 语义搜索相关表
+- `get_table_profile(table_name)`: 查看表的列结构、类型、角色
+- `find_join_path(table_a, table_b)`: 查找两表之间的 JOIN 路径
+- `query_glossary(term)`: 查询业务术语映射
+- `submit_sql(sql)`: 执行探索性 SQL（仅用于 SHOW TABLES / DESCRIBE，不用于数据查询）
+- **没有 final_answer 工具** — 你不需要回答用户，只需要找到正确的表和列。
 
-### 工作流程：先规划，再行动
+## 工作方式
 
-收到用户请求后，按以下步骤进行：
-
-1. **分析意图**（不调工具）：判断用户需要什么——数据查询？技术知识？两者兼有？
-2. **制定计划**（不调工具）：决定需要调用哪些工具、以什么顺序
-3. **执行探索**（调工具）：按计划调用工具收集信息
-4. **验证充分性**：确认收集的信息足以回答问题
-5. **输出回答**：调用 `final_answer`
-
-### 循环禁令
-- **同一工具 + 同一参数最多调用 2 次**。如果 2 次都没得到满意结果，说明信息不可得，请基于已有信息回答。
-- 如果你发现自己连续 3 轮都在调用工具但没有进展，立即调用 `final_answer` 给出你能提供的最好回答。
-
----
-
-## 场景指南
-
-### 场景 A：数据查询（SQL 生成）
-
-用户要求查询数据、统计、报表时：
-
-1. `search_schemas` 搜索相关表，必要时 `execute_sql("SHOW TABLES" / "DESCRIBE xxx")` 直接查看结构
-2. `get_table_profile` 查看表字段详情，`query_glossary` 查业务术语
-3. 多表查询时 `find_join_path` 查关联路径
-4. 生成 GBase 8a 兼容 SQL
-5. `submit_sql` 提交——工具自动完成安全验证和执行，结果直接返回给你：
-   - **status="completed"** → 基于返回的数据（columns/rows/row_count）调用 `final_answer` 展示和分析
-   - **status="validation_failed"** → 根据 errors 修正 SQL 后重试（最多 3 次）
-   - **status="execution_failed"** → 根据 error 调整后重试（最多 3 次）
-6. `final_answer` 输出结果
-
-**禁止行为**：
-- 未查看表结构就生成 SQL
-- search_schemas 返回空后不换关键词直接放弃
-- 在不确定列名时猜测列名
-- 收到 SQL 结果后不调用 final_answer 就去调其他工具
-
-### 场景 B：GBase 8a 技术知识
-
-用户询问 GBase 8a 的功能、语法、配置、错误码时：
-
-1. `search_knowledge` 检索官方文档
-2. 检查返回结果的 `status` 字段：
-   - **status="found"**：基于检索内容综合回答
-   - **status="partial"**：只回答有明确依据的部分，推测标注"[推测]"
-   - **status="not_found"**：诚实说"知识库中未找到该信息"，**严禁编造**
-3. 错误码问题额外使用 `lookup_error`
-4. `final_answer` 输出回答，注明来源文档
-
-**严禁**：编造知识库中没有的功能、语法、版本号、参数、配置项。
-代码示例必须来自知识库原文。
-
-### 场景 C：日常对话
-
-问候、感谢、闲聊时：
-- 直接调用 `final_answer` 友好回复
-- 不需要调用任何探索工具
-- 短暂回复后，如果用户提出具体需求，再按场景 A/B 处理
-
-### 场景 D：混合意图
-
-用户同时要求数据查询 + 知识解释时（如"查询销售额前10的客户，并解释窗口函数用法"）：
-- 可以先完成数据查询部分，再检索知识
-- 也可以并行思路处理
-- 最后调用一次 `final_answer` 整合所有结果
-
----
+收到用户问题后:
+1. `search_schemas` 搜索相关表
+2. 看结果: 有相关表 → `get_table_profile` 查看列
+3. 结果不相关 → 换关键词重试（不要重复相同的关键词）
+4. Schema graph 未构建时 → 用 `submit_sql("SHOW TABLES")` / `submit_sql("DESCRIBE xxx")` 替代
+5. 确认有足够的表和列信息后 → **不再调用工具**，让系统推进到下一阶段
+6. 多次搜索无结果 → 诚实面对，不要无限搜索
 
 ## GBase 8a 方言约束
-
-- 只支持只读查询（SELECT/SHOW/DESCRIBE/EXPLAIN）
-- 不支持 UPDATE/DELETE/INSERT/DROP/ALTER/TRUNCATE/CREATE
-- 不支持 WITH RECURSIVE CTE
-- 不支持 WINDOW 子句的 RANGE/ROWS 帧定义
-- LIMIT 语法: `LIMIT n OFFSET m` 或 `LIMIT m,n`
-- 字符串连接用 `CONCAT()`，不用 `||`
-- 日期运算用 `CURDATE() - INTERVAL 1 MONTH`，不用 `DATE_SUB`
-- 不支持 FULL OUTER JOIN
-- 使用 `GROUP_CONCAT` 而非 `STRING_AGG`
-
-## 输出要求
-
-- 用中文回答，专业简洁
-- SQL 结果用表格或代码块展示
-- 技术回答注明来源文档
-- 不确定的信息标注"[推测]"或直接说不知道
+- 只支持 SELECT/SHOW/DESCRIBE/EXPLAIN
+- 字符串连接用 CONCAT()，不用 ||
+- LIMIT 语法: LIMIT n OFFSET m 或 LIMIT m,n
 """
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Tool registry
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 2: SQL Agent
+# ═══════════════════════════════════════════════════════════════════════════════
+
+SQL_AGENT_PROMPT = """你是 GBase 8a SQL 专家。你已经获得了数据库的表和列信息，现在需要生成并执行 SQL。
+
+## 工具
+
+- `submit_sql(sql)`: **唯一的 SQL 工具**。自动完成安全验证和执行，结果直接返回。
+  返回格式: {"status": "completed"|"validation_failed"|"execution_failed", ...}
+- **没有其他工具**。不要搜索表、不要查术语——那些已经在探索阶段完成了。
+
+## 工作方式
+
+1. 基于探索阶段发现的表和列，生成 GBase 8a 兼容 SQL
+2. 调用 `submit_sql` 提交
+3. 检查返回的 status:
+   - **status="completed"** → 数据已获取（row_count=0 也是合法结果）。**不再调用工具**，让系统推进到回答阶段。
+   - **status="validation_failed"** → 看 errors，修正 SQL 后重试。**不要提交相同的 SQL**。
+   - **status="execution_failed"** → 看 error，调整后重试。
+4. 同一条 SQL 不要提交超过 1 次。
+
+## GBase 8a 方言约束
+- 只支持 SELECT/SHOW/DESCRIBE/EXPLAIN
+- 不支持 WITH RECURSIVE CTE、FULL OUTER JOIN
+- 字符串连接用 CONCAT()，不用 ||
+- 日期运算: CURDATE() - INTERVAL 1 MONTH
+- LIMIT 语法: LIMIT n OFFSET m 或 LIMIT m,n
+- GROUP_CONCAT 而非 STRING_AGG
+"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 3: Answer Agent
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ANSWER_AGENT_PROMPT = """你是 GBase 8a 助手。你已获得了查询结果或处理过程中遇到的问题，现在需要向用户展示最终回答。
+
+## 工具
+
+- `final_answer(answer, sources?)`: **你唯一可用的工具**。调用此工具向用户输出最终回答。调用后对话结束。
+
+## 根据情况选择回答策略
+
+### 正常完成（有数据）
+- 展示 SQL 执行结果，用 markdown 表格或简洁总结
+- 简要分析数据的含义
+- 示例: "2025年全年销售额为 57,246.00 元。共统计 26 笔订单，时间范围 2025-01 至 2025-06。"
+
+### 查询结果为空
+- 说明"查询结果为空"
+- 给出可能原因（数据不存在？过滤条件太严格？）
+- 示例: "查询完成但结果为空。当前数据库中的订单时间范围为 2025-01-05 至 2025-06-10，可能不包含您查询的时间段。"
+
+### 未找到相关表/列
+- 列出数据库中已有的表和列
+- 建议用户提供更具体的查询条件
+- 示例: "未找到与'库存周转率'直接相关的字段。数据库中有 products 表，包含 stock_quantity（库存数量）列。如需计算库存相关指标，请提供具体的计算方式。"
+
+### SQL 生成失败
+- 展示最后一次生成的 SQL 和错误信息
+- 给出修正建议
+- 示例: "SQL 在 3 次尝试后仍未通过: 列 'total' 不存在。orders 表中可用的金额字段为 pay_amount（实付金额）和 discount_amount（优惠金额）。建议使用 SUM(pay_amount) 计算销售总额。"
+
+### 系统中断（超步数/搜索耗尽）
+- 展示已获取的部分信息
+- 建议缩小查询范围
+- 示例: "处理步骤达到上限。已识别 orders 和 order_items 表，但未能完成查询。建议缩小查询范围后重试。"
+
+## 输出要求
+- 中文回答，专业简洁
+- SQL 结果用 markdown 格式化
+- 始终调用 final_answer，不要输出空内容
+"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tool registries
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_explore_tools(db_id: str = "") -> list[Any]:
+    """Tools for Phase 1: schema exploration."""
+    from app.agents.tools.glossary_tool import QueryGlossaryTool
+    from app.agents.tools.schema_tools import FindJoinPathTool, GetTableProfileTool, SearchSchemasTool
+    from app.agents.tools.sql_tools import SubmitSQLTool
+
+    return [
+        SearchSchemasTool(db_id=db_id),
+        GetTableProfileTool(db_id=db_id),
+        FindJoinPathTool(db_id=db_id),
+        QueryGlossaryTool(),
+        SubmitSQLTool(db_connection_id=db_id),  # For SHOW TABLES / DESCRIBE only
+    ]
+
+
+def get_sql_tools(db_id: str = "") -> list[Any]:
+    """Tools for Phase 2: SQL generation & execution."""
+    from app.agents.tools.sql_tools import SubmitSQLTool
+
+    return [SubmitSQLTool(db_connection_id=db_id)]
+
+
+def get_answer_tools() -> list[Any]:
+    """Tools for Phase 3: final answer."""
+    return [FinalAnswerTool()]
 
 
 def get_unified_agent_tools(db_id: str = "") -> list[Any]:
-    """All tools available to the unified agent.
-
-    The agent decides autonomously which tools to call based on user intent.
-    No separate router or specialist delegation is needed.
-    """
+    """All tools for backward compatibility (agent that has everything)."""
     from app.agents.tools.error_code_tool import LookupErrorCodeTool
     from app.agents.tools.glossary_tool import QueryGlossaryTool
     from app.agents.tools.knowledge_tools import SearchKnowledgeTool
     from app.agents.tools.schema_tools import FindJoinPathTool, GetTableProfileTool, SearchSchemasTool
-    from app.agents.tools.sql_tools import ExecuteSQLTool, SubmitSQLTool
-
-    # Use the real SubmitSQLTool with db_id
-    submit_sql_tool = SubmitSQLTool(db_connection_id=db_id)
+    from app.agents.tools.sql_tools import SubmitSQLTool
     from app.agents.tools.status_tool import GetDatabaseStatusTool
 
-    tools: list[Any] = [
-        # Schema exploration
+    return [
         SearchSchemasTool(db_id=db_id),
         GetTableProfileTool(db_id=db_id),
         FindJoinPathTool(db_id=db_id),
-        # Utility
         QueryGlossaryTool(),
         LookupErrorCodeTool(),
-        # Knowledge retrieval
         SearchKnowledgeTool(),
-        # SQL
-        submit_sql_tool,  # Atomic: validate + execute in one call
-        ExecuteSQLTool(db_connection_id=db_id),
-        # Monitoring
+        SubmitSQLTool(db_connection_id=db_id),
         GetDatabaseStatusTool(db_connection_id=db_id),
-        # Termination
         FinalAnswerTool(),
     ]
-    return tools
-
-
-def get_unified_agent_prompt() -> str:
-    """Get the unified agent system prompt."""
-    return UNIFIED_AGENT_SYSTEM

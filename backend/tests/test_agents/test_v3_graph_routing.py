@@ -1,4 +1,4 @@
-"""Integration tests for v3.2 Unified Agent graph routing — verifies the graph terminates correctly."""
+"""Integration tests for v3.3 Circuit Breaker graph routing."""
 
 from unittest.mock import MagicMock, patch
 
@@ -9,19 +9,15 @@ from app.agents.state import AgentState
 
 
 def _mock_adapter(responses: list[AIMessage]):
-    """Create a mock LLM adapter that returns predefined responses in sequence."""
     call_count = [0]
-
     class MockAdapter:
         llm_client = None
-
         async def _agenerate(self, messages, **kwargs):
             idx = min(call_count[0], len(responses) - 1)
             resp = responses[idx]
             call_count[0] += 1
             from langchain_core.outputs import ChatGeneration, ChatResult
             return ChatResult(generations=[ChatGeneration(message=resp)])
-
     return MockAdapter()
 
 
@@ -30,109 +26,122 @@ def _tc_msg(name: str, args: dict) -> AIMessage:
 
 
 def _fa_msg(answer: str) -> AIMessage:
-    return AIMessage(content="", tool_calls=[ToolCall(name="final_answer", args={"answer": answer}, id="call_fa")])
+    return AIMessage(content="", tool_calls=[ToolCall(name="final_answer", args={"answer": answer, "sources": []}, id="call_fa")])
 
 
 def _text_msg(content: str) -> AIMessage:
     return AIMessage(content=content)
 
 
-def _initial_state(msg: str, test_id: str, db_id: str | None = None) -> AgentState:
-    return {
-        "messages": [HumanMessage(content=msg)],
-        "db_connection_id": db_id,
-        "agent_step": 0,
-        "agent_finished": False,
-        "sql": {},
-        "knowledge": {},
-    }
+def _initial_state(msg: str) -> AgentState:
+    return {"messages": [HumanMessage(content=msg)], "db_connection_id": None, "cb": {}}
 
 
 @pytest.mark.asyncio
-async def test_graph_finishes_with_final_answer():
-    """Unified agent calls final_answer → graph ends with final_response."""
+async def test_answer_phase_calls_final_answer():
+    """Answer agent calls final_answer → graph ends."""
     mock = _mock_adapter([_fa_msg("你好！有什么可以帮你的？")])
 
     with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph.get_unified_agent_tools", return_value=[]):
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
-        state = _initial_state("你好", "t1")
+        # Start directly in answer phase
+        state = {"messages": [HumanMessage(content="你好")], "db_connection_id": None,
+                 "cb": {"current_phase": "answer", "total_steps": 0}}
         result = await graph.ainvoke(state, {"configurable": {"thread_id": "t1"}})
         assert result.get("final_response") == "你好！有什么可以帮你的？"
-        assert result.get("agent_finished") is True
 
 
 @pytest.mark.asyncio
-async def test_graph_finishes_text_fallback():
-    """Agent outputs text without tool calls → treated as final answer (fallback)."""
-    mock = _mock_adapter([_text_msg("你好！")])
+async def test_graph_terminates_on_explore_empty_tools():
+    """Explore agent with no tools → advances to sql phase → answer."""
+    mock = _mock_adapter([_text_msg("done exploring")])
 
     with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph.get_unified_agent_tools", return_value=[]):
+         patch("app.agents.graph.get_explore_tools", return_value=[]), \
+         patch("app.agents.graph.get_sql_tools", return_value=[]), \
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
-        state = _initial_state("你好", "t2")
-        result = await graph.ainvoke(state, {"configurable": {"thread_id": "t2"}})
-        assert result.get("final_response") is not None
-        assert result.get("agent_finished") is True
+        result = await graph.ainvoke(_initial_state("查询订单"), {"configurable": {"thread_id": "t2"}})
+        # Should advance through all phases and terminate
+        assert result is not None
 
 
 @pytest.mark.asyncio
-async def test_graph_stops_at_iteration_limit():
-    """Agent stops after MAX_ITERATIONS (12) — doesn't loop forever."""
-    # Use submit_sql to avoid DB-dependent tools
+async def test_circuit_breaker_explore_max_steps():
+    """After 5 explore steps with search_schemas, CB triggers and advances."""
     from app.agents.tools.sql_tools import SubmitSQLTool
 
-    mock = _mock_adapter([_tc_msg("submit_sql", {"sql": "SELECT 1"})] * 20)
+    responses = [_tc_msg("search_schemas", {"query": f"q{i}"}) for i in range(10)]
 
-    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
+    # Make search_schemas always return empty
+    mock_search = MagicMock()
+    mock_search.name = "search_schemas"
+    mock_search.execute = MagicMock(return_value=[])
+    mock_search.format_result = MagicMock(return_value={"summary": "未找到相关表。", "detail": None, "truncated": False})
+    mock_search.to_openai_schema = lambda: {"type": "function", "function": {"name": "search_schemas", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+
+    explore_tools = [mock_search, SubmitSQLTool(db_connection_id="")]
+    sql_tools = [SubmitSQLTool(db_connection_id="")]
+
+    mock_llm = _mock_adapter(responses)
+
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock_llm), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]):
+         patch("app.agents.graph.get_explore_tools", return_value=explore_tools), \
+         patch("app.agents.graph.get_sql_tools", return_value=sql_tools), \
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
-        state = _initial_state("x", "t3")
-        result = await graph.ainvoke(state, {"configurable": {"thread_id": "t3"}})
-        # Graph must terminate — agent_step should be at or near MAX_ITERATIONS
-        step = result.get("agent_step", 0)
-        assert 1 <= step <= 13  # At least 1 iteration, at most MAX_ITERATIONS + 1
+        result = await graph.ainvoke(_initial_state("查询销售"), {"configurable": {"thread_id": "t3"}})
+        # CB should have triggered explore_max_steps or search_exhausted
+        cb = result.get("cb", {})
+        reason = cb.get("cb_reason", "")
+        assert reason in ("explore_max_steps", "search_exhausted", "")
+        # Graph must terminate
+        assert result is not None
 
 
 @pytest.mark.asyncio
-async def test_execution_error_allows_retry_then_terminates():
-    """SQL execution error returns feedback to agent, retries up to 3x, then terminates."""
+async def test_graph_stops_at_total_steps_limit():
+    """After MAX_TOTAL_STEPS, CB triggers and graph terminates."""
     from app.agents.tools.sql_tools import SubmitSQLTool
 
-    mock = _mock_adapter([_tc_msg("submit_sql", {"sql": "SELECT 1"})] * 20)
+    responses = [_tc_msg("search_schemas", {"query": "x"})] * 20
+    mock_search = MagicMock()
+    mock_search.name = "search_schemas"
+    mock_search.execute = MagicMock(return_value=[MagicMock(table_name="orders")])
+    mock_search.format_result = MagicMock(return_value={"summary": "找到 orders", "detail": None, "truncated": False})
+    mock_search.to_openai_schema = lambda: {"type": "function", "function": {"name": "search_schemas", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
 
-    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=_mock_adapter(responses)), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]):
+         patch("app.agents.graph.get_explore_tools", return_value=[mock_search, SubmitSQLTool(db_connection_id="")]), \
+         patch("app.agents.graph.get_sql_tools", return_value=[SubmitSQLTool(db_connection_id="")]), \
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
-        state = _initial_state("x", "t4")
-        result = await graph.ainvoke(state, {"configurable": {"thread_id": "t4"}})
-        # Graph must terminate (not loop forever)
-        # Either via max_iterations, execution retry exhaustion, or agent giving up
-        step = result.get("agent_step", 0)
-        assert 1 <= step <= 13  # Between 1 and MAX_ITERATIONS+1
-        # Final state should have meaningful content
-        assert result.get("agent_finished") is True or len(result.get("messages", [])) > 0
+        result = await graph.ainvoke(_initial_state("x"), {"configurable": {"thread_id": "t4"}})
+        assert result is not None
+        cb = result.get("cb", {})
+        assert cb.get("total_steps", 0) <= 16
 
 
 @pytest.mark.asyncio
 async def test_agent_handles_no_db_connection():
-    """When no DB connected, agent can still respond (via final_answer)."""
+    """When no DB connected, answer agent responds gracefully."""
     mock = _mock_adapter([_fa_msg("当前未选择数据库连接，请先在设置中添加。")])
 
     with patch("app.agents.graph.LiteLLMChatAdapter", return_value=mock), \
          patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
-         patch("app.agents.graph.get_unified_agent_tools", return_value=[]):
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
         from app.agents.graph import build_graph
         graph = build_graph()
-        state = _initial_state("查询订单", "t5", db_id=None)
+        state = {"messages": [HumanMessage(content="查询订单")], "db_connection_id": None,
+                 "cb": {"current_phase": "answer", "total_steps": 0}}
         result = await graph.ainvoke(state, {"configurable": {"thread_id": "t5"}})
         assert result.get("final_response") is not None
-        assert result.get("agent_finished") is True

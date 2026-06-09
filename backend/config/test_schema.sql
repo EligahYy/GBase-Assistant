@@ -9,7 +9,7 @@ CREATE TABLE sales_regions (
     region_name  VARCHAR(64)  COMMENT '区域名称|华东/华南/华北/西南/西北',
     manager      VARCHAR(32)  COMMENT '区域负责人',
     created_at   DATETIME     COMMENT 'TIME_DIMENSION|创建时间'
-) DISTRIBUTED BY (region_id);
+) DISTRIBUTED BY ('region_id');
 
 -- 2. 客户表
 CREATE TABLE customers (
@@ -21,7 +21,7 @@ CREATE TABLE customers (
     registered_at DATETIME      COMMENT 'TIME_DIMENSION|注册时间',
     total_orders  INT           COMMENT 'MEASURE|累计订单数',
     total_amount  DECIMAL(14,2) COMMENT 'MEASURE|累计消费金额'
-) DISTRIBUTED BY (customer_id);
+) DISTRIBUTED BY ('customer_id');
 
 -- 3. 产品表
 CREATE TABLE products (
@@ -33,8 +33,8 @@ CREATE TABLE products (
     stock_quantity INT          COMMENT 'MEASURE|库存数量',
     supplier      VARCHAR(64)   COMMENT '供应商',
     created_at    DATETIME      COMMENT 'TIME_DIMENSION|上架时间',
-    is_active     TINYINT       COMMENT 'ENUM|是否上架|1=上架|0=下架'
-) DISTRIBUTED BY (product_id);
+    is_active     SMALLINT       COMMENT 'ENUM|是否上架|1=上架|0=下架'
+) DISTRIBUTED BY ('product_id');
 
 -- 4. 订单表
 CREATE TABLE orders (
@@ -46,7 +46,7 @@ CREATE TABLE orders (
     discount_amount DECIMAL(14,2) COMMENT 'MEASURE|优惠金额',
     region_id     INT           COMMENT 'FOREIGN_KEY→sales_regions|配送区域',
     remark        VARCHAR(256)  COMMENT '备注'
-) DISTRIBUTED BY (order_id);
+) DISTRIBUTED BY ('order_id');
 
 -- 5. 订单明细表
 CREATE TABLE order_items (
@@ -56,4 +56,4 @@ CREATE TABLE order_items (
     quantity      INT           COMMENT 'MEASURE|购买数量',
     unit_price    DECIMAL(10,2) COMMENT 'MEASURE|成交单价',
     subtotal      DECIMAL(14,2) COMMENT 'MEASURE|小计金额'
-) DISTRIBUTED BY (item_id);
+) DISTRIBUTED BY ('item_id');

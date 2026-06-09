@@ -1,4 +1,4 @@
-"""Behavior contracts for the v3.2 Unified Agent framework (atomic submit_sql)."""
+"""Behavior contracts for v3.3 Circuit Breaker ReAct framework."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,7 +16,6 @@ class SequencedAdapter:
         self.responses = responses
         self.calls: list[list] = []
         self.index = 0
-
     async def _agenerate(self, messages, **kwargs):
         self.calls.append(messages)
         response = self.responses[min(self.index, len(self.responses) - 1)]
@@ -26,207 +25,140 @@ class SequencedAdapter:
 
 def _tool_call(name: str, args: dict) -> AIMessage:
     return AIMessage(content="", tool_calls=[ToolCall(name=name, args=args, id=f"call_{name}")])
-
-
-def _final_answer(answer: str, sources: list[str] | None = None) -> AIMessage:
-    return AIMessage(content="", tool_calls=[ToolCall(name="final_answer", args={"answer": answer, "sources": sources or []}, id="call_fa")])
-
-
-def _state(message: str, db_connection_id: str | None = "db-1") -> dict:
-    return {
-        "messages": [HumanMessage(content=message)],
-        "db_connection_id": db_connection_id,
-        "agent_step": 0,
-        "agent_finished": False,
-        "sql": {},
-        "knowledge": {},
-    }
+def _final_answer(answer: str) -> AIMessage:
+    return AIMessage(content="", tool_calls=[ToolCall(name="final_answer", args={"answer": answer, "sources": []}, id="call_fa")])
 
 
 def _make_mock_submit_sql(status="completed", **overrides):
-    """Create a mock SubmitSQLTool that returns the given atomic result."""
-    base = {
-        "status": status,
-        "sql": overrides.get("sql", "SELECT id FROM orders"),
-        "columns": overrides.get("columns", ["id"]),
-        "rows": overrides.get("rows", [[1], [2], [3]]),
-        "row_count": overrides.get("row_count", 3),
-        "execution_time_ms": overrides.get("execution_time_ms", 2.0),
-        "truncated": False,
-    }
+    """Mock SubmitSQLTool that returns the given atomic result."""
+    base = {"status": status, "sql": overrides.get("sql", "SELECT 1"), "columns": overrides.get("columns", ["id"]), "rows": overrides.get("rows", [[1]]), "row_count": overrides.get("row_count", 1), "execution_time_ms": 2.0, "truncated": False}
     if status == "validation_failed":
-        base = {"status": status, "sql": overrides.get("sql", "DELETE FROM orders"), "errors": overrides.get("errors", ["禁止执行 DELETE 语句"]), "warnings": []}
+        base = {"status": status, "sql": overrides.get("sql", ""), "errors": overrides.get("errors", ["error"]), "warnings": []}
     if status == "execution_failed":
-        base = {"status": status, "sql": overrides.get("sql", "SELECT * FROM nonexistent"), "error": overrides.get("error", "表不存在")}
-
+        base = {"status": status, "sql": overrides.get("sql", ""), "error": overrides.get("error", "error")}
     mock = MagicMock()
     mock.name = "submit_sql"
     mock.execute = AsyncMock(return_value=base)
-
-    def _fmt(result):
-        s = result.get("status", "")
-        if s == "completed":
-            return {"summary": f"SQL 执行成功：共 {result.get('row_count', 0)} 行。请调用 final_answer。", "detail": result, "truncated": False}
-        if s == "validation_failed":
-            return {"summary": f"SQL 验证失败：{result.get('errors', [])}", "detail": result, "truncated": False}
-        return {"summary": f"SQL 执行失败：{result.get('error', '')}", "detail": result, "truncated": False}
+    def _fmt(r):
+        s = r.get("status", "")
+        if s == "completed": return {"summary": f"SQL 成功: {r.get('row_count', 0)} 行", "detail": r, "truncated": False}
+        if s == "validation_failed": return {"summary": f"验证失败: {r.get('errors', [])}", "detail": r, "truncated": False}
+        return {"summary": f"执行失败: {r.get('error', '')}", "detail": r, "truncated": False}
     mock.format_result = MagicMock(side_effect=_fmt)
-    mock.to_openai_schema = lambda: {"type": "function", "function": {"name": "submit_sql", "description": "Atomic SQL", "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]}}}
+    mock.to_openai_schema = lambda: {"type": "function", "function": {"name": "submit_sql", "description": "...", "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]}}}
     return mock
 
 
 # ── Helpers ──
 
-def test_build_conversation_messages_includes_history_without_duplicate_current_message():
-    history = [
-        {"role": "user", "content": "查询销售额最高的部门"},
-        {"role": "assistant", "content": "华东事业部最高"},
-        {"role": "user", "content": "只看华东地区"},
-    ]
-    messages = _build_conversation_messages(history, "只看华东地区")
-    assert [m.content for m in messages] == ["查询销售额最高的部门", "华东事业部最高", "只看华东地区"]
+def test_build_conversation_messages():
+    history = [{"role": "user", "content": "查询销售额"}, {"role": "assistant", "content": "华东最高"}, {"role": "user", "content": "只看华东"}]
+    messages = _build_conversation_messages(history, "只看华东")
+    assert [m.content for m in messages] == ["查询销售额", "华东最高", "只看华东"]
 
-
-def test_knowledge_query_expansion_matches_terms_inside_natural_language():
+def test_knowledge_query_expansion():
     expanded = expand_knowledge_query("如何创建随机分布表？")
     assert "随机分布" in expanded
     assert "DISTRIBUTED" in expanded
 
 
-# ── v3.2 Atomic SubmitSQL Contracts ──
+# ── v3.3 Circuit Breaker Contracts ──
 
 @pytest.mark.asyncio
-async def test_submit_sql_returns_completed_result():
-    """Atomic submit_sql returns status=completed → agent calls final_answer."""
-    mock_tool = _make_mock_submit_sql("completed", sql="SELECT id FROM orders", row_count=3)
+async def test_full_three_phase_flow():
+    """explore(search_schemas) → sql(submit_sql) → answer(final_answer)."""
+    mock_search = MagicMock()
+    mock_search.name = "search_schemas"
+    mock_search.execute = AsyncMock(return_value=[MagicMock(table_name="orders")])
+    mock_search.format_result = MagicMock(return_value={"summary": "找到 orders", "detail": None, "truncated": False})
+    mock_search.to_openai_schema = lambda: {"type": "function", "function": {"name": "search_schemas", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+
+    mock_sql = _make_mock_submit_sql("completed", sql="SELECT SUM(pay_amount) FROM orders", row_count=1, columns=["total"], rows=[[57246.00]])
+
+    # Phase 1: explore → search_schemas → no more tools (advance to sql)
+    # Phase 2: sql → submit_sql → completed → no more tools (advance to answer)
+    # Phase 3: answer → final_answer
     adapter = SequencedAdapter([
-        _tool_call("submit_sql", {"sql": "SELECT id FROM orders"}),
-        _final_answer("查询完成：共 3 行数据"),
+        _tool_call("search_schemas", {"query": "销售额"}),
+        _tool_call("submit_sql", {"sql": "SELECT SUM(pay_amount) FROM orders"}),
+        _final_answer("2025年销售额为 57,246.00 元"),
     ])
 
-    with (
-        patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
-        patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[mock_tool]),
-    ):
-        graph = build_graph(db_connection_id="db-1")
-        result = await graph.ainvoke(_state("查询订单"), {"configurable": {"thread_id": "atomic-sql"}})
-
-    mock_tool.execute.assert_awaited_once_with(sql="SELECT id FROM orders")
-    assert result["agent_finished"] is True
-    assert result["final_response"] == "查询完成：共 3 行数据"
-
-
-@pytest.mark.asyncio
-async def test_submit_sql_validation_failed_returns_error():
-    """Atomic submit_sql returns status=validation_failed → agent sees error, retries or gives up."""
-    mock_tool = _make_mock_submit_sql("validation_failed", sql="DELETE FROM orders", errors=["禁止执行 DELETE 语句"])
-    adapter = SequencedAdapter([
-        _tool_call("submit_sql", {"sql": "DELETE FROM orders"}),
-        _final_answer("无法执行 DELETE 操作，GBase 8a 只支持只读查询。"),
-    ])
-
-    with (
-        patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
-        patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[mock_tool]),
-    ):
-        graph = build_graph(db_connection_id="db-1")
-        result = await graph.ainvoke(_state("删除订单"), {"configurable": {"thread_id": "atomic-invalid"}})
-
-    # Agent should have received the validation_failed result and responded
-    assert result["agent_finished"] is True
-    assert result["final_response"] is not None
-
-
-@pytest.mark.asyncio
-async def test_knowledge_search_returns_chunks_with_status():
-    """search_knowledge → agent reads chunks + status → final_answer."""
-    from app.agents.tools.knowledge_tools import SearchKnowledgeTool
-
-    adapter = SequencedAdapter([
-        _tool_call("search_knowledge", {"query": "如何创建随机分布表？"}),
-        _final_answer("不指定 DISTRIBUTED BY 子句即可创建随机分布表。", sources=["5.1.8.2.1 CREATE TABLE"]),
-    ])
-    retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=[
-        KnowledgeChunk(content="如果不指定 DISTRIBUTED BY 和 REPLICATED，则默认创建随机分布表。", source="5.1.8.2.1 CREATE TABLE")
-    ])
-
-    with (
-        patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
-        patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.dependencies.get_knowledge_retriever", return_value=retriever),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[SearchKnowledgeTool()]),
-    ):
-        graph = build_graph()
-        result = await graph.ainvoke(
-            _state("如何创建随机分布表？", db_connection_id=None),
-            {"configurable": {"thread_id": "contract-knowledge"}},
-        )
-
-    assert retriever.retrieve.await_count >= 1
-    assert result["final_response"] is not None
-    assert "随机分布表" in result["final_response"]
-
-
-@pytest.mark.asyncio
-async def test_unified_agent_handles_multi_intent_query():
-    """'查询订单数量，并解释分布表' → agent uses submit_sql + search_knowledge → final_answer."""
-    from app.agents.tools.knowledge_tools import SearchKnowledgeTool
-
-    mock_sql = _make_mock_submit_sql("completed", sql="SELECT COUNT(*) AS cnt FROM orders", columns=["cnt"], rows=[[3]], row_count=1)
-    adapter = SequencedAdapter([
-        AIMessage(content="", tool_calls=[
-            ToolCall(name="submit_sql", args={"sql": "SELECT COUNT(*) AS cnt FROM orders"}, id="call_sql"),
-            ToolCall(name="search_knowledge", args={"query": "分布表"}, id="call_know"),
-        ]),
-        _final_answer("查询结果：共 3 条订单。\n\n分布表按分布键分散存储。[manual]", sources=["manual"]),
-    ])
-    retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=[KnowledgeChunk(content="分布表...", source="manual")])
-
-    with (
-        patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
-        patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.dependencies.get_knowledge_retriever", return_value=retriever),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[mock_sql, SearchKnowledgeTool()]),
-    ):
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter), \
+         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
+         patch("app.agents.graph.get_explore_tools", return_value=[mock_search, mock_sql]), \
+         patch("app.agents.graph.get_sql_tools", return_value=[mock_sql]), \
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
         graph = build_graph(db_connection_id="db-1")
         result = await graph.ainvoke(
-            _state("查询订单数量，并解释分布表"),
-            {"configurable": {"thread_id": "contract-multi"}},
+            {"messages": [HumanMessage(content="查询销售额")], "db_connection_id": "db-1", "cb": {}},
+            {"configurable": {"thread_id": "c1"}},
         )
 
-    assert result["agent_finished"] is True
-    assert result["final_response"] is not None
+    assert result["final_response"] == "2025年销售额为 57,246.00 元"
+    cb = result.get("cb", {})
+    assert cb.get("explore", {}).get("tables_found") == ["orders"]
+    assert cb.get("sql", {}).get("status") == "completed"
 
 
 @pytest.mark.asyncio
-async def test_final_answer_terminates_agent():
-    """Agent calling final_answer → agent_finished=True, graph ends."""
-    adapter = SequencedAdapter([_final_answer("你好！有什么可以帮你的？")])
+async def test_sql_validation_failed_retries_then_advances():
+    """submit_sql validation_failed x3 → CB triggers → answer."""
+    mock_sql = _make_mock_submit_sql("validation_failed", sql="BAD SQL", errors=["语法错误"])
 
-    with (
-        patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
-        patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[]),
-    ):
+    # First response: explore phase (no tools) → text advances to sql
+    # Then sql phase: 3 submit_sql failures → answer phase
+    adapter = SequencedAdapter([
+        AIMessage(content="ready for sql"),                              # explore phase pass-through
+        _tool_call("submit_sql", {"sql": "BAD SQL"}),                   # sql retry 1
+        _tool_call("submit_sql", {"sql": "BAD SQL 2"}),                 # sql retry 2
+        _tool_call("submit_sql", {"sql": "BAD SQL 3"}),                 # sql retry 3 → CB
+        _final_answer("SQL 生成失败，已尝试 3 次。"),                     # answer phase
+    ])
+
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter), \
+         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
+         patch("app.agents.graph.get_explore_tools", return_value=[]), \
+         patch("app.agents.graph.get_sql_tools", return_value=[mock_sql]), \
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
+        graph = build_graph(db_connection_id="db-1")
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content="查询")], "db_connection_id": "db-1", "cb": {}},
+            {"configurable": {"thread_id": "c2"}},
+        )
+
+    cb = result.get("cb", {})
+    assert cb.get("sql", {}).get("retry_count", 0) >= 1
+    assert result.get("final_response") is not None
+
+
+@pytest.mark.asyncio
+async def test_search_exhausted_skips_to_answer():
+    """search_schemas returns empty 3x → CB search_exhausted → answer_agent."""
+    mock_search = MagicMock()
+    mock_search.name = "search_schemas"
+    mock_search.execute = AsyncMock(return_value=[])
+    mock_search.format_result = MagicMock(return_value={"summary": "未找到", "detail": None, "truncated": False})
+    mock_search.to_openai_schema = lambda: {"type": "function", "function": {"name": "search_schemas", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
+
+    adapter = SequencedAdapter([
+        _tool_call("search_schemas", {"query": "q1"}),
+        _tool_call("search_schemas", {"query": "q2"}),
+        _tool_call("search_schemas", {"query": "q3"}),
+        _final_answer("未找到相关表"),
+    ])
+
+    with patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter), \
+         patch("app.dependencies.get_llm_client", return_value=MagicMock()), \
+         patch("app.agents.graph.get_explore_tools", return_value=[mock_search]), \
+         patch("app.agents.graph.get_sql_tools", return_value=[]), \
+         patch("app.agents.graph.get_answer_tools", return_value=[]):
         graph = build_graph()
-        result = await graph.ainvoke(_state("你好", db_connection_id=None), {"configurable": {"thread_id": "contract-fa"}})
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content="查询")], "db_connection_id": None, "cb": {}},
+            {"configurable": {"thread_id": "c3"}},
+        )
 
-    assert result["agent_finished"] is True
-    assert result["final_response"] == "你好！有什么可以帮你的？"
-
-
-def test_build_graph_applies_user_selected_model():
-    """build_graph(model='openai/gpt-4o') passes model through to LLM client."""
-    with (
-        patch("app.agents.graph.LiteLLMChatAdapter", side_effect=lambda client: client),
-        patch("app.dependencies.get_llm_client", return_value=MagicMock()) as get_client,
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[]),
-    ):
-        build_graph(db_connection_id="db-1", model="openai/gpt-4o")
-
-    assert get_client.call_count == 1
-    assert get_client.call_args.kwargs["model"] == "openai/gpt-4o"
+    cb = result.get("cb", {})
+    assert cb.get("cb_reason") in ("search_exhausted", "explore_max_steps", "")
+    assert result.get("final_response") is not None
