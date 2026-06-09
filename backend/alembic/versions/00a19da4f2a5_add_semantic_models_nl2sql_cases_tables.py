@@ -1,28 +1,18 @@
-"""add semantic models tables
+"""add semantic models + nl2sql cases tables"""
 
-Revision ID: 2afc5ef4bb99
-Revises: 24d8ce000324
-Create Date: 2026-06-09 22:15:45.228569
-
-"""
 from typing import Sequence, Union
-
 from alembic import op
 import sqlalchemy as sa
 
-
-# revision identifiers, used by Alembic.
-revision: str = '2afc5ef4bb99'
+revision: str = '00a19da4f2a5'
 down_revision: Union[str, Sequence[str], None] = '24d8ce000324'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-    # ── Semantic layer tables ──
-    op.create_table(
-        "semantic_models",
+    # ── Semantic models ──
+    op.create_table("semantic_models",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("db_connection_id", sa.String(64), nullable=False, index=True),
         sa.Column("name", sa.String(128), nullable=False),
@@ -35,8 +25,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime),
         sa.Column("updated_at", sa.DateTime),
     )
-    op.create_table(
-        "semantic_metrics",
+    op.create_table("semantic_metrics",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("semantic_model_id", sa.String(32), sa.ForeignKey("semantic_models.id"), nullable=False, index=True),
         sa.Column("name", sa.String(128), nullable=False),
@@ -48,8 +37,7 @@ def upgrade() -> None:
         sa.Column("description", sa.Text, default=""),
         sa.Column("status", sa.String(16), default="draft"),
     )
-    op.create_table(
-        "semantic_dimensions",
+    op.create_table("semantic_dimensions",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("semantic_model_id", sa.String(32), sa.ForeignKey("semantic_models.id"), nullable=False, index=True),
         sa.Column("name", sa.String(128), nullable=False),
@@ -60,8 +48,7 @@ def upgrade() -> None:
         sa.Column("hierarchy", sa.JSON, nullable=True),
         sa.Column("status", sa.String(16), default="draft"),
     )
-    op.create_table(
-        "semantic_members",
+    op.create_table("semantic_members",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("dimension_id", sa.String(32), sa.ForeignKey("semantic_dimensions.id"), nullable=False, index=True),
         sa.Column("raw_value", sa.String(256), nullable=False),
@@ -70,8 +57,7 @@ def upgrade() -> None:
         sa.Column("frequency", sa.Integer, nullable=True),
         sa.Column("status", sa.String(16), default="draft"),
     )
-    op.create_table(
-        "semantic_joins",
+    op.create_table("semantic_joins",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("semantic_model_id", sa.String(32), sa.ForeignKey("semantic_models.id"), nullable=False, index=True),
         sa.Column("left_table", sa.String(64), nullable=False),
@@ -82,10 +68,44 @@ def upgrade() -> None:
         sa.Column("confidence", sa.Float, default=0.0),
         sa.Column("status", sa.String(16), default="candidate"),
     )
+    # ── NL2SQL cases ──
+    op.create_table("nl2sql_cases",
+        sa.Column("id", sa.String(32), primary_key=True),
+        sa.Column("question", sa.Text, nullable=False),
+        sa.Column("sql", sa.Text, nullable=False),
+        sa.Column("semantic_model_id", sa.String(32), nullable=True, index=True),
+        sa.Column("db_connection_id", sa.String(64), nullable=True),
+        sa.Column("schema_version", sa.String(32), nullable=True),
+        sa.Column("query_ir_json", sa.Text, nullable=True),
+        sa.Column("status", sa.String(16), default="pending"),
+        sa.Column("quality_score", sa.Float, default=0.0),
+        sa.Column("usage_count", sa.Integer, default=0),
+        sa.Column("acceptance_rate", sa.Float, default=0.0),
+        sa.Column("source", sa.String(16), default="auto"),
+        sa.Column("conversation_id", sa.String(64), nullable=True),
+        sa.Column("error_category", sa.String(32), nullable=True),
+        sa.Column("reviewed_by", sa.String(64), nullable=True),
+        sa.Column("reviewed_at", sa.DateTime, nullable=True),
+        sa.Column("created_at", sa.DateTime),
+    )
+    op.create_table("nl2sql_attempts",
+        sa.Column("id", sa.String(32), primary_key=True),
+        sa.Column("conversation_id", sa.String(64), nullable=False, index=True),
+        sa.Column("question", sa.Text, nullable=False),
+        sa.Column("sql", sa.Text, nullable=True),
+        sa.Column("status", sa.String(16), default="pending"),
+        sa.Column("error_message", sa.Text, nullable=True),
+        sa.Column("error_category", sa.String(32), nullable=True),
+        sa.Column("latency_ms", sa.Float, nullable=True),
+        sa.Column("llm_calls", sa.Integer, default=0),
+        sa.Column("query_ir_json", sa.Text, nullable=True),
+        sa.Column("created_at", sa.DateTime),
+    )
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    op.drop_table("nl2sql_attempts")
+    op.drop_table("nl2sql_cases")
     op.drop_table("semantic_joins")
     op.drop_table("semantic_members")
     op.drop_table("semantic_dimensions")

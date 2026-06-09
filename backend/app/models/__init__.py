@@ -10,6 +10,7 @@ from app.models.knowledge_document import KnowledgeDocument
 from app.models.message import Message
 from app.models.sql_feedback import SQLFeedback
 from app.models.user_pattern import UserPattern
+from app.models.nl2sql_case import NL2SQLCase, NL2SQLAttempt
 from app.semantic.models import (
     SemanticDimension,
     SemanticJoin,
@@ -27,6 +28,8 @@ __all__ = [
     "Message",
     "SQLFeedback",
     "UserPattern",
+    "NL2SQLCase",
+    "NL2SQLAttempt",
     "SemanticDimension",
     "SemanticJoin",
     "SemanticMember",
