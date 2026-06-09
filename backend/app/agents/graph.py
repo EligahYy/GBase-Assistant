@@ -64,6 +64,17 @@ def _parse_tool_calls(msg) -> tuple[list[dict] | None, str | None]:
         content = msg.content
         if isinstance(content, str) and content.strip():
             text = content.strip()
+        elif isinstance(content, list):
+            # Some LLMs return content as a list of blocks — join text blocks
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+                elif isinstance(block, str):
+                    parts.append(block)
+            joined = "".join(parts).strip()
+            if joined:
+                text = joined
 
     return tool_calls, text
 
@@ -318,17 +329,45 @@ def _make_unified_agent_node(model: Any, get_tools, get_prompt):
                 "messages": [response],
             }
 
-        # ── No tool calls — fallback: treat as final answer ──
+        # ── No tool calls — fallback: treat as final answer if there's text ──
         if not tool_calls:
             if text:
                 _emit("delta", text)
-            _emit("step_finished", {"agent_name": "unified_agent"})
-            return {
-                "agent_step": step_idx + 1,
-                "agent_finished": True,
-                "final_response": text or "",
-                "messages": [response],
-            }
+                _emit("step_finished", {"agent_name": "unified_agent"})
+                return {
+                    "agent_step": step_idx + 1,
+                    "agent_finished": True,
+                    "final_response": text,
+                    "messages": [response],
+                }
+            # Empty response (no tool_calls, no text) — retry LLM call with guidance
+            # This prevents silent termination when the LLM returns nothing
+            logger.warning("Unified agent returned empty response at step %d — retrying with prompt", step_idx)
+            retry_prompt = HumanMessage(content="请调用 final_answer 工具输出你的回答。如果你已经获得了查询结果，请总结结果；如果遇到错误，请说明发生了什么。")
+            try:
+                retry_messages = messages + [response, retry_prompt]
+                response2 = await _call_llm(model, retry_messages, tool_schemas if tool_schemas else None)
+                tc2, text2 = _parse_tool_calls(response2)
+                if text2:
+                    _emit("delta", text2)
+                _emit("step_finished", {"agent_name": "unified_agent"})
+                return {
+                    "agent_step": step_idx + 1,
+                    "agent_finished": True,
+                    "final_response": text2 or "",
+                    "messages": [response, response2],
+                }
+            except Exception:
+                # If retry also fails, terminate gracefully
+                fallback = "处理完成。如有其他问题，请继续提问。"
+                _emit("delta", fallback)
+                _emit("step_finished", {"agent_name": "unified_agent"})
+                return {
+                    "agent_step": step_idx + 1,
+                    "agent_finished": True,
+                    "final_response": fallback,
+                    "messages": [response],
+                }
 
         # ── Has tool calls (not final_answer) → emit thinking, continue ──
         if text:
@@ -532,7 +571,8 @@ def _make_sql_execution_node(db_connection_id: str):
         _emit("state_delta", {"path": "result", "value": result})
         result_msg = (
             f"```sql\n{sql}\n```\n\n"
-            f"查询完成：共 {result.get('row_count', 0)} 行，耗时 {result.get('execution_time_ms', 0)}ms。"
+            f"查询完成：共 {result.get('row_count', 0)} 行，耗时 {result.get('execution_time_ms', 0)}ms。\n\n"
+            f"请调用 final_answer 向用户展示和分析查询结果。"
         )
         _emit("delta", result_msg)
         return {"sql": sql_state, "messages": [AIMessage(content=result_msg)]}
