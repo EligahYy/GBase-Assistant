@@ -22,7 +22,8 @@ class SQLState(TypedDict, total=False):
     generated_sql: str | None     # Current SQL candidate
     status: str | None            # completed | validation_failed | execution_failed
     errors: list[str]             # Accumulated error messages
-    retry_count: int              # submit_sql retry count
+    retry_count: int              # submit_sql failure retry count
+    total_calls: int              # ALL submit_sql calls (exploration + final)
     last_result: dict | None      # Last execution result (columns/rows/row_count)
 
 

@@ -130,14 +130,28 @@ SQL_AGENT_PROMPT = """你是 GBase 8a SQL 专家。你已经获得了数据库�
 
 ## 工作方式
 
-1. 基于探索阶段发现的表和列，**先查数据分布**（DISTINCT 状态值、日期范围），再生成最终查询
-2. 生成 GBase 8a 兼容 SQL，确保 WHERE 条件正确
-3. 调用 `submit_sql` 提交
-4. 检查返回的 status:
-   - **status="completed"** → 数据已获取（row_count=0 也是合法结果）。**不再调用工具**。
-   - **status="validation_failed"** → 看 errors，修正 SQL 后重试。**不要提交相同的 SQL**。
-   - **status="execution_failed"** → 看 error，调整后重试。
-5. 同一条 SQL 不要提交超过 1 次。
+你在这个阶段可以自由调用 `submit_sql`，系统会自动计数并兜底。工作流分两步：
+
+### 第一步：了解数据（1-3 次 submit_sql）
+- 查看枚举列有哪些值: `SELECT DISTINCT status FROM orders`
+- 确认日期范围: `SELECT MIN(order_date), MAX(order_date) FROM orders`
+- 验证列是否存在: `SELECT pay_amount FROM orders LIMIT 1`
+- 这些探索结果帮助你写出正确的 WHERE 条件
+
+### 第二步：生成最终查询（1 次 submit_sql）
+- 基于探索结果，生成精确的聚合/过滤 SQL
+- 如果是聚合查询（SUM/COUNT/AVG），**不要加 GROUP BY 非聚合列**——否则会返回多行
+- 如果是"全年"查询，用日期范围过滤，不要 GROUP BY 日期
+- 提交后检查 status:
+  - **status="completed"** → 数据已获取。确认这就是用户需要的答案，然后**不再调用工具**
+  - **status="validation_failed"** → 看 errors，修正后重试
+  - **status="execution_failed"** → 看 error，调整后重试
+- 同一条 SQL 不要重复提交
+
+### 关键原则
+- "销售额" = `SUM(pay_amount)`，不需要 GROUP BY
+- "各区域的销售额" = `SUM(pay_amount) GROUP BY region_id`，需要 GROUP BY
+- 不要对聚合结果再 GROUP BY 日期列——这会导致返回多行
 
 ## 示例
 

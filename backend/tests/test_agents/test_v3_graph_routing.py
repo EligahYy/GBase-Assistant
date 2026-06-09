@@ -1,6 +1,6 @@
 """Integration tests for v3.3 Circuit Breaker graph routing."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall
@@ -81,7 +81,7 @@ async def test_circuit_breaker_explore_max_steps():
     # Make search_schemas always return empty
     mock_search = MagicMock()
     mock_search.name = "search_schemas"
-    mock_search.execute = MagicMock(return_value=[])
+    mock_search.execute = AsyncMock(return_value=[])
     mock_search.format_result = MagicMock(return_value={"summary": "未找到相关表。", "detail": None, "truncated": False})
     mock_search.to_openai_schema = lambda: {"type": "function", "function": {"name": "search_schemas", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
 
@@ -114,7 +114,7 @@ async def test_graph_stops_at_total_steps_limit():
     responses = [_tc_msg("search_schemas", {"query": "x"})] * 20
     mock_search = MagicMock()
     mock_search.name = "search_schemas"
-    mock_search.execute = MagicMock(return_value=[MagicMock(table_name="orders")])
+    mock_search.execute = AsyncMock(return_value=[MagicMock(table_name="orders")])
     mock_search.format_result = MagicMock(return_value={"summary": "找到 orders", "detail": None, "truncated": False})
     mock_search.to_openai_schema = lambda: {"type": "function", "function": {"name": "search_schemas", "description": "...", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}
 

@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 # ── Circuit breaker constants ──
 MAX_EXPLORE_STEPS = 5
 MAX_SCHEMA_EMPTY_SEARCHES = 3
-MAX_SQL_RETRIES = 3
+MAX_SQL_RETRIES = 3       # Failed submit_sql retries
+MAX_SQL_CALLS = 8         # Total submit_sql calls (exploration + final)
 MAX_TOTAL_STEPS = 15
 MAX_EMPTY_RESPONSES = 2
 MAX_SAME_TOOL_CALLS = 2
@@ -197,12 +198,15 @@ def _cb_sql_update(cb: dict, result: dict) -> dict:
     """Update SQL-specific CB counters from submit_sql result. Mutates and returns cb."""
     sql_state = {**cb.get("sql", {})}
 
+    # Track ALL submit_sql calls (exploration + final + retries)
+    sql_state["total_calls"] = sql_state.get("total_calls", 0) + 1
+
     if isinstance(result, dict):
         sql_state["status"] = result.get("status", "execution_failed")
         sql_state["generated_sql"] = result.get("sql", sql_state.get("generated_sql"))
         if sql_state["status"] == "completed":
             sql_state["last_result"] = result
-            sql_state["retry_count"] = sql_state.get("retry_count", 0)  # keep, don't increment
+            # Keep retry_count unchanged on success
         else:
             sql_state["retry_count"] = sql_state.get("retry_count", 0) + 1
             errors = sql_state.get("errors", [])
@@ -240,6 +244,8 @@ def _cb_check(state: dict, phase: str) -> str | None:
     if phase == "sql":
         if sql.get("retry_count", 0) >= MAX_SQL_RETRIES:
             return "sql_max_retries"
+        if sql.get("total_calls", 0) >= MAX_SQL_CALLS:
+            return "sql_max_calls"
 
     return None
 
@@ -526,7 +532,7 @@ def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGr
         return "agent"
 
     def route_sql_agent(state: AgentState) -> str:
-        """SQL agent: submit_sql → tools, no tools → advance, CB → answer."""
+        """SQL agent: tool calls → tools_node, otherwise CB check → answer or loop."""
         cb = state.get("cb", {})
         cb_reason = _cb_check(state, "sql")
         if cb_reason:
@@ -536,14 +542,12 @@ def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGr
         tcs = _extract_tool_calls(state)
         if tcs:
             return "tools"
-        # Check if SQL was completed
-        sql_state = cb.get("sql", {})
-        if sql_state.get("status") == "completed":
-            cb["current_phase"] = "answer"
-            cb["cb_reason"] = "normal"
-            return "answer"
-        # No tool calls, no completion → advance
+        # Agent produced no tool calls → it decided it's done. Advance to answer.
+        # Don't auto-advance on sql_status=="completed" — the agent might need
+        # more exploration after a successful query.
         cb["current_phase"] = "answer"
+        if not cb.get("cb_reason"):
+            cb["cb_reason"] = "normal"
         return "answer"
 
     def route_sql_tools(state: AgentState) -> str:
