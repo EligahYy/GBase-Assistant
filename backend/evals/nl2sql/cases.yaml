@@ -1,0 +1,229 @@
+# NL2SQL Eval Cases — v3.3 基线
+# 基于真实 GBase 8a 电商场景数据 (customers, orders, order_items, products, sales_regions)
+
+# 用例格式:
+# - id: 唯一标识
+#   question: 用户自然语言问题
+#   expected:
+#     tables: [必须涉及的表]
+#     columns: [必须涉及的列]
+#     sql_pattern: [SQL 中必须包含的关键词/模式]
+#     row_count: [预期结果行数]
+#   notes: 测试说明
+
+cases:
+  # ═══ 简单聚合查询 ═══
+  - id: "agg_001"
+    question: "查询总共有多少个订单"
+    expected:
+      tables: ["orders"]
+      columns: ["order_id"]
+      sql_pattern: ["COUNT", "orders"]
+      row_count: 1
+
+  - id: "agg_002"
+    question: "2025年全年销售额"
+    expected:
+      tables: ["orders"]
+      columns: ["pay_amount"]
+      sql_pattern: ["SUM", "pay_amount", "order_date"]
+      row_count: 1
+
+  - id: "agg_003"
+    question: "2025年营收是多少"
+    expected:
+      tables: ["orders"]
+      columns: ["pay_amount"]
+      sql_pattern: ["SUM", "pay_amount"]
+      row_count: 1
+
+  - id: "agg_004"
+    question: "平均每笔订单的金额"
+    expected:
+      tables: ["orders"]
+      columns: ["pay_amount"]
+      sql_pattern: ["AVG", "pay_amount"]
+      row_count: 1
+
+  - id: "agg_005"
+    question: "订单最高金额和最低金额"
+    expected:
+      tables: ["orders"]
+      columns: ["pay_amount"]
+      sql_pattern: ["MAX", "MIN", "pay_amount"]
+      row_count: 1
+
+  # ═══ 过滤查询 ═══
+  - id: "filter_001"
+    question: "已取消的订单有哪些"
+    expected:
+      tables: ["orders"]
+      columns: ["status"]
+      sql_pattern: ["SELECT", "WHERE", "cancelled"]
+      row_count: 1
+
+  - id: "filter_002"
+    question: "已完成的订单总金额"
+    expected:
+      tables: ["orders"]
+      columns: ["pay_amount", "status"]
+      sql_pattern: ["SUM", "pay_amount", "WHERE", "delivered"]
+      row_count: 1
+
+  - id: "filter_003"
+    question: "金卡会员的客户列表"
+    expected:
+      tables: ["customers"]
+      columns: ["member_level", "customer_name"]
+      sql_pattern: ["SELECT", "WHERE", "金卡会员"]
+      row_count: 2
+
+  - id: "filter_004"
+    question: "2025年上半年的订单数"
+    expected:
+      tables: ["orders"]
+      columns: ["order_date"]
+      sql_pattern: ["COUNT", "WHERE", "2025-01-01"]
+      row_count: 1
+
+  # ═══ 分组查询 ═══
+  - id: "group_001"
+    question: "各区域的订单数量"
+    expected:
+      tables: ["orders", "sales_regions"]
+      columns: ["region_name", "order_id"]
+      sql_pattern: ["COUNT", "GROUP BY", "region_name"]
+      row_count: 5
+
+  - id: "group_002"
+    question: "各产品分类的平均单价"
+    expected:
+      tables: ["products"]
+      columns: ["category", "unit_price"]
+      sql_pattern: ["AVG", "unit_price", "GROUP BY", "category"]
+      row_count: 5
+
+  - id: "group_003"
+    question: "每个客户的累计消费金额"
+    expected:
+      tables: ["customers"]
+      columns: ["total_amount", "customer_name"]
+      sql_pattern: ["SELECT", "total_amount", "customer_name"]
+      row_count: 10
+
+  - id: "group_004"
+    question: "各会员等级的客户数量"
+    expected:
+      tables: ["customers"]
+      columns: ["member_level"]
+      sql_pattern: ["COUNT", "GROUP BY", "member_level"]
+      row_count: 4
+
+  # ═══ JOIN 查询 ═══
+  - id: "join_001"
+    question: "每个客户的订单明细"
+    expected:
+      tables: ["customers", "orders"]
+      columns: ["customer_name", "order_id"]
+      sql_pattern: ["JOIN", "customer_id"]
+      row_count: 26
+
+  - id: "join_002"
+    question: "各区域销售额排行"
+    expected:
+      tables: ["orders", "sales_regions"]
+      columns: ["region_name", "pay_amount"]
+      sql_pattern: ["SUM", "pay_amount", "GROUP BY", "region_name", "ORDER BY"]
+      row_count: 5
+
+  - id: "join_003"
+    question: "每种产品的销售总量"
+    expected:
+      tables: ["products", "order_items"]
+      columns: ["product_name", "quantity"]
+      sql_pattern: ["SUM", "quantity", "GROUP BY", "product_name"]
+      row_count: 10
+
+  # ═══ 排序/分页查询 ═══
+  - id: "order_001"
+    question: "销售额最高的前5个产品"
+    expected:
+      tables: ["products", "order_items"]
+      columns: ["product_name", "subtotal"]
+      sql_pattern: ["SUM", "subtotal", "ORDER BY", "DESC", "LIMIT 5"]
+      row_count: 5
+
+  - id: "order_002"
+    question: "注册最早的前3个客户"
+    expected:
+      tables: ["customers"]
+      columns: ["registered_at"]
+      sql_pattern: ["ORDER BY", "ASC", "LIMIT 3"]
+      row_count: 3
+
+  # ═══ 时间表达式 ═══
+  - id: "time_001"
+    question: "25年全年销售额"
+    expected:
+      tables: ["orders"]
+      columns: ["pay_amount", "order_date"]
+      sql_pattern: ["SUM", "pay_amount", "2025-01-01", "2026-01-01"]
+      row_count: 1
+
+  - id: "time_002"
+    question: "2025年3月的订单量"
+    expected:
+      tables: ["orders"]
+      columns: ["order_date"]
+      sql_pattern: ["COUNT", "2025-03-01", "2025-04-01"]
+      row_count: 1
+
+  # ═══ 术语映射 ═══
+  - id: "term_001"
+    question: "查营收"
+    expected:
+      tables: ["orders"]
+      columns: ["pay_amount"]
+      sql_pattern: ["SUM", "pay_amount"]
+      row_count: 1
+
+  - id: "term_002"
+    question: "爆款产品有哪些"
+    expected:
+      tables: ["products", "order_items"]
+      columns: ["quantity"]
+      sql_pattern: ["SUM", "quantity", "ORDER BY", "DESC"]
+      row_count: 10
+
+  - id: "term_003"
+    question: "等待付款的订单"
+    expected:
+      tables: ["orders"]
+      columns: ["status"]
+      sql_pattern: ["SELECT", "WHERE", "pending"]
+      row_count: 1
+
+  # ═══ 复杂语义 ═══
+  - id: "complex_001"
+    question: "华东区域钻石会员的订单总额"
+    expected:
+      tables: ["customers", "orders", "sales_regions"]
+      columns: ["pay_amount", "member_level", "region_name"]
+      sql_pattern: ["SUM", "pay_amount", "JOIN", "钻石会员", "华东"]
+      row_count: 1
+
+  - id: "complex_002"
+    question: "深圳智能硬件供应的产品中卖得最好的是哪个"
+    expected:
+      tables: ["products", "order_items"]
+      columns: ["supplier", "quantity"]
+      sql_pattern: ["SUM", "quantity", "深圳智能硬件", "LIMIT 1"]
+      row_count: 1
+
+  - id: "complex_003"
+    question: "今年新增客户中消费金额最高的前3名"
+    expected:
+      tables: ["customers", "orders"]
+      columns: ["registered_at", "pay_amount"]
+      sql_pattern: ["SUM", "pay_amount", "2025-01-01", "LIMIT 3"]
+      row_count: 3
