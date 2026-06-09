@@ -10,15 +10,9 @@ from langgraph.graph.message import add_messages
 
 
 class SQLAgentState(TypedDict, total=False):
-    """SQL Agent-specific state — shared between unified agent and SQL gates."""
+    """SQL Agent-specific state — minimal tracking for schema grounding."""
 
-    generated_sql: str | None
-    grounded_schemas: list
-    validation: dict | None
-    query_result: dict | None
-    execution_error: str | None
-    retry_count: int
-    phase: str  # idle → proposed → validated → completed | validation_failed | execution_failed
+    grounded_schemas: list  # Schema exploration results for the validator
 
 
 class KnowledgeAgentState(TypedDict, total=False):

@@ -134,9 +134,33 @@ def _make_mock_schema_tool(name: str, description: str):
     return mock
 
 
+def _make_mock_submit_sql():
+    """Create a mock SubmitSQLTool that returns the expected result atomically."""
+    mock = MagicMock()
+    mock.name = "submit_sql"
+    mock.execute = AsyncMock(return_value={
+        "status": "completed",
+        "sql": "SELECT SUM(pay_amount) AS total_sales FROM orders WHERE order_date >= '2025-01-01' AND order_date < '2026-01-01' AND status IN ('paid','shipped','delivered')",
+        "columns": ["total_sales"],
+        "rows": [[57246.00]],
+        "row_count": 1,
+        "execution_time_ms": 45.30,
+        "truncated": False,
+    })
+    mock.format_result = MagicMock(return_value={
+        "summary": "SQL 执行成功：共 1 行，耗时 45.3ms。请调用 final_answer 向用户展示和分析查询结果。",
+        "detail": {"sql": "...", "columns": ["total_sales"], "rows": [[57246.00]], "row_count": 1, "status": "completed"},
+        "truncated": False,
+    })
+    mock.to_openai_schema = lambda: {
+        "type": "function", "function": {"name": "submit_sql", "description": "Submit SQL for atomic validation+execution",
+        "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]}}
+    }
+    return mock
+
+
 def _make_mock_tools():
     """Return a list of mocked tools that match what get_unified_agent_tools produces."""
-    from app.agents.tools.sql_tools import SubmitSQLTool
     from app.agents.agents.unified_agent import FinalAnswerTool
 
     tools = [
@@ -144,7 +168,7 @@ def _make_mock_tools():
         _make_mock_schema_tool("get_table_profile", "Get table column details"),
         _make_mock_schema_tool("find_join_path", "Find JOIN path between tables"),
         MockExecuteSQLTool(),
-        SubmitSQLTool(),
+        _make_mock_submit_sql(),
         FinalAnswerTool(),
     ]
     return tools
@@ -168,7 +192,7 @@ async def test_diagnose_full_sql_chain(capsys):
     with (
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=llm),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.agents.graph.ExecuteSQLTool", new=MockExecuteSQLTool),
+        patch("app.agents.tools.sql_tools.ExecuteSQLTool", new=MockExecuteSQLTool),
         patch("app.agents.graph.get_unified_agent_tools", return_value=_make_mock_tools()),
     ):
         graph = build_graph(db_connection_id="mock-db-1")

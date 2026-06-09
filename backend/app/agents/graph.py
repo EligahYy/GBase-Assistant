@@ -1,7 +1,8 @@
 """LangGraph 图构建和运行 — v3.2 Unified ReAct Agent + token 级流式输出。
 
-v3.2 架构: 统一 Agent（全工具集）+ 确定性 SQL Gate + Knowledge Pipeline
+v3.2 架构: 统一 Agent（全工具集，submit_sql 原子化）
 - 无独立 Supervisor/router —— Prompt + Tools 本身就是路由机制
+- submit_sql 内部完成 validate+execute，结果直返 Agent
 - final_answer 工具提供显式终止信号（防无限循环）
 - 循环检测 + 三级终止策略（防硬终止丢失进展）
 """
@@ -18,10 +19,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.agents.knowledge_agent import make_knowledge_node
 from app.agents.agents.unified_agent import get_unified_agent_prompt, get_unified_agent_tools
 from app.agents.state import AgentState
-from app.agents.tools.sql_tools import ExecuteSQLTool
 from app.gateway.ag_ui_encoder import EventEncoder
 from app.llm.adapter import LiteLLMChatAdapter
 
@@ -392,7 +391,7 @@ def _make_unified_tools_node(tools: list[Any]):
     """Create a tool execution node for the unified agent.
 
     Reads tool_calls from the last message, executes, emits events.
-    Updates sql state for schema/sql tools.
+    For submit_sql, emits STATE_DELTA with SQL/result for frontend display.
     """
 
     tool_map = {t.name: t for t in tools if hasattr(t, "name")}
@@ -429,16 +428,34 @@ def _make_unified_tools_node(tools: list[Any]):
                 formatted = tool.format_result(result) if hasattr(tool, "format_result") else {"summary": str(result)[:200]}
                 _emit("tool_call_result", {"name": tool_name, "result": formatted})
 
-                # Update SQL state for schema/sql tools
-                sql_state = {**state.get("sql", {})}
+                # Emit STATE_DELTA for submit_sql results (frontend needs structured data)
+                if tool_name == "submit_sql" and isinstance(result, dict):
+                    sql = result.get("sql", "")
+                    status = result.get("status", "")
+                    if status == "completed":
+                        _emit("state_delta", {"path": "sql", "value": {
+                            "sql": sql, "validation": {"valid": True, "errors": [], "warnings": []}
+                        }})
+                        _emit("state_delta", {"path": "result", "value": {
+                            "columns": result.get("columns", []),
+                            "rows": result.get("rows", []),
+                            "row_count": result.get("row_count", 0),
+                            "execution_time_ms": result.get("execution_time_ms", 0),
+                            "truncated": result.get("truncated", False),
+                        }})
+                    elif status == "validation_failed":
+                        _emit("state_delta", {"path": "sql", "value": {
+                            "sql": sql, "validation": {
+                                "valid": False,
+                                "errors": result.get("errors", []),
+                                "warnings": result.get("warnings", []),
+                            }
+                        }})
+
+                # Save schema grounding result for state
                 if tool_name == "search_schemas":
+                    sql_state = {**state.get("sql", {})}
                     sql_state["grounded_schemas"] = result
-                    state_update["sql"] = sql_state
-                elif tool_name == "submit_sql":
-                    sql_state.update({
-                        "generated_sql": result.get("sql", "") if isinstance(result, dict) else "",
-                        "phase": "proposed",
-                    })
                     state_update["sql"] = sql_state
 
                 # Build LLM context
@@ -468,131 +485,19 @@ def _make_unified_tools_node(tools: list[Any]):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# SQL validation & execution gates (unchanged from v3.1)
-# ═══════════════════════════════════════════════════════════════════════════════════
-
-def _make_sql_validation_node():
-    """Create the deterministic SQL validation gate."""
-
-    async def node_fn(state: AgentState) -> dict:
-        from app.sql.sandbox import SQLSandbox, SQLSandboxError
-        from app.sql.validator import validate_sql
-
-        sql_state = {**state.get("sql", {})}
-        sql = str(sql_state.get("generated_sql") or "")
-        schemas = sql_state.get("grounded_schemas") or None
-        result = validate_sql(sql, schemas=schemas)
-        safety_errors: list[str] = []
-        try:
-            SQLSandbox._validate_first_word(sql)
-            SQLSandbox._validate_ast(sql)
-            SQLSandbox._validate_single_statement(sql)
-        except SQLSandboxError as exc:
-            safety_errors.append(str(exc))
-        validation = {
-            "valid": result.is_valid and not safety_errors,
-            "errors": [*safety_errors, *result.errors],
-            "warnings": result.warnings,
-        }
-        sql_state["validation"] = validation
-        _emit("state_delta", {"path": "sql", "value": {"sql": sql, "validation": validation}})
-
-        if validation["valid"]:
-            sql_state["phase"] = "validated"
-            sql_state["execution_error"] = None
-            return {"sql": sql_state}
-
-        retry_count = sql_state.get("retry_count", 0) + 1
-        sql_state.update({
-            "phase": "validation_failed",
-            "retry_count": retry_count,
-            "execution_error": "；".join(validation["errors"]) or "SQL 验证失败",
-        })
-        if retry_count >= 3:
-            diagnostics = (
-                f"SQL 在 3 次尝试后仍未通过验证。\n"
-                f"错误：{sql_state['execution_error']}\n"
-                f"建议：请检查表名和列名是否正确，或简化查询条件。"
-            )
-            _emit("delta", diagnostics)
-            return {"sql": sql_state, "agent_finished": True, "messages": [AIMessage(content=diagnostics)]}
-        feedback = (
-            "确定性 SQL 验证失败，请修正后重新调用 submit_sql。"
-            f"\n错误：{sql_state['execution_error']}"
-        )
-        return {"sql": sql_state, "messages": [HumanMessage(content=feedback)]}
-
-    return node_fn
-
-
-def _make_sql_execution_node(db_connection_id: str):
-    """Create the deterministic SQL execution gate.
-
-    On success: returns result to the agent so it can call final_answer.
-    On error: returns feedback to the agent so it can fix and retry (up to 3x total).
-    Only sets agent_finished when retries are exhausted.
-    """
-
-    async def node_fn(state: AgentState) -> dict:
-        sql_state = {**state.get("sql", {})}
-        sql = str(sql_state.get("generated_sql") or "")
-        tool = ExecuteSQLTool(db_connection_id=db_connection_id)
-        result = await tool.execute(sql=sql)
-
-        if isinstance(result, dict) and result.get("error"):
-            retry_count = sql_state.get("retry_count", 0) + 1
-            sql_state.update({
-                "phase": "execution_failed",
-                "retry_count": retry_count,
-                "execution_error": str(result["error"]),
-            })
-            if retry_count >= 3:
-                diagnostics = (
-                    f"SQL 执行在 3 次尝试后仍然失败。\n"
-                    f"错误：{result['error']}\n"
-                    f"生成的 SQL：\n```sql\n{sql}\n```\n"
-                    f"建议：请检查数据库连接和表结构是否正确。"
-                )
-                _emit("delta", diagnostics)
-                return {"sql": sql_state, "agent_finished": True, "messages": [AIMessage(content=diagnostics)]}
-            feedback = (
-                f"SQL 执行失败：{result['error']}\n"
-                f"生成的 SQL：\n```sql\n{sql}\n```\n"
-                f"请修正后重新调用 submit_sql。已尝试 {retry_count}/3 次。"
-            )
-            return {"sql": sql_state, "messages": [HumanMessage(content=feedback)]}
-
-        # Success — return result to agent for final_answer, DON'T terminate
-        sql_state.update({
-            "phase": "completed",
-            "query_result": result,
-            "execution_error": None,
-        })
-        _emit("state_delta", {"path": "result", "value": result})
-        result_msg = (
-            f"```sql\n{sql}\n```\n\n"
-            f"查询完成：共 {result.get('row_count', 0)} 行，耗时 {result.get('execution_time_ms', 0)}ms。\n\n"
-            f"请调用 final_answer 向用户展示和分析查询结果。"
-        )
-        _emit("delta", result_msg)
-        return {"sql": sql_state, "messages": [AIMessage(content=result_msg)]}
-
-    return node_fn
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════
-# Graph builder — v3.2 Unified Agent
+# Graph builder — v3.2 Unified Agent (atomic submit_sql)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGraph:
-    """Build the v3.2 Unified ReAct Agent graph.
+    """Build the v3.2 Unified ReAct Agent graph (atomic submit_sql).
 
-    Graph structure (5 nodes):
+    Graph structure (2 nodes):
         START → unified_agent ⇄ unified_tools
-                   │                │
-                   │           submit_sql → sql_validate → sql_execute → unified_agent
                    │
                    └── final_answer / agent_finished → END
+
+    submit_sql is now atomic — validate + execute happen inside the tool.
+    No dedicated gate nodes needed.
     """
     from app.dependencies import get_llm_client
 
@@ -608,13 +513,11 @@ def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGr
         agent_llm, _get_tools, get_unified_agent_prompt,
     ))
     builder.add_node("unified_tools", _make_unified_tools_node(_get_tools()))
-    builder.add_node("sql_validate", _make_sql_validation_node())
-    builder.add_node("sql_execute", _make_sql_execution_node(db_connection_id))
 
     # ── Routing ──
 
     def route_unified_agent(state: AgentState) -> str:
-        """Route from unified_agent: final_answer/finished → END, any tool calls → tools_node."""
+        """Route from agent: final_answer/finished → END, tool calls → tools_node."""
         if state.get("agent_finished"):
             return "end"
 
@@ -628,32 +531,10 @@ def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGr
         if not tcs:
             return "end"
 
-        tc_names = [tc["name"] for tc in tcs]
-
-        if "final_answer" in tc_names:
+        if any(tc["name"] == "final_answer" for tc in tcs):
             return "end"
 
-        # All other tool calls (including submit_sql) go through tools_node
-        # so the sql state gets populated before validation
         return "tools"
-
-    def route_after_tools(state: AgentState) -> str:
-        """After tools: submit_sql → validate, else back to agent."""
-        sql_state = state.get("sql", {})
-        if sql_state.get("phase") == "proposed":
-            return "validate"
-        return "agent"
-
-    def route_after_validate(state: AgentState) -> str:
-        """After SQL validation: valid → execute, max retries → agent (final_answer), else → agent (retry)."""
-        sql_state = state.get("sql", {})
-        if sql_state.get("validation", {}).get("valid"):
-            return "execute"
-        return "agent"  # Agent receives error feedback and can retry or final_answer
-
-    def route_after_execute(state: AgentState) -> str:
-        """After SQL execution: always back to agent (for final_answer)."""
-        return "agent"
 
     # ── Edges ──
     builder.add_edge(START, "unified_agent")
@@ -663,19 +544,8 @@ def build_graph(db_connection_id: str = "", model: str | None = None) -> StateGr
         "end": END,
     })
 
-    builder.add_conditional_edges("unified_tools", route_after_tools, {
-        "validate": "sql_validate",
-        "agent": "unified_agent",
-    })
-
-    builder.add_conditional_edges("sql_validate", route_after_validate, {
-        "execute": "sql_execute",
-        "agent": "unified_agent",
-    })
-
-    builder.add_conditional_edges("sql_execute", route_after_execute, {
-        "agent": "unified_agent",
-    })
+    # Tools always loop back to agent — submit_sql now returns result directly
+    builder.add_edge("unified_tools", "unified_agent")
 
     return builder.compile(checkpointer=MemorySaver())
 

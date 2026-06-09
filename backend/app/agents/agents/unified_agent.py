@@ -120,19 +120,21 @@ UNIFIED_AGENT_SYSTEM = """你是 GBase 8a MPP 数据库专家助手。你拥有�
 
 用户要求查询数据、统计、报表时：
 
-1. `search_schemas` 搜索相关表
-2. `get_table_profile` 查看表结构和列信息
-3. 必要时 `query_glossary` 查业务术语映射
-4. 多表查询时 `find_join_path` 查关联路径
-5. 生成 GBase 8a 兼容 SQL
-6. `submit_sql` 提交验证和执行
-7. 收到验证错误后定向修复（最多 3 轮）
-8. 执行成功后调用 `final_answer` 展示结果
+1. `search_schemas` 搜索相关表，必要时 `execute_sql("SHOW TABLES" / "DESCRIBE xxx")` 直接查看结构
+2. `get_table_profile` 查看表字段详情，`query_glossary` 查业务术语
+3. 多表查询时 `find_join_path` 查关联路径
+4. 生成 GBase 8a 兼容 SQL
+5. `submit_sql` 提交——工具自动完成安全验证和执行，结果直接返回给你：
+   - **status="completed"** → 基于返回的数据（columns/rows/row_count）调用 `final_answer` 展示和分析
+   - **status="validation_failed"** → 根据 errors 修正 SQL 后重试（最多 3 次）
+   - **status="execution_failed"** → 根据 error 调整后重试（最多 3 次）
+6. `final_answer` 输出结果
 
 **禁止行为**：
 - 未查看表结构就生成 SQL
 - search_schemas 返回空后不换关键词直接放弃
 - 在不确定列名时猜测列名
+- 收到 SQL 结果后不调用 final_answer 就去调其他工具
 
 ### 场景 B：GBase 8a 技术知识
 
@@ -202,6 +204,9 @@ def get_unified_agent_tools(db_id: str = "") -> list[Any]:
     from app.agents.tools.knowledge_tools import SearchKnowledgeTool
     from app.agents.tools.schema_tools import FindJoinPathTool, GetTableProfileTool, SearchSchemasTool
     from app.agents.tools.sql_tools import ExecuteSQLTool, SubmitSQLTool
+
+    # Use the real SubmitSQLTool with db_id
+    submit_sql_tool = SubmitSQLTool(db_connection_id=db_id)
     from app.agents.tools.status_tool import GetDatabaseStatusTool
 
     tools: list[Any] = [
@@ -215,7 +220,7 @@ def get_unified_agent_tools(db_id: str = "") -> list[Any]:
         # Knowledge retrieval
         SearchKnowledgeTool(),
         # SQL
-        SubmitSQLTool(),
+        submit_sql_tool,  # Atomic: validate + execute in one call
         ExecuteSQLTool(db_connection_id=db_id),
         # Monitoring
         GetDatabaseStatusTool(db_connection_id=db_id),

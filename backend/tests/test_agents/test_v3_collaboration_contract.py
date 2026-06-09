@@ -1,4 +1,4 @@
-"""Behavior contracts for the v3.2 Unified Agent framework."""
+"""Behavior contracts for the v3.2 Unified Agent framework (atomic submit_sql)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,8 +12,6 @@ from app.protocols import KnowledgeChunk
 
 
 class SequencedAdapter:
-    """Minimal LLM adapter that records prompts and returns scripted responses."""
-
     def __init__(self, responses: list[AIMessage]) -> None:
         self.responses = responses
         self.calls: list[list] = []
@@ -31,10 +29,7 @@ def _tool_call(name: str, args: dict) -> AIMessage:
 
 
 def _final_answer(answer: str, sources: list[str] | None = None) -> AIMessage:
-    return AIMessage(
-        content="",
-        tool_calls=[ToolCall(name="final_answer", args={"answer": answer, "sources": sources or []}, id="call_fa")],
-    )
+    return AIMessage(content="", tool_calls=[ToolCall(name="final_answer", args={"answer": answer, "sources": sources or []}, id="call_fa")])
 
 
 def _state(message: str, db_connection_id: str | None = "db-1") -> dict:
@@ -48,34 +43,39 @@ def _state(message: str, db_connection_id: str | None = "db-1") -> dict:
     }
 
 
-def _mock_tools_for_test(tool_names: list[str]):
-    """Return a minimal tool list containing only mocked tools for the given names.
-
-    Each tool is a MagicMock with .name, .to_openai_schema(), .execute(), and .format_result().
-    """
-    from app.agents.tools.sql_tools import ExecuteSQLTool, SubmitSQLTool
-    from app.agents.tools.knowledge_tools import SearchKnowledgeTool
-
-    TOOL_CLASSES = {
-        "submit_sql": SubmitSQLTool,
-        "search_knowledge": SearchKnowledgeTool,
-        "final_answer": None,  # handled separately — needs special execute
+def _make_mock_submit_sql(status="completed", **overrides):
+    """Create a mock SubmitSQLTool that returns the given atomic result."""
+    base = {
+        "status": status,
+        "sql": overrides.get("sql", "SELECT id FROM orders"),
+        "columns": overrides.get("columns", ["id"]),
+        "rows": overrides.get("rows", [[1], [2], [3]]),
+        "row_count": overrides.get("row_count", 3),
+        "execution_time_ms": overrides.get("execution_time_ms", 2.0),
+        "truncated": False,
     }
+    if status == "validation_failed":
+        base = {"status": status, "sql": overrides.get("sql", "DELETE FROM orders"), "errors": overrides.get("errors", ["禁止执行 DELETE 语句"]), "warnings": []}
+    if status == "execution_failed":
+        base = {"status": status, "sql": overrides.get("sql", "SELECT * FROM nonexistent"), "error": overrides.get("error", "表不存在")}
 
-    tools = []
-    for name in tool_names:
-        if name == "final_answer":
-            from app.agents.agents.unified_agent import FinalAnswerTool
-            tools.append(FinalAnswerTool())
-        elif name in TOOL_CLASSES:
-            cls = TOOL_CLASSES[name]
-            if cls:
-                tools.append(cls())
-    return tools
+    mock = MagicMock()
+    mock.name = "submit_sql"
+    mock.execute = AsyncMock(return_value=base)
+
+    def _fmt(result):
+        s = result.get("status", "")
+        if s == "completed":
+            return {"summary": f"SQL 执行成功：共 {result.get('row_count', 0)} 行。请调用 final_answer。", "detail": result, "truncated": False}
+        if s == "validation_failed":
+            return {"summary": f"SQL 验证失败：{result.get('errors', [])}", "detail": result, "truncated": False}
+        return {"summary": f"SQL 执行失败：{result.get('error', '')}", "detail": result, "truncated": False}
+    mock.format_result = MagicMock(side_effect=_fmt)
+    mock.to_openai_schema = lambda: {"type": "function", "function": {"name": "submit_sql", "description": "Atomic SQL", "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]}}}
+    return mock
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
+# ── Helpers ──
 
 def test_build_conversation_messages_includes_history_without_duplicate_current_message():
     history = [
@@ -83,114 +83,75 @@ def test_build_conversation_messages_includes_history_without_duplicate_current_
         {"role": "assistant", "content": "华东事业部最高"},
         {"role": "user", "content": "只看华东地区"},
     ]
-
     messages = _build_conversation_messages(history, "只看华东地区")
-
-    assert [m.content for m in messages] == [
-        "查询销售额最高的部门",
-        "华东事业部最高",
-        "只看华东地区",
-    ]
+    assert [m.content for m in messages] == ["查询销售额最高的部门", "华东事业部最高", "只看华东地区"]
 
 
 def test_knowledge_query_expansion_matches_terms_inside_natural_language():
     expanded = expand_knowledge_query("如何创建随机分布表？")
-
     assert "随机分布" in expanded
     assert "DISTRIBUTED" in expanded
 
 
-# ── v3.2 Unified Agent Contracts ───────────────────────────────────────────────
-
+# ── v3.2 Atomic SubmitSQL Contracts ──
 
 @pytest.mark.asyncio
-async def test_sql_is_validated_before_deterministic_execution():
-    """SQL submit_sql → validation gate → execution gate (deterministic, unchanged from v3.1)."""
-    from app.agents.tools.sql_tools import SubmitSQLTool
-
-    adapter = SequencedAdapter(
-        [
-            _tool_call("submit_sql", {"sql": "SELECT id FROM orders"}),
-            _final_answer("查询完成：3 行数据"),
-        ]
-    )
-    execution = MagicMock()
-    execution.execute = AsyncMock(
-        return_value={
-            "columns": ["id"],
-            "rows": [[1]],
-            "row_count": 1,
-            "execution_time_ms": 2.0,
-            "truncated": False,
-        }
-    )
+async def test_submit_sql_returns_completed_result():
+    """Atomic submit_sql returns status=completed → agent calls final_answer."""
+    mock_tool = _make_mock_submit_sql("completed", sql="SELECT id FROM orders", row_count=3)
+    adapter = SequencedAdapter([
+        _tool_call("submit_sql", {"sql": "SELECT id FROM orders"}),
+        _final_answer("查询完成：共 3 行数据"),
+    ])
 
     with (
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.agents.graph.ExecuteSQLTool", return_value=execution),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[mock_tool]),
     ):
         graph = build_graph(db_connection_id="db-1")
-        result = await graph.ainvoke(_state("查询订单"), {"configurable": {"thread_id": "contract-sql"}})
+        result = await graph.ainvoke(_state("查询订单"), {"configurable": {"thread_id": "atomic-sql"}})
 
-    execution.execute.assert_awaited_once_with(sql="SELECT id FROM orders")
-    assert result["sql"]["validation"]["valid"] is True
-    assert result["sql"]["query_result"]["row_count"] == 1
-    assert result["sql"]["generated_sql"] == "SELECT id FROM orders"
+    mock_tool.execute.assert_awaited_once_with(sql="SELECT id FROM orders")
+    assert result["agent_finished"] is True
+    assert result["final_response"] == "查询完成：共 3 行数据"
 
 
 @pytest.mark.asyncio
-async def test_invalid_sql_never_reaches_execution_gate():
-    """DELETE FROM orders → validation fails → never reaches execute."""
-    from app.agents.tools.sql_tools import SubmitSQLTool
-
-    adapter = SequencedAdapter(
-        [
-            _tool_call("submit_sql", {"sql": "DELETE FROM orders"}),
-            _final_answer("无法执行 DELETE 操作，GBase 8a 只支持只读查询。"),
-        ]
-    )
-    execution = MagicMock()
-    execution.execute = AsyncMock()
+async def test_submit_sql_validation_failed_returns_error():
+    """Atomic submit_sql returns status=validation_failed → agent sees error, retries or gives up."""
+    mock_tool = _make_mock_submit_sql("validation_failed", sql="DELETE FROM orders", errors=["禁止执行 DELETE 语句"])
+    adapter = SequencedAdapter([
+        _tool_call("submit_sql", {"sql": "DELETE FROM orders"}),
+        _final_answer("无法执行 DELETE 操作，GBase 8a 只支持只读查询。"),
+    ])
 
     with (
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.agents.graph.ExecuteSQLTool", return_value=execution),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool()]),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[mock_tool]),
     ):
         graph = build_graph(db_connection_id="db-1")
-        result = await graph.ainvoke(_state("删除订单"), {"configurable": {"thread_id": "contract-invalid"}})
+        result = await graph.ainvoke(_state("删除订单"), {"configurable": {"thread_id": "atomic-invalid"}})
 
-    execution.execute.assert_not_awaited()
-    assert result["sql"]["validation"]["valid"] is False
-    assert result["sql"]["execution_error"]
+    # Agent should have received the validation_failed result and responded
+    assert result["agent_finished"] is True
+    assert result["final_response"] is not None
 
 
 @pytest.mark.asyncio
 async def test_knowledge_search_returns_chunks_with_status():
-    """search_knowledge → agent reads chunks + status → final_answer with sources."""
+    """search_knowledge → agent reads chunks + status → final_answer."""
     from app.agents.tools.knowledge_tools import SearchKnowledgeTool
 
-    adapter = SequencedAdapter(
-        [
-            _tool_call("search_knowledge", {"query": "如何创建随机分布表？"}),
-            _final_answer(
-                "不指定 DISTRIBUTED BY 子句即可创建随机分布表。",
-                sources=["5.1.8.2.1 CREATE TABLE"],
-            ),
-        ]
-    )
+    adapter = SequencedAdapter([
+        _tool_call("search_knowledge", {"query": "如何创建随机分布表？"}),
+        _final_answer("不指定 DISTRIBUTED BY 子句即可创建随机分布表。", sources=["5.1.8.2.1 CREATE TABLE"]),
+    ])
     retriever = MagicMock()
-    retriever.retrieve = AsyncMock(
-        return_value=[
-            KnowledgeChunk(
-                content="如果不指定 DISTRIBUTED BY 和 REPLICATED，则默认创建随机分布表。",
-                source="5.1.8.2.1 CREATE TABLE",
-            )
-        ]
-    )
+    retriever.retrieve = AsyncMock(return_value=[
+        KnowledgeChunk(content="如果不指定 DISTRIBUTED BY 和 REPLICATED，则默认创建随机分布表。", source="5.1.8.2.1 CREATE TABLE")
+    ])
 
     with (
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
@@ -211,46 +172,25 @@ async def test_knowledge_search_returns_chunks_with_status():
 
 @pytest.mark.asyncio
 async def test_unified_agent_handles_multi_intent_query():
-    """'查询订单数量，并解释分布表' → agent searches schema AND knowledge → final_answer."""
+    """'查询订单数量，并解释分布表' → agent uses submit_sql + search_knowledge → final_answer."""
     from app.agents.tools.knowledge_tools import SearchKnowledgeTool
-    from app.agents.tools.sql_tools import SubmitSQLTool
 
-    adapter = SequencedAdapter(
-        [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    ToolCall(name="submit_sql", args={"sql": "SELECT COUNT(*) AS cnt FROM orders"}, id="call_sql"),
-                    ToolCall(name="search_knowledge", args={"query": "分布表"}, id="call_know"),
-                ],
-            ),
-            _final_answer(
-                "查询结果：共 3 条订单。\n\n分布表按分布键分散存储。[manual]",
-                sources=["manual"],
-            ),
-        ]
-    )
-    execution = MagicMock()
-    execution.execute = AsyncMock(
-        return_value={
-            "columns": ["cnt"],
-            "rows": [[3]],
-            "row_count": 1,
-            "execution_time_ms": 1.0,
-            "truncated": False,
-        }
-    )
-    retriever = MagicMock()
-    retriever.retrieve = AsyncMock(return_value=[
-        KnowledgeChunk(content="分布表...", source="manual"),
+    mock_sql = _make_mock_submit_sql("completed", sql="SELECT COUNT(*) AS cnt FROM orders", columns=["cnt"], rows=[[3]], row_count=1)
+    adapter = SequencedAdapter([
+        AIMessage(content="", tool_calls=[
+            ToolCall(name="submit_sql", args={"sql": "SELECT COUNT(*) AS cnt FROM orders"}, id="call_sql"),
+            ToolCall(name="search_knowledge", args={"query": "分布表"}, id="call_know"),
+        ]),
+        _final_answer("查询结果：共 3 条订单。\n\n分布表按分布键分散存储。[manual]", sources=["manual"]),
     ])
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(return_value=[KnowledgeChunk(content="分布表...", source="manual")])
 
     with (
         patch("app.agents.graph.LiteLLMChatAdapter", return_value=adapter),
         patch("app.dependencies.get_llm_client", return_value=MagicMock()),
-        patch("app.agents.graph.ExecuteSQLTool", return_value=execution),
         patch("app.dependencies.get_knowledge_retriever", return_value=retriever),
-        patch("app.agents.graph.get_unified_agent_tools", return_value=[SubmitSQLTool(), SearchKnowledgeTool()]),
+        patch("app.agents.graph.get_unified_agent_tools", return_value=[mock_sql, SearchKnowledgeTool()]),
     ):
         graph = build_graph(db_connection_id="db-1")
         result = await graph.ainvoke(
@@ -258,7 +198,7 @@ async def test_unified_agent_handles_multi_intent_query():
             {"configurable": {"thread_id": "contract-multi"}},
         )
 
-    assert result["sql"]["query_result"]["row_count"] == 1
+    assert result["agent_finished"] is True
     assert result["final_response"] is not None
 
 
@@ -273,10 +213,7 @@ async def test_final_answer_terminates_agent():
         patch("app.agents.graph.get_unified_agent_tools", return_value=[]),
     ):
         graph = build_graph()
-        result = await graph.ainvoke(
-            _state("你好", db_connection_id=None),
-            {"configurable": {"thread_id": "contract-fa"}},
-        )
+        result = await graph.ainvoke(_state("你好", db_connection_id=None), {"configurable": {"thread_id": "contract-fa"}})
 
     assert result["agent_finished"] is True
     assert result["final_response"] == "你好！有什么可以帮你的？"
@@ -291,6 +228,5 @@ def test_build_graph_applies_user_selected_model():
     ):
         build_graph(db_connection_id="db-1", model="openai/gpt-4o")
 
-    # v3.2: single LLM client for unified agent (was 4 in v3.1)
     assert get_client.call_count == 1
     assert get_client.call_args.kwargs["model"] == "openai/gpt-4o"
