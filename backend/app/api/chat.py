@@ -12,7 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+import os
+
 from app.agents.graph import run_agent_with_ag_ui
+
+_NL2SQL_GRAPH_VERSION = os.getenv("NL2SQL_GRAPH_VERSION", "v3_3")
 from app.database import get_db
 from app.models.conversation import Conversation
 from app.schemas.chat import BatchRequest, ChatRequest, ConversationResponse, FolderResponse
@@ -65,12 +69,21 @@ async def chat_stream(
     except Exception as e:
         logger.warning("Failed to persist user message before stream: %s", e)
 
-    event_stream = run_agent_with_ag_ui(
-        user_message=request.message,
-        conversation_id=conversation_id,
-        model=request.model or "deepseek/deepseek-chat",
-        db_connection_id=request.db_connection_id,
-    )
+    if _NL2SQL_GRAPH_VERSION == "v3_4_semantic":
+        from app.agents.nl2sql_graph import run_nl2sql_agent
+        event_stream = run_nl2sql_agent(
+            user_message=request.message,
+            conversation_id=conversation_id,
+            model=request.model or "deepseek/deepseek-chat",
+            db_connection_id=request.db_connection_id,
+        )
+    else:
+        event_stream = run_agent_with_ag_ui(
+            user_message=request.message,
+            conversation_id=conversation_id,
+            model=request.model or "deepseek/deepseek-chat",
+            db_connection_id=request.db_connection_id,
+        )
 
     async def persistent_stream():
         full_text = ""
