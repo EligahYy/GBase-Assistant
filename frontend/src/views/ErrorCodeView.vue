@@ -199,13 +199,13 @@ function categoryLabel(cat: string): string {
 <style scoped>
 .errorcode-page {
   height: 100vh; display: flex; flex-direction: column; overflow: hidden;
-  background: #fafafa;
+  background: var(--bg-page);
 }
 
 .errorcode-header {
   display: flex; align-items: center; gap: 12px;
   padding: 0 24px; height: 48px;
-  border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0;
+  border-bottom: 1px solid var(--border-card); background: var(--bg-header); flex-shrink: 0;
 }
 .back-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -215,7 +215,7 @@ function categoryLabel(cat: string): string {
   cursor: pointer; transition: all var(--duration-fast);
 }
 .back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
-.header-title { font-size: 15px; font-weight: 600; color: #111; }
+.header-title { font-size: 15px; font-weight: 600; color: var(--text-brand); }
 
 .errorcode-main {
   flex: 1; min-width: 0; overflow-y: auto;
@@ -224,19 +224,19 @@ function categoryLabel(cat: string): string {
 
 /* ── Hero ── */
 .errorcode-hero { text-align: center; margin-bottom: 32px; }
-.hero-title { font-size: 26px; font-weight: 700; color: #111; letter-spacing: -0.02em; margin-bottom: 8px; }
+.hero-title { font-size: 26px; font-weight: 700; color: var(--text-brand); letter-spacing: -0.02em; margin-bottom: 8px; }
 .hero-sub { font-size: 14px; color: #999; }
 
 /* ── Search ── */
 .search-wrap { max-width: 560px; margin: 0 auto 24px; }
 .search-box {
   display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px; background: #fff;
+  padding: 12px 16px; background: var(--bg-header);
   border: 1.5px solid #e0e0e0; border-radius: 14px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.04);
   transition: border-color 0.15s;
 }
-.search-box:focus-within { border-color: #aaa; }
+.search-box:focus-within { border-color: var(--text-soft); }
 .search-icon { color: #bbb; flex-shrink: 0; }
 .search-hint {
   font-size: 10px; color: #bbb; background: #f4f4f4;
@@ -255,10 +255,10 @@ function categoryLabel(cat: string): string {
 .quick-list { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 28px; }
 .quick-pill {
   padding: 5px 12px; font-size: 11px; font-family: var(--font-mono);
-  border-radius: 6px; border: 1px solid #e8e8e8; background: #fff;
+  border-radius: 6px; border: 1px solid #e8e8e8; background: var(--bg-header);
   color: #888; cursor: pointer; transition: all 0.15s;
 }
-.quick-pill:hover:not(:disabled) { border-color: #aaa; color: #111; }
+.quick-pill:hover:not(:disabled) { border-color: var(--text-soft); color: var(--text-brand); }
 .quick-pill:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Result section ── */
@@ -298,7 +298,7 @@ function categoryLabel(cat: string): string {
 
 /* ── Result card ── */
 .result-card {
-  background: #fff;
+  background: var(--bg-header);
   border: 1px solid #eee;
   border-radius: 14px;
   padding: 16px 20px;

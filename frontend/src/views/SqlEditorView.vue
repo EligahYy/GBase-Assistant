@@ -450,7 +450,7 @@ function formatCell(val: unknown): string {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #fafafa;
+  background: var(--bg-page);
 }
 
 /* ── Header ── */
@@ -461,8 +461,8 @@ function formatCell(val: unknown): string {
   gap: 16px;
   padding: 0 24px;
   height: 48px;
-  border-bottom: 1px solid #eee;
-  background: #fff;
+  border-bottom: 1px solid var(--border-card);
+  background: var(--bg-header);
   flex-shrink: 0;
 }
 
@@ -477,7 +477,7 @@ function formatCell(val: unknown): string {
   cursor: pointer; transition: all var(--duration-fast);
 }
 .back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
-.header-title { font-size: 15px; font-weight: 600; color: #111; }
+.header-title { font-size: 15px; font-weight: 600; color: var(--text-brand); }
 
 .header-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -495,7 +495,7 @@ function formatCell(val: unknown): string {
 /* ── Main Layout ── */
 .editor-main {
   flex: 1; display: flex; min-height: 0; overflow: hidden;
-  padding: 20px; gap: 16px; background: #fafafa;
+  padding: 20px; gap: 16px; background: var(--bg-page);
 }
 .editor-workspace {
   flex: 1; display: flex; flex-direction: column; min-width: 0;
@@ -504,14 +504,14 @@ function formatCell(val: unknown): string {
 
 /* ── Input Card with line numbers ── */
 .input-card {
-  background: #fff; border: 1px solid #e0e0e0; border-radius: 14px;
+  background: var(--bg-header); border: 1px solid #e0e0e0; border-radius: 14px;
   overflow: hidden; flex-shrink: 0;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .input-card:focus-within { border-color: #bbb; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .input-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 18px; border-bottom: 1px solid #eee; background: #fafafa;
+  padding: 12px 18px; border-bottom: 1px solid var(--border-card); background: var(--bg-page);
 }
 .input-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-0); }
 .input-hint { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
@@ -547,13 +547,13 @@ function formatCell(val: unknown): string {
 
 /* ── Result Card ── */
 .result-card {
-  background: #fff; border: 1px solid #e0e0e0; border-radius: 14px;
+  background: var(--bg-header); border: 1px solid #e0e0e0; border-radius: 14px;
   overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   animation: fadeInUp 0.25s var(--ease-out-expo) both;
 }
 .result-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 18px; border-bottom: 1px solid #eee; background: #fafafa;
+  padding: 10px 18px; border-bottom: 1px solid var(--border-card); background: var(--bg-page);
 }
 .result-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-0); }
 .result-meta { display: flex; align-items: center; gap: 12px; }
@@ -579,15 +579,15 @@ function formatCell(val: unknown): string {
 /* ── Sidebar ── */
 .editor-sidebar { width: 220px; display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
 .sidebar-card {
-  background: #fff; border: 1px solid #e0e0e0; border-radius: 14px;
+  background: var(--bg-header); border: 1px solid #e0e0e0; border-radius: 14px;
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .sidebar-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; font-size: 11px; font-weight: 600;
-  color: var(--text-0); border-bottom: 1px solid #eee;
-  background: #fafafa; flex-shrink: 0;
+  color: var(--text-0); border-bottom: 1px solid var(--border-card);
+  background: var(--bg-page); flex-shrink: 0;
 }
 .sidebar-close-btn {
   display: flex; align-items: center; justify-content: center;

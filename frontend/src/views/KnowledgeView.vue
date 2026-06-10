@@ -476,13 +476,13 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 <style scoped>
 .knowledge-page {
   height: 100vh; display: flex; flex-direction: column; overflow: hidden;
-  background: #fafafa;
+  background: var(--bg-page);
 }
 
 .kb-header {
   display: flex; align-items: center; gap: 12px;
   padding: 0 24px; height: 48px;
-  border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0;
+  border-bottom: 1px solid var(--border-card); background: var(--bg-header); flex-shrink: 0;
 }
 .back-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -492,7 +492,7 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   cursor: pointer; transition: all var(--duration-fast);
 }
 .back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
-.header-title { font-size: 15px; font-weight: 600; color: #111; }
+.header-title { font-size: 15px; font-weight: 600; color: var(--text-brand); }
 
 .kb-body {
   flex: 1; overflow-y: auto;
@@ -560,13 +560,13 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   border-radius: 14px;
   padding: 32px;
   text-align: center;
-  background: #fff;
+  background: var(--bg-header);
   transition: all 0.2s;
   cursor: pointer;
 }
 .upload-zone:hover {
-  border-color: #111;
-  background: #fafafa;
+  border-color: var(--text-brand);
+  background: var(--bg-page);
 }
 .upload-icon-wrap {
   width: 48px; height: 48px;
@@ -576,7 +576,7 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   margin: 0 auto 12px; color: #999;
 }
 .upload-title {
-  font-size: 14px; font-weight: 600; color: #111; margin-bottom: 4px;
+  font-size: 14px; font-weight: 600; color: var(--text-brand); margin-bottom: 4px;
 }
 .upload-hint {
   font-size: 11px; color: #bbb;
@@ -667,7 +667,7 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 
 /* ── Delete Modal ── */
 .delete-modal {
-  background: #fff;
+  background: var(--bg-header);
   border-radius: 18px;
   overflow: hidden;
   width: 380px;
@@ -687,7 +687,7 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 }
 .delete-modal-title {
   font-size: 17px; font-weight: 700;
-  color: #111; letter-spacing: -0.01em;
+  color: var(--text-brand); letter-spacing: -0.01em;
   margin-bottom: 8px;
 }
 .delete-modal-desc {

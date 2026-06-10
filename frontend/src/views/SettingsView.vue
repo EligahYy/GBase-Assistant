@@ -12,11 +12,13 @@ import {
 import { NIcon } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { getHealthStatus, getFeedbackStats, type HealthStatus, type FeedbackStats } from '@/api/admin'
+import { useTheme } from '@/composables/useTheme'
 
 const router = useRouter()
 const connStore = useConnectionStore()
 const naiveMsg = useMessage()
 const dialog = useDialog()
+const { theme, apply: applyTheme } = useTheme()
 
 // ── Model ──
 const modelOptions = ref<{ label: string; value: string }[]>([])
@@ -235,8 +237,8 @@ function handleDelete(id: string, name: string) {
               </div>
             </div>
             <div class="theme-toggle">
-              <button class="toggle-option active">浅色</button>
-              <button class="toggle-option">深色</button>
+              <button :class="['toggle-option', { active: theme === 'light' }]" @click="applyTheme('light')">浅色</button>
+              <button :class="['toggle-option', { active: theme === 'dark' }]" @click="applyTheme('dark')">深色</button>
             </div>
           </div>
 
@@ -451,7 +453,7 @@ function handleDelete(id: string, name: string) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #fafafa;
+  background: var(--bg-page);
 }
 
 /* ── Header ── */
@@ -461,8 +463,8 @@ function handleDelete(id: string, name: string) {
   gap: 16px;
   padding: 0 24px;
   height: 48px;
-  border-bottom: 1px solid #eee;
-  background: #fff;
+  border-bottom: 1px solid var(--border-card);
+  background: var(--bg-header);
   flex-shrink: 0;
 }
 
@@ -485,17 +487,26 @@ function handleDelete(id: string, name: string) {
   cursor: pointer; transition: all var(--duration-fast);
 }
 .back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
-.header-title { font-size: 15px; font-weight: 600; color: #111; }
+.header-title { font-size: 15px; font-weight: 600; color: var(--text-brand); }
 
 .tab-panel {
   animation: fadeInUp 0.25s var(--ease-out-expo) both;
   max-width: 760px;
 }
 
+/* Naive UI NSelect overrides */
+:deep(.n-base-selection) {
+  --n-border: 1px solid var(--border-card) !important;
+  --n-border-hover: 1px solid var(--seam-2) !important;
+  --n-color: var(--bg-card) !important;
+  border-radius: 8px !important;
+}
+:deep(.n-base-selection .n-base-selection-label) { font-size: 13px !important; }
+
 .settings-page-title {
   font-size: 24px;
   font-weight: 700;
-  color: #111;
+  color: var(--text-brand);
   letter-spacing: -0.02em;
   margin-bottom: 28px;
 }
@@ -513,7 +524,7 @@ function handleDelete(id: string, name: string) {
 /* ── Item Card ── */
 .item-card {
   display: flex; align-items: center; justify-content: space-between;
-  background: #fff; border: 1px solid #eee;
+  background: var(--bg-header); border: 1px solid #eee;
   border-radius: 12px; padding: 14px 16px; margin-bottom: 6px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
@@ -525,9 +536,9 @@ function handleDelete(id: string, name: string) {
   display: flex; align-items: center; justify-content: center;
   color: #888; flex-shrink: 0;
 }
-.item-title { font-size: 13px; font-weight: 600; color: #111; margin-bottom: 2px; }
-.item-status { font-size: 10px; color: #aaa; }
-.item-status code { color: #111; font-family: monospace; font-weight: 500; background:#f5f5f5; padding:1px 4px; border-radius:3px; }
+.item-title { font-size: 13px; font-weight: 600; color: var(--text-brand); margin-bottom: 2px; }
+.item-status { font-size: 10px; color: var(--text-soft); }
+.item-status code { color: var(--text-brand); font-family: monospace; font-weight: 500; background:#f5f5f5; padding:1px 4px; border-radius:3px; }
 .status-indicator { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; font-size: 10px; font-weight: 500; }
 .status-indicator.ok { color: #16a34a; }
 .status-indicator::before { content: ''; width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
@@ -536,10 +547,10 @@ function handleDelete(id: string, name: string) {
 .theme-toggle { display: flex; background: #f4f4f4; border-radius: 8px; padding: 2px; }
 .toggle-option {
   padding: 5px 14px; font-size: 11px; font-weight: 500;
-  border: none; background: transparent; color: #aaa;
+  border: none; background: transparent; color: var(--text-soft);
   border-radius: 6px; cursor: pointer; transition: all 0.15s;
 }
-.toggle-option.active { background: #fff; color: #111; font-weight: 600; box-shadow: 0 1px 1px rgba(0,0,0,0.04); }
+.toggle-option.active { background: var(--bg-header); color: var(--text-brand); font-weight: 600; box-shadow: 0 1px 1px rgba(0,0,0,0.04); }
 
 /* ── Setting Card ── */
 .setting-card {
@@ -956,7 +967,7 @@ function handleDelete(id: string, name: string) {
 .feedback-stat {
   text-align: center;
   padding: 16px 10px;
-  background: #fafafa;
+  background: var(--bg-page);
   border: 1px solid #eee;
   border-radius: 10px;
 }
@@ -966,7 +977,7 @@ function handleDelete(id: string, name: string) {
 .feedback-value {
   font-size: 22px;
   font-weight: 700;
-  color: #111;
+  color: var(--text-brand);
   font-family: var(--font-mono);
   line-height: 1;
 }

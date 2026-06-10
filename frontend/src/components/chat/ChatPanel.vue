@@ -354,7 +354,7 @@ function handleKeydown(e: KeyboardEvent) {
 .header-title {
   font-size: 15px;
   font-weight: 600;
-  color: #111;
+  color: var(--text-brand);
   letter-spacing: -0.01em;
 }
 .header-badge {
@@ -628,7 +628,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 .hint-card {
   padding: 18px 20px;
-  background: #fff;
+  background: var(--bg-header);
   border: 1px solid #eee;
   border-radius: 14px;
   text-align: left;
@@ -651,7 +651,7 @@ function handleKeydown(e: KeyboardEvent) {
 .hint-card-title {
   font-size: 14px;
   font-weight: 600;
-  color: #111;
+  color: var(--text-brand);
 }
 .hint-card-desc {
   font-size: 11px;

@@ -75,6 +75,14 @@
   --warning: #d97706;
   --error: #dc2626;
   --info: var(--accent);
+
+  /* Page-level tokens */
+  --bg-page: #fafafa;
+  --bg-header: #ffffff;
+  --bg-card: #ffffff;
+  --border-card: #eee;
+  --text-brand: #111;
+  --text-soft: #aaa;
 }
 
 html[data-theme="dark"] {
@@ -117,6 +125,14 @@ html[data-theme="dark"] {
   --border: var(--seam-1);
   --border-strong: var(--seam-2);
   --divider: var(--seam-1);
+
+  /* Page-level tokens */
+  --bg-page: #0a0a0a;
+  --bg-header: #0f0f0f;
+  --bg-card: #141414;
+  --border-card: rgba(255,255,255,0.06);
+  --text-brand: #f5f5f5;
+  --text-soft: #666;
 }
 
 *, *::before, *::after {
@@ -151,8 +167,17 @@ body {
 
 /* Naive UI patches */
 .n-base-selection {
-  --n-border: 1px solid var(--seam-1) !important;
-  --n-color: var(--bg-surface) !important;
+  --n-border: 1px solid var(--border-card) !important;
+  --n-color: var(--bg-card) !important;
+  --n-border-hover: 1px solid var(--seam-2) !important;
+  --n-border-focus: 1px solid var(--text-3) !important;
+  border-radius: 8px !important;
+}
+.n-base-select-menu {
+  --n-color: var(--bg-card) !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
 }
 .n-input {
   --n-color: var(--bg-surface) !important;
