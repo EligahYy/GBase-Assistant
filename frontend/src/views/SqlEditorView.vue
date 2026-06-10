@@ -414,6 +414,7 @@ function formatCell(val: unknown): string {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #fafafa;
 }
 
 /* ── Header ── */
@@ -422,9 +423,10 @@ function formatCell(val: unknown): string {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 24px;
+  padding: 0 24px;
+  height: 48px;
   border-bottom: 1px solid var(--seam-1);
-  background: var(--bg-void);
+  background: #fff;
   flex-shrink: 0;
 }
 
@@ -520,8 +522,9 @@ function formatCell(val: unknown): string {
   display: flex;
   min-height: 0;
   overflow: hidden;
-  padding: 16px;
+  padding: 20px;
   gap: 16px;
+  background: #fafafa;
 }
 
 .editor-workspace {
@@ -537,59 +540,44 @@ function formatCell(val: unknown): string {
 .input-card {
   background: #fff;
   border: 1px solid #e0e0e0;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
   flex-shrink: 0;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   transition: border-color var(--duration-fast);
 }
 .input-card:focus-within {
-  border-color: #aaa;
+  border-color: #bbb;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
 }
 
 .input-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--seam-1);
-  background: var(--bg-surface);
-}
-.input-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-0);
-  letter-spacing: 0.02em;
-}
-.input-label .n-icon {
-  color: var(--text-3);
-}
-.input-hint {
-  font-size: 11px;
-  color: var(--text-3);
-  font-family: var(--font-mono);
+  padding: 12px 18px;
+  border-bottom: 1px solid #eee;
+  background: #fafafa;
 }
 
 .sql-textarea {
   width: 100%;
-  min-height: 200px;
+  min-height: 240px;
   max-height: 420px;
-  padding: 18px 20px;
+  padding: 20px 22px;
   border: none;
   background: #1a1a1a;
-  color: #e0e0e0;
-  font-family: 'JetBrains Mono', var(--font-mono);
+  color: #d4d4d4;
+  font-family: 'JetBrains Mono', 'SF Mono', SFMono-Regular, monospace;
   font-size: 13px;
-  line-height: 1.8;
+  line-height: 1.9;
   resize: vertical;
   outline: none;
-  border-radius: 0 0 12px 12px;
+  border-radius: 0;
+  tab-size: 2;
 }
 .sql-textarea::placeholder {
-  color: #666;
+  color: #555;
 }
 
 /* ── Execution Progress Bar ── */
@@ -610,19 +598,20 @@ function formatCell(val: unknown): string {
 
 /* ── Result Card ── */
 .result-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-lg);
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 14px;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   animation: fadeInUp 0.25s var(--ease-out-expo) both;
 }
 .result-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--seam-1);
-  background: var(--bg-surface);
+  padding: 10px 18px;
+  border-bottom: 1px solid #eee;
+  background: #fafafa;
 }
 .result-title {
   display: flex;
@@ -678,10 +667,10 @@ function formatCell(val: unknown): string {
 
 /* ── Error Card ── */
 .error-card {
-  background: rgba(220, 38, 38, 0.04);
-  border: 1px solid rgba(220, 38, 38, 0.15);
-  border-radius: var(--radius-lg);
-  padding: 16px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  padding: 16px 20px;
   animation: fadeInUp 0.25s var(--ease-out-expo) both;
 }
 .error-title {
@@ -711,31 +700,28 @@ function formatCell(val: unknown): string {
 }
 
 .sidebar-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-lg);
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 14px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   flex: 1;
-  transition: border-color var(--duration-fast);
-}
-.sidebar-card:hover {
-  border-color: var(--seam-2);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
-  font-size: 12px;
+  padding: 12px 16px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-3);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  border-bottom: 1px solid var(--seam-1);
-  background: var(--bg-surface);
+  border-bottom: 1px solid #eee;
+  background: #fafafa;
   flex-shrink: 0;
 }
 .sidebar-count {
