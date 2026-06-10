@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue'
+import { useMessage } from 'naive-ui'
 import SqlBlock from './SqlBlock.vue'
 import AgentActivity from './AgentActivity.vue'
 import ChartRenderer from './ChartRenderer.vue'
@@ -7,6 +8,7 @@ import { parseContent } from '@/composables/useContentParser'
 import type { Message } from '@/stores/chat'
 
 const props = defineProps<{ message: Message }>()
+const naiveMsg = useMessage()
 const isUser = computed(() => props.message.role === 'user')
 
 const segments = computed(() => {
@@ -48,6 +50,15 @@ function formatCell(val: unknown): string {
   if (val === null || val === undefined) return 'NULL'
   if (typeof val === 'string') return val
   return String(val)
+}
+
+function copyContent() {
+  const text = props.message.content
+  navigator.clipboard.writeText(text).then(() => {
+    naiveMsg.success('已复制')
+  }).catch(() => {
+    naiveMsg.warning('复制失败')
+  })
 }
 
 const sourceList = computed(() => {
@@ -140,17 +151,13 @@ function renderInline(text: string): string {
   <div :class="['msg-row', isUser ? 'is-user' : 'is-assistant']">
     <div class="msg-wrapper">
       <!-- Assistant avatar -->
-      <div v-if="!isUser" class="avatar assistant-avatar">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-        </svg>
-      </div>
+      <div v-if="!isUser" class="avatar assistant-avatar">G</div>
 
       <!-- Content -->
       <div :class="['msg-content', isUser ? 'user-content' : 'assistant-content']">
         <!-- AI meta info -->
         <div v-if="!isUser && !isTyping" class="msg-meta">
-          <span class="msg-author">GBase 助手</span>
+          <span class="msg-author">GBase Copilot</span>
           <span class="msg-badge">AI</span>
         </div>
 
@@ -214,6 +221,19 @@ function renderInline(text: string): string {
           <div v-if="queryResult!.truncated" class="result-truncated">结果已截断，最多展示 50 行</div>
         </div>
 
+        <!-- Hover action buttons -->
+        <div v-if="!isUser && !isTyping" class="msg-actions">
+          <button class="hover-action-btn" title="复制" @click="copyContent">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="hover-action-btn" title="点赞">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/></svg>
+          </button>
+          <button class="hover-action-btn" title="点踩">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V4H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/></svg>
+          </button>
+        </div>
+
         <!-- RAG sources -->
         <details v-if="!isUser && !isTyping && sourceList.length" class="sources-block">
           <summary class="sources-summary">
@@ -267,9 +287,12 @@ function renderInline(text: string): string {
   flex-shrink: 0; margin-top: 2px;
 }
 .assistant-avatar {
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  color: var(--text-2);
+  background: #111;
+  color: #fff;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Inter', var(--font-sans);
 }
 .user-avatar {
   background: var(--bg-panel);
@@ -592,5 +615,53 @@ function renderInline(text: string): string {
   line-height: 1.6;
   font-family: var(--font-mono);
   word-break: break-word;
+}
+
+/* ── Hover action buttons ── */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.msg-row:hover .msg-actions {
+  opacity: 1;
+}
+.hover-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-4);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.hover-action-btn:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+
+/* ── Footnote index badge ── */
+.source-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  background: var(--bg-deep);
+  color: var(--text-2);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  margin-right: 4px;
+  border: 1px solid var(--seam-1);
 }
 </style>
