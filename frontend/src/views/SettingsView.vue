@@ -25,6 +25,7 @@ watch(selectedModel, (val) => { localStorage.setItem('gbase_model', val) })
 // ── Connection form ──
 const driverOptions = [
   { label: '手动模式（粘贴 DDL）', value: 'manual' },
+  { label: 'SQLite 本地开发', value: 'sqlite' },
   { label: '原生 Python 驱动', value: 'native' },
 ]
 const showAddForm = ref(false)
@@ -331,7 +332,7 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
               <div class="form-row">
                 <div class="form-field">
                   <label>数据库名</label>
-                  <n-input v-model:value="newConn.database_name" placeholder="gbase_db" />
+                  <n-input v-model:value="newConn.database_name" :placeholder="newConn.driver_type === 'sqlite' ? 'data/nl2sql_demo.db' : 'gbase_db'" />
                 </div>
                 <div class="form-field">
                   <label>驱动类型</label>
@@ -375,7 +376,7 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
                   <span class="conn-name">{{ c.name }}</span>
                   <div class="conn-meta">
                     <span :class="['conn-badge', c.has_schema ? 'ok' : 'muted']">{{ c.has_schema ? '已配置 Schema' : '无 Schema' }}</span>
-                    <span class="conn-badge">{{ c.driver_type === 'manual' ? '手动' : '原生驱动' }}</span>
+                    <span class="conn-badge">{{ c.driver_type === 'manual' ? '手动' : c.driver_type === 'sqlite' ? 'SQLite' : '原生驱动' }}</span>
                     <span v-if="c.driver_type !== 'manual'" :class="['conn-badge', connStore.connStatusMap[c.id] === 'ok' ? 'ok' : connStore.connStatusMap[c.id] === 'error' ? 'warn' : 'muted']">
                       {{ connStore.connStatusMap[c.id] === 'ok' ? '已连通' : connStore.connStatusMap[c.id] === 'error' ? '已断开' : '待检测' }}
                     </span>

@@ -17,24 +17,25 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import time
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import yaml
-from langchain_core.messages import AIMessage, HumanMessage, ToolCall
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, HumanMessage
 
 # Ensure backend is on path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from evals.nl2sql.scorers import ScoreResult, score_case, aggregate_results
+from evals.nl2sql.scorers import ScoreResult, aggregate_results, score_case
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Data classes
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class EvalResult:
@@ -60,14 +61,6 @@ class EvalReport:
 # ═══════════════════════════════════════════════════════════════════════════════
 # LLM Mocks
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def _tc(name: str, args: dict) -> AIMessage:
-    return AIMessage(content="", tool_calls=[ToolCall(name=name, args=args, id=f"call_{name}")])
-
-
-def _fa(answer: str) -> AIMessage:
-    return AIMessage(content="", tool_calls=[ToolCall(name="final_answer", args={"answer": answer, "sources": []}, id="call_fa")])
-
 
 # Per-case mock SQL — structural validation of the eval pipeline
 _CASE_SQL = {
@@ -100,36 +93,21 @@ _CASE_SQL = {
 }
 
 
-class ScriptedLLM:
-    """Returns predefined responses per case for eval structural validation."""
-    def __init__(self, case_id: str):
-        sql = _CASE_SQL.get(case_id, "SELECT * FROM orders LIMIT 10")
-        self.responses = [
-            _tc("submit_sql", {"sql": sql}),
-            _fa("查询完成"),
-        ]
-        self.call_count = 0
-
-    async def _agenerate(self, messages, **kwargs):
-        idx = min(self.call_count, len(self.responses) - 1)
-        resp = self.responses[idx]
-        self.call_count += 1
-        return ChatResult(generations=[ChatGeneration(message=resp)])
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # SQL extraction
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _extract_tables_from_sql(sql: str | None) -> list[str]:
     """Extract table names from SQL using simple heuristics."""
     if not sql:
         return []
     import re
+
     sql_upper = sql.upper()
     tables = set()
     # FROM / JOIN patterns
-    for m in re.finditer(r'(?:FROM|JOIN)\s+(\w+)', sql_upper, re.IGNORECASE):
+    for m in re.finditer(r"(?:FROM|JOIN)\s+(\w+)", sql_upper, re.IGNORECASE):
         tables.add(m.group(1).lower())
     return list(tables)
 
@@ -139,28 +117,66 @@ def _extract_columns_from_sql(sql: str | None) -> list[str]:
     if not sql:
         return []
     import re
+
     cols = set()
     sql_lower = sql.lower()
     # table.column patterns
-    for m in re.finditer(r'(\w+)\.(\w+)', sql_lower):
+    for m in re.finditer(r"(\w+)\.(\w+)", sql_lower):
         cols.add(m.group(2))
     # Any word that matches an expected column pattern in the scorer
     # Just return everything that looks like a column reference
     # Strip SQL keywords
-    keywords = {"select", "from", "where", "and", "or", "not", "in", "on", "as",
-                "join", "left", "right", "inner", "outer", "group", "order", "by",
-                "limit", "offset", "asc", "desc", "having", "between", "like", "is",
-                "null", "count", "sum", "avg", "max", "min", "distinct", "all",
-                "case", "when", "then", "else", "end", "cast", "exists"}
+    keywords = {
+        "select",
+        "from",
+        "where",
+        "and",
+        "or",
+        "not",
+        "in",
+        "on",
+        "as",
+        "join",
+        "left",
+        "right",
+        "inner",
+        "outer",
+        "group",
+        "order",
+        "by",
+        "limit",
+        "offset",
+        "asc",
+        "desc",
+        "having",
+        "between",
+        "like",
+        "is",
+        "null",
+        "count",
+        "sum",
+        "avg",
+        "max",
+        "min",
+        "distinct",
+        "all",
+        "case",
+        "when",
+        "then",
+        "else",
+        "end",
+        "cast",
+        "exists",
+    }
     # Extract identifiers after SELECT (before FROM)
-    select_match = re.search(r'select\s+(.*?)\s+from', sql_lower, re.DOTALL)
+    select_match = re.search(r"select\s+(.*?)\s+from", sql_lower, re.DOTALL)
     if select_match:
         select_text = select_match.group(1)
         # Split by comma, extract column names
-        for part in select_text.split(','):
+        for part in select_text.split(","):
             part = part.strip()
             # Extract words that aren't keywords or functions
-            words = re.findall(r'\b([a-z_]\w*)\b', part)
+            words = re.findall(r"\b([a-z_]\w*)\b", part)
             for w in words:
                 if w not in keywords and not w.isdigit():
                     cols.add(w)
@@ -170,6 +186,7 @@ def _extract_columns_from_sql(sql: str | None) -> list[str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Runner
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _load_cases() -> list[dict]:
     cases_path = Path(__file__).parent / "cases.yaml"
@@ -184,56 +201,101 @@ async def run_case(case: dict, mock: bool = False, model: str | None = None) -> 
     question = case["question"]
     expected = case.get("expected", {})
 
-    llm = ScriptedLLM(case_id) if mock else None
+    sql = _CASE_SQL.get(case_id, "SELECT * FROM orders LIMIT 10")
+    llm_calls = 0
 
     start = time.monotonic()
 
     try:
         if mock:
+
+            async def fake_llm(*args, **kwargs):
+                nonlocal llm_calls
+                llm_calls += 1
+                return AIMessage(content=sql if llm_calls == 1 else "查询完成")
+
+            async def fake_stream(*args, **kwargs):
+                nonlocal llm_calls
+                llm_calls += 1
+                yield "查询完成"
+
+            semantic_context = SimpleNamespace(
+                focused_schema=[SimpleNamespace(name=table, columns=[]) for table in expected.get("tables", [])],
+                verified_joins=[],
+                verified_examples=[],
+            )
+            from app.semantic.query_ir import QueryIR
+
+            query_ir = QueryIR(semantic_model_id="eval-model")
+            completed_result = {
+                "status": "completed",
+                "sql": sql,
+                "columns": expected.get("columns", []),
+                "rows": [],
+                "row_count": expected.get("row_count"),
+                "execution_time_ms": 1,
+                "truncated": False,
+            }
             with (
-                patch("app.agents.graph.LiteLLMChatAdapter", return_value=llm),
-                patch("app.dependencies.get_llm_client", return_value=MagicMock()),
+                patch("app.agents.graph._call_llm", side_effect=fake_llm),
+                patch("app.agents.graph._stream_llm_text", side_effect=fake_stream),
+                patch(
+                    "app.semantic.context_builder.SemanticContextBuilder.build",
+                    new=AsyncMock(return_value=semantic_context),
+                ),
+                patch("app.semantic.planner.QueryPlanner.plan", new=AsyncMock(return_value=query_ir)),
+                patch(
+                    "app.sql.semantic_validator.SemanticValidator.validate",
+                    return_value=SimpleNamespace(valid=True),
+                ),
+                patch(
+                    "app.agents.tools.sql_tools.SubmitSQLTool.execute",
+                    new=AsyncMock(return_value=completed_result),
+                ),
             ):
-                from app.agents.graph import build_graph
-                graph = build_graph(db_connection_id="eval-db")
+                from app.agents.graph import build_nl2sql_graph
+
+                graph = build_nl2sql_graph(db_connection_id="eval-db")
                 state = {
                     "messages": [HumanMessage(content=question)],
                     "db_connection_id": "eval-db",
-                    "cb": {},
+                    "sql_history": [],
                 }
                 result = await graph.ainvoke(state, {"configurable": {"thread_id": f"eval-{case_id}"}})
-                llm_calls = llm.call_count
         else:
             # Real LLM mode — defer to Phase 1 when API key is available
             return EvalResult(
-                case_id=case_id, question=question,
-                sql=None, status="skipped",
-                referenced_tables=[], referenced_columns=[],
-                row_count=None, llm_calls=0, latency_ms=0,
+                case_id=case_id,
+                question=question,
+                sql=None,
+                status="skipped",
+                referenced_tables=[],
+                referenced_columns=[],
+                row_count=None,
+                llm_calls=0,
+                latency_ms=0,
             )
     except Exception as e:
+        if mock:
+            raise RuntimeError(f"Mock eval case {case_id} failed") from e
         return EvalResult(
-            case_id=case_id, question=question,
-            sql=None, status=f"error: {e}",
-            referenced_tables=[], referenced_columns=[],
-            row_count=None, llm_calls=0 if not mock else llm.call_count,
+            case_id=case_id,
+            question=question,
+            sql=None,
+            status=f"error: {e}",
+            referenced_tables=[],
+            referenced_columns=[],
+            row_count=None,
+            llm_calls=llm_calls,
             latency_ms=(time.monotonic() - start) * 1000,
         )
 
     latency_ms = (time.monotonic() - start) * 1000
 
-    # Extract SQL from messages
-    sql = None
-    status = "not_found"
-    row_count = None
-    cb = result.get("cb", {})
-    sql_state = cb.get("sql", {}) if cb else {}
-    if sql_state:
-        sql = sql_state.get("generated_sql")
-        status = sql_state.get("status", "not_found")
-        last_result = sql_state.get("last_result")
-        if isinstance(last_result, dict):
-            row_count = last_result.get("row_count")
+    sql = result.get("sql_candidate")
+    query_result = result.get("query_result", {})
+    status = query_result.get("status", "not_found") if isinstance(query_result, dict) else "not_found"
+    row_count = query_result.get("row_count") if isinstance(query_result, dict) else None
 
     referenced_tables = _extract_tables_from_sql(sql)
     referenced_columns = _extract_columns_from_sql(sql)
@@ -296,7 +358,7 @@ def print_report(report: EvalReport):
     print(f"  Cases: {report.config['total_cases']}")
 
     agg = report.aggregate
-    print(f"\n  ── Aggregate ──")
+    print("\n  ── Aggregate ──")
     print(f"  Pass Rate:  {agg.get('pass_rate', 0) * 100:.1f}% ({agg.get('passed', 0)}/{agg.get('total_cases', 0)})")
     if "avg_llm_calls" in agg:
         print(f"  Avg LLM Calls: {agg['avg_llm_calls']}")
@@ -305,11 +367,11 @@ def print_report(report: EvalReport):
 
     avg_scores = agg.get("avg_scores", {})
     if avg_scores:
-        print(f"\n  ── Avg Scores ──")
+        print("\n  ── Avg Scores ──")
         for k, v in avg_scores.items():
             print(f"  {k}: {v:.3f}")
 
-    print(f"\n  ── Per-Case ──")
+    print("\n  ── Per-Case ──")
     for r in report.results:
         status_icon = "✅" if (r.score and r.score.passed) else "❌"
         score_str = ""
@@ -328,6 +390,7 @@ def print_report(report: EvalReport):
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def main():
     parser = argparse.ArgumentParser(description="NL2SQL Eval Runner")

@@ -22,13 +22,15 @@ logger = logging.getLogger(__name__)
 # Data Classes
 # ═══════════════════════════════════════════════════════════════════
 
+
 @dataclass
 class ColumnMeta:
     """列的语义元数据。"""
+
     name: str
     data_type: str
     role: str = "UNKNOWN"  # PRIMARY_KEY | MEASURE | TIME_DIMENSION | ENUM | FOREIGN_KEY | UNKNOWN
-    label: str = ""         # 中文标签
+    label: str = ""  # 中文标签
     aliases: list[str] = field(default_factory=list)
     comment: str = ""
     enum_values: dict | None = None
@@ -63,6 +65,7 @@ class ColumnMeta:
 @dataclass
 class TableMeta:
     """表的语义元数据。"""
+
     name: str
     label: str = ""
     aliases: list[str] = field(default_factory=list)
@@ -96,6 +99,7 @@ class TableMeta:
 # DDL Parser
 # ═══════════════════════════════════════════════════════════════════
 
+
 class DDLParser:
     """从 CREATE TABLE DDL 中提取结构化元数据。
 
@@ -103,15 +107,27 @@ class DDLParser:
     """
 
     # 列角色推断规则
-    _MEASURE_TYPES = {"DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "INT", "INTEGER",
-                       "BIGINT", "SMALLINT", "TINYINT", "REAL"}
+    _MEASURE_TYPES = {
+        "DECIMAL",
+        "NUMERIC",
+        "FLOAT",
+        "DOUBLE",
+        "INT",
+        "INTEGER",
+        "BIGINT",
+        "SMALLINT",
+        "TINYINT",
+        "REAL",
+    }
     _TIME_TYPES = {"DATE", "DATETIME", "TIMESTAMP", "TIME"}
 
     @staticmethod
     def parse_ddl(ddl: str) -> TableMeta | None:
         """解析单条 CREATE TABLE DDL，返回 TableMeta。"""
         # 提取表名
-        table_match = re.search(r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"\[\]]?(\w+)[`"\[\]]?', ddl, re.IGNORECASE)
+        table_match = re.search(
+            r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"\[\]]?(\w+)[`"\[\]]?', ddl, re.IGNORECASE
+        )
         if not table_match:
             return None
         table_name = table_match.group(1)
@@ -125,10 +141,10 @@ class DDLParser:
 
         # 提取 DISTRIBUTED BY / REPLICATED
         distribution = ""
-        dist_match = re.search(r'DISTRIBUTED\s+BY\s*\(([^)]+)\)', ddl, re.IGNORECASE)
+        dist_match = re.search(r"DISTRIBUTED\s+BY\s*\(([^)]+)\)", ddl, re.IGNORECASE)
         if dist_match:
             distribution = f"DISTRIBUTED BY({dist_match.group(1)})"
-        elif re.search(r'REPLICATED', ddl, re.IGNORECASE):
+        elif re.search(r"REPLICATED", ddl, re.IGNORECASE):
             distribution = "REPLICATED"
 
         return TableMeta(
@@ -143,17 +159,17 @@ class DDLParser:
     def _extract_columns_section(ddl: str) -> str | None:
         """提取括号内的列定义部分。"""
         # Find the first '(' after CREATE TABLE ... and match its closing ')'
-        start = ddl.find('(')
+        start = ddl.find("(")
         if start == -1:
             return None
         depth = 0
         for i in range(start, len(ddl)):
-            if ddl[i] == '(':
+            if ddl[i] == "(":
                 depth += 1
-            elif ddl[i] == ')':
+            elif ddl[i] == ")":
                 depth -= 1
                 if depth == 0:
-                    return ddl[start+1:i]
+                    return ddl[start + 1 : i]
         return None
 
     @staticmethod
@@ -166,7 +182,7 @@ class DDLParser:
         for col_def in col_defs:
             col_def = col_def.strip()
             # Skip constraints (PRIMARY KEY, INDEX, etc.)
-            if re.match(r'^\s*(PRIMARY|UNIQUE|INDEX|KEY|CONSTRAINT|FOREIGN|CHECK)\s', col_def, re.IGNORECASE):
+            if re.match(r"^\s*(PRIMARY|UNIQUE|INDEX|KEY|CONSTRAINT|FOREIGN|CHECK)\s", col_def, re.IGNORECASE):
                 continue
             if not col_def:
                 continue
@@ -184,11 +200,11 @@ class DDLParser:
         depth = 0
         current = ""
         for ch in columns_text:
-            if ch == '(':
+            if ch == "(":
                 depth += 1
-            elif ch == ')':
+            elif ch == ")":
                 depth -= 1
-            if ch == ',' and depth == 0:
+            if ch == "," and depth == 0:
                 parts.append(current)
                 current = ""
             else:
@@ -203,10 +219,11 @@ class DDLParser:
         # Pattern: `name` TYPE[(params)] [NOT NULL] [DEFAULT ...] [COMMENT '...']
         match = re.match(
             r'[`"\[]?(\w+)[`"\]]?\s+'  # column name
-            r'(\w+)'                     # type keyword
-            r'(\([^)]*\))?'              # optional type params
-            r'(.*)',                     # rest (NOT NULL, DEFAULT, COMMENT, etc.)
-            col_def, re.DOTALL | re.IGNORECASE
+            r"(\w+)"  # type keyword
+            r"(\([^)]*\))?"  # optional type params
+            r"(.*)",  # rest (NOT NULL, DEFAULT, COMMENT, etc.)
+            col_def,
+            re.DOTALL | re.IGNORECASE,
         )
         if not match:
             return None
@@ -250,28 +267,33 @@ class DDLParser:
     def _infer_role(col_def: str, col_name: str, type_keyword: str, comment: str, rest: str) -> str:
         """推断列的语义角色。"""
         # PRIMARY KEY (explicit)
-        if re.search(r'PRIMARY\s+KEY', col_def, re.IGNORECASE):
+        if re.search(r"PRIMARY\s+KEY", col_def, re.IGNORECASE):
             return "PRIMARY_KEY"
+
+        # TIME_DIMENSION: databases frequently store timestamps in TEXT/VARCHAR
+        # columns, so use stable naming conventions in addition to SQL types.
+        if type_keyword in DDLParser._TIME_TYPES or re.search(
+            r"(^|_)(date|time|timestamp|datetime)$|_at$",
+            col_name,
+            re.IGNORECASE,
+        ):
+            return "TIME_DIMENSION"
 
         # ENUM: TINYINT/SMALLINT with enum-like COMMENT (before MEASURE check)
         if type_keyword in ("TINYINT", "SMALLINT", "INT", "INTEGER") and comment:
             # Patterns: "1待支付2已支付", "1:待支付", "1-待支付"
-            if re.search(r'\d+\s*[:：\-]?\s*\D', comment):
+            if re.search(r"\d+\s*[:：\-]?\s*\D", comment):
                 return "ENUM"
 
         # MEASURE: numeric types that are often aggregated
         if type_keyword in DDLParser._MEASURE_TYPES:
             # Check if it looks like an ID or code
-            if re.search(r'(id|no|code)$', col_name, re.IGNORECASE):
+            if re.search(r"(id|no|code)$", col_name, re.IGNORECASE):
                 return "FOREIGN_KEY"
             return "MEASURE"
 
-        # TIME_DIMENSION
-        if type_keyword in DDLParser._TIME_TYPES:
-            return "TIME_DIMENSION"
-
         # FOREIGN_KEY: naming convention
-        if re.search(r'(_id|_no|_code)$', col_name, re.IGNORECASE):
+        if re.search(r"(_id|_no|_code)$", col_name, re.IGNORECASE):
             return "FOREIGN_KEY"
 
         return "UNKNOWN"
@@ -286,11 +308,11 @@ class DDLParser:
         - "1-待支付 2-已支付"          (破折号分隔)
         """
         # Try format with separator first: "1:待支付 2:已支付"
-        pairs = re.findall(r'(\d+)\s*[:：\-]\s*(\S+)', comment)
+        pairs = re.findall(r"(\d+)\s*[:：\-]\s*(\S+)", comment)
         if pairs:
             return {int(k): v for k, v in pairs}
         # Try format without separator: "1待支付2已支付3已取消"
-        pairs = re.findall(r'(\d+)([^\d]+)', comment)
+        pairs = re.findall(r"(\d+)([^\d]+)", comment)
         if pairs:
             return {int(k): v.strip() for k, v in pairs}
         return None
@@ -300,7 +322,7 @@ class DDLParser:
         """提取列的中文标签。优先用 COMMENT，否则从列名推断。"""
         if comment:
             # Use COMMENT up to first colon/enum separator
-            label = re.split(r'[:：\d]', comment)[0].strip()
+            label = re.split(r"[:：\d]", comment)[0].strip()
             if label:
                 return label
         return DDLParser._name_to_label(col_name)
@@ -310,15 +332,23 @@ class DDLParser:
         """从表名推断中文标签。"""
         # Common patterns
         label_map = {
-            "user": "用户表", "users": "用户表",
-            "order": "订单表", "orders": "订单表",
-            "product": "产品表", "products": "产品表",
-            "customer": "客户表", "customers": "客户表",
-            "employee": "员工表", "employees": "员工表",
-            "sale": "销售表", "sales": "销售表",
+            "user": "用户表",
+            "users": "用户表",
+            "order": "订单表",
+            "orders": "订单表",
+            "product": "产品表",
+            "products": "产品表",
+            "customer": "客户表",
+            "customers": "客户表",
+            "employee": "员工表",
+            "employees": "员工表",
+            "sale": "销售表",
+            "sales": "销售表",
             "inventory": "库存表",
-            "payment": "支付表", "payments": "支付表",
-            "log": "日志表", "logs": "日志表",
+            "payment": "支付表",
+            "payments": "支付表",
+            "log": "日志表",
+            "logs": "日志表",
             "config": "配置表",
         }
         for key, label in label_map.items():
@@ -331,7 +361,7 @@ class DDLParser:
         """生成表名别名。"""
         aliases = [table_name]
         # Remove underscores
-        no_underscore = table_name.replace('_', '')
+        no_underscore = table_name.replace("_", "")
         if no_underscore != table_name:
             aliases.append(no_underscore)
         return aliases
@@ -343,20 +373,20 @@ class DDLParser:
         if label and label != col_name:
             aliases.append(label)
         # Remove prefix (e.g., order_amount -> amount)
-        if '_' in col_name:
-            prefix_removed = col_name.split('_', 1)[-1]
+        if "_" in col_name:
+            prefix_removed = col_name.split("_", 1)[-1]
             if prefix_removed != col_name:
                 aliases.append(prefix_removed)
         # Extract Chinese word segments from label
         if label:
             # Strip parenthetical content first: "订单金额(元)" → "订单金额"
-            stripped = re.sub(r'[\(（].*?[\)）]', '', label).strip()
+            stripped = re.sub(r"[\(（].*?[\)）]", "", label).strip()
             if stripped and stripped not in aliases:
                 aliases.append(stripped)
             # Extract 2-char sliding windows from stripped label
             if len(stripped) >= 2:
                 for i in range(len(stripped) - 1):
-                    chunk = stripped[i:i+2]
+                    chunk = stripped[i : i + 2]
                     if chunk not in aliases:
                         aliases.append(chunk)
         return aliases
@@ -365,21 +395,35 @@ class DDLParser:
     def _name_to_label(name: str) -> str:
         """简单的中文标签推断（snake_case → 中文）。"""
         common_words = {
-            "id": "编号", "name": "名称", "amount": "金额", "price": "价格",
-            "time": "时间", "date": "日期", "status": "状态", "type": "类型",
-            "code": "编码", "no": "编号", "desc": "描述", "remark": "备注",
-            "count": "数量", "total": "总计", "user": "用户", "order": "订单",
-            "product": "产品", "customer": "客户",
+            "id": "编号",
+            "name": "名称",
+            "amount": "金额",
+            "price": "价格",
+            "time": "时间",
+            "date": "日期",
+            "status": "状态",
+            "type": "类型",
+            "code": "编码",
+            "no": "编号",
+            "desc": "描述",
+            "remark": "备注",
+            "count": "数量",
+            "total": "总计",
+            "user": "用户",
+            "order": "订单",
+            "product": "产品",
+            "customer": "客户",
         }
         if name.lower() in common_words:
             return common_words[name.lower()]
         # Capitalize first letter for display
-        return name.replace('_', ' ').title()
+        return name.replace("_", " ").title()
 
 
 # ═══════════════════════════════════════════════════════════════════
 # Relation Inferrer
 # ═══════════════════════════════════════════════════════════════════
+
 
 class RelationInferrer:
     """推断表之间的 JOIN 关系。"""
@@ -407,7 +451,7 @@ class RelationInferrer:
 
                 col_name = col.name.lower()
                 # Try to find target: remove _id/_no/_code suffix, find matching table
-                base_name = re.sub(r'(_id|_no|_code)$', '', col_name)
+                base_name = re.sub(r"(_id|_no|_code)$", "", col_name)
 
                 # Look for matching table
                 for other_table in tables:
@@ -449,6 +493,7 @@ class RelationInferrer:
 # Schema Graph Builder & Store
 # ═══════════════════════════════════════════════════════════════════
 
+
 class SchemaGraph:
     """Schema Knowledge Graph — 构建、存储、检索。
 
@@ -475,7 +520,7 @@ class SchemaGraph:
         for schema in schemas:
             if isinstance(schema, TableSchema):
                 ddl = schema.ddl
-            elif hasattr(schema, 'ddl'):
+            elif hasattr(schema, "ddl"):
                 ddl = schema.ddl
             else:
                 continue
@@ -488,7 +533,7 @@ class SchemaGraph:
                 continue
 
             # Apply description if available
-            if hasattr(schema, 'description') and schema.description and not table_meta.label:
+            if hasattr(schema, "description") and schema.description and not table_meta.label:
                 table_meta.label = schema.description
 
             tables_list.append(table_meta)
@@ -496,8 +541,9 @@ class SchemaGraph:
 
         # Infer relationships
         relationships = RelationInferrer.infer(tables_list)
-        logger.info("SchemaGraph[%s]: built %d tables, %d relationships",
-                     self.db_id, len(tables_list), len(relationships))
+        logger.info(
+            "SchemaGraph[%s]: built %d tables, %d relationships", self.db_id, len(tables_list), len(relationships)
+        )
 
         # Build exact match index
         self._build_exact_index()
@@ -531,7 +577,7 @@ class SchemaGraph:
             return results
 
         # Tokenize query into words
-        words = re.findall(r'[一-鿿\w]+', query)
+        words = re.findall(r"[一-鿿\w]+", query)
         seen = set()
 
         for word in words:
@@ -541,14 +587,16 @@ class SchemaGraph:
                     entry = (table_name, col_name)
                     if entry not in seen:
                         seen.add(entry)
-                        results.append({
-                            "term": word,
-                            "table": table_name,
-                            "column": col_name,
-                            "role": role,
-                            "score": 1.0,
-                            "source": "exact",
-                        })
+                        results.append(
+                            {
+                                "term": word,
+                                "table": table_name,
+                                "column": col_name,
+                                "role": role,
+                                "score": 1.0,
+                                "source": "exact",
+                            }
+                        )
 
         return results
 
@@ -580,6 +628,7 @@ class SchemaGraph:
 
         # BFS
         from collections import deque
+
         queue = deque([(table_a, [])])
         visited = {table_a}
 
@@ -637,10 +686,7 @@ class SchemaGraph:
                 context["tables"][name] = {
                     "label": table.label,
                     "distribution": table.distribution,
-                    "columns": {
-                        c.name: {"type": c.data_type, "role": c.role, "label": c.label}
-                        for c in table.columns
-                    },
+                    "columns": {c.name: {"type": c.data_type, "role": c.role, "label": c.label} for c in table.columns},
                 }
                 for rel in table.relationships:
                     key = rel["via"]
@@ -688,8 +734,7 @@ class SchemaGraph:
 
         graph._build_exact_index()
         graph._built = True
-        logger.info("SchemaGraph[%s]: loaded from %s (%d tables)",
-                     db_id, filepath, len(graph.tables))
+        logger.info("SchemaGraph[%s]: loaded from %s (%d tables)", db_id, filepath, len(graph.tables))
         return graph
 
 

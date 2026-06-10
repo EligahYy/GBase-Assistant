@@ -71,10 +71,9 @@ class LiteLLMClientImpl:
     def _resolve_params(self) -> dict:
         """Return LLM params (temperature, max_tokens) from config."""
         params = {}
-        if "temperature" in self._config:
-            params["temperature"] = self._config["temperature"]
-        if "max_tokens" in self._config:
-            params["max_tokens"] = self._config["max_tokens"]
+        for key in ("temperature", "max_tokens", "timeout"):
+            if key in self._config:
+                params[key] = self._config[key]
         return params
 
     def _get_fallback_models(self) -> list[str]:

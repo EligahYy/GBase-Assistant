@@ -5,26 +5,31 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import require_admin
 from app.database import get_db
 from app.semantic.models import (
     SemanticDimension,
     SemanticJoin,
-    SemanticMember,
     SemanticMetric,
     SemanticModel,
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/semantic-models", tags=["semantic-models"])
+router = APIRouter(
+    prefix="/semantic-models",
+    tags=["semantic-models"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Schemas
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class SemanticModelCreate(BaseModel):
     name: str
@@ -34,6 +39,7 @@ class SemanticModelCreate(BaseModel):
     primary_table: str | None = None
     prompt_hint: str | None = None
 
+
 class SemanticModelUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -42,7 +48,10 @@ class SemanticModelUpdate(BaseModel):
     enabled_for_nl2sql: bool | None = None
     prompt_hint: str | None = None
 
+
 class SemanticModelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     description: str
@@ -55,8 +64,6 @@ class SemanticModelOut(BaseModel):
     created_at: str
     updated_at: str
 
-    class Config:
-        from_attributes = True
 
 class MetricCreate(BaseModel):
     name: str
@@ -68,6 +75,7 @@ class MetricCreate(BaseModel):
     description: str = ""
     status: str = "draft"
 
+
 class MetricUpdate(BaseModel):
     name: str | None = None
     synonyms: list[str] | None = None
@@ -78,6 +86,7 @@ class MetricUpdate(BaseModel):
     description: str | None = None
     status: str | None = None
 
+
 class DimensionCreate(BaseModel):
     name: str
     column_ref: str
@@ -87,6 +96,7 @@ class DimensionCreate(BaseModel):
     hierarchy: list[str] | None = None
     status: str = "draft"
 
+
 class JoinCreate(BaseModel):
     left_table: str
     right_table: str
@@ -95,6 +105,7 @@ class JoinCreate(BaseModel):
     source: str = "manual"
     confidence: float = 0.0
     status: str = "candidate"
+
 
 class JoinUpdate(BaseModel):
     condition: str | None = None
@@ -106,6 +117,7 @@ class JoinUpdate(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Models CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("", response_model=list[SemanticModelOut])
 async def list_models(db_connection_id: str | None = None, db: AsyncSession = Depends(get_db)):
@@ -151,6 +163,7 @@ async def update_model(model_id: str, data: SemanticModelUpdate, db: AsyncSessio
 # Metrics CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/{model_id}/metrics")
 async def list_metrics(model_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SemanticMetric).where(SemanticMetric.semantic_model_id == model_id))
@@ -185,6 +198,7 @@ async def update_metric(model_id: str, metric_id: str, data: MetricUpdate, db: A
 # Dimensions CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @router.get("/{model_id}/dimensions")
 async def list_dimensions(model_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SemanticDimension).where(SemanticDimension.semantic_model_id == model_id))
@@ -203,6 +217,7 @@ async def create_dimension(model_id: str, data: DimensionCreate, db: AsyncSessio
 # ═══════════════════════════════════════════════════════════════════════════════
 # Joins CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/{model_id}/joins")
 async def list_joins(model_id: str, db: AsyncSession = Depends(get_db)):

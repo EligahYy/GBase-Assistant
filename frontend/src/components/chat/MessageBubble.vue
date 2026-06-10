@@ -28,11 +28,16 @@ const viewMode = ref<'chart' | 'table' | 'raw'>('table')
 const hasChart = computed(() => {
   if (props.message.chartConfig) return true
   if (!hasQueryResult.value) return false
-  return queryResult.value!.columns.length >= 2
+  const result = queryResult.value!
+  if (result.rows.length < 2 || result.rows.length > 50 || result.columns.length < 2) return false
+  const numericColumns = result.columns.filter((_, columnIndex) =>
+    result.rows.some((row) => typeof row[columnIndex] === 'number'),
+  )
+  return numericColumns.length > 0
 })
 
 watchEffect(() => {
-  if (props.message.chartConfig && hasQueryResult.value) {
+  if (hasChart.value) {
     viewMode.value = 'chart'
   } else if (hasQueryResult.value) {
     viewMode.value = 'table'
@@ -206,7 +211,7 @@ function renderInline(text: string): string {
             </table>
           </div>
           <pre v-if="viewMode === 'raw'" class="raw-data">{{ JSON.stringify(queryResult, null, 2) }}</pre>
-          <div v-if="queryResult!.truncated" class="result-truncated">结果已截断，最多展示 100 行</div>
+          <div v-if="queryResult!.truncated" class="result-truncated">结果已截断，最多展示 50 行</div>
         </div>
 
         <!-- RAG sources -->

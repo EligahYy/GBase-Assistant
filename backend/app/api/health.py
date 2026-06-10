@@ -93,7 +93,7 @@ async def _check_gbase_connections() -> str:
             return "no_connections"
 
         # 读取缓存状态
-        from app.api.connections import _get_cached_status
+        from app.services.connection_cache import get_cached_status
 
         tested = 0
         ok_count = 0
@@ -102,7 +102,7 @@ async def _check_gbase_connections() -> str:
                 ok_count += 1
                 tested += 1
                 continue
-            cached = _get_cached_status(c.id)
+            cached = get_cached_status(c.id)
             if cached is not None:
                 tested += 1
                 if cached == "ok":

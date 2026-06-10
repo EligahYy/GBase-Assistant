@@ -91,9 +91,7 @@ class SubmitSQLTool:
 
         try:
             async with async_session_factory() as session:
-                result = await session.execute(
-                    select(DbConnection).where(DbConnection.id == self._db_connection_id)
-                )
+                result = await session.execute(select(DbConnection).where(DbConnection.id == self._db_connection_id))
                 conn = result.scalar_one_or_none()
                 if not conn or conn.driver_type == "manual":
                     return {"status": "execution_failed", "sql": query, "error": "数据库连接不可用"}
@@ -141,7 +139,7 @@ class SubmitSQLTool:
             summary = (
                 f"SQL 执行成功：共 {row_count} 行，耗时 {exec_time}ms"
                 f"{'（已截断）' if truncated else ''}。"
-                f"请调用 final_answer 向用户展示和分析查询结果。"
+                "查询结果可用于生成最终摘要。"
             )
             detail = {
                 "sql": sql,
@@ -236,9 +234,7 @@ class ExecuteSQLTool:
 
         try:
             async with async_session_factory() as session:
-                result = await session.execute(
-                    select(DbConnection).where(DbConnection.id == self._db_connection_id)
-                )
+                result = await session.execute(select(DbConnection).where(DbConnection.id == self._db_connection_id))
                 conn = result.scalar_one_or_none()
                 # Extract fields while session is still open
                 if not conn or conn.driver_type == "manual":

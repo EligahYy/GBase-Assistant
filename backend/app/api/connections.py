@@ -61,9 +61,7 @@ async def _background_test_connection(connection_id: str) -> None:
         from app.database import async_session_factory
 
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(DbConnection).where(DbConnection.id == connection_id)
-            )
+            result = await session.execute(select(DbConnection).where(DbConnection.id == connection_id))
             conn = result.scalar_one_or_none()
             if not conn or conn.driver_type == "manual":
                 set_cached_status(connection_id, "ok")
@@ -86,11 +84,14 @@ async def _background_test_connection(connection_id: str) -> None:
             if old_status != new_status:
                 try:
                     from app.services.connection_health_checker import get_health_checker
-                    await get_health_checker()._broadcast({
-                        "type": "status",
-                        "connection_id": connection_id,
-                        "status": new_status,
-                    })
+
+                    await get_health_checker()._broadcast(
+                        {
+                            "type": "status",
+                            "connection_id": connection_id,
+                            "status": new_status,
+                        }
+                    )
                 except Exception:
                     pass
     except Exception:
@@ -100,21 +101,37 @@ async def _background_test_connection(connection_id: str) -> None:
         if old_status != new_status:
             try:
                 from app.services.connection_health_checker import get_health_checker
-                await get_health_checker()._broadcast({
-                    "type": "status",
-                    "connection_id": connection_id,
-                    "status": new_status,
-                })
+
+                await get_health_checker()._broadcast(
+                    {
+                        "type": "status",
+                        "connection_id": connection_id,
+                        "status": new_status,
+                    }
+                )
             except Exception:
                 pass
     finally:
         clear_testing(connection_id)
 
 
+def _refresh_schema_graph(db_id: str, schema_ddl: str | None) -> None:
+    """Synchronously replace the in-memory and persisted SchemaGraph."""
+    try:
+        from app.agents.schema_graph import build_schema_graph_from_connection
+
+        schemas = _parse_ddl_to_schemas(schema_ddl or "")
+        graph = build_schema_graph_from_connection(db_id, schemas)
+        logger.info("SchemaGraph 刷新完成: db_id=%s, %d 个表", db_id, len(graph.tables))
+    except Exception as e:
+        logger.exception("SchemaGraph 刷新失败: db_id=%s, %s", db_id, e)
+
+
 async def _trigger_schema_indexing(db_id: str, schema_ddl: str | None) -> None:
-    """后台任务：将 schema DDL 解析并向量化入库到 Qdrant。"""
+    """后台任务：将 schema DDL 向量化入库到 Qdrant。"""
     if not schema_ddl:
         return
+
     try:
         from app.vector.client import get_qdrant_manager
         from app.vector.embedder import get_embedder
@@ -188,6 +205,7 @@ async def create_connection(data: ConnectionCreate, db: AsyncSession = Depends(g
     db.add(conn)
     await db.commit()
     await db.refresh(conn)
+    _refresh_schema_graph(conn.id, conn.schema_ddl)
     # 后台异步触发 schema 向量化（不阻塞响应）
     asyncio.create_task(_trigger_schema_indexing(conn.id, conn.schema_ddl))
     return ConnectionResponse.from_orm_model(conn)
@@ -202,9 +220,7 @@ async def available_drivers():
 @router.get("/status", response_model=ConnectionStatusResponse)
 async def get_connections_status(db: AsyncSession = Depends(get_db)):
     """获取所有活跃连接的状态。无缓存时触发后台测试，不阻塞响应。"""
-    result = await db.execute(
-        select(DbConnection).where(DbConnection.is_active.is_(True))
-    )
+    result = await db.execute(select(DbConnection).where(DbConnection.is_active.is_(True)))
     connections = result.scalars().all()
 
     items: list[ConnectionStatusItem] = []
@@ -258,8 +274,9 @@ async def update_connection(connection_id: str, data: ConnectionUpdate, db: Asyn
     conn.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(conn)
-    # 如果 schema_ddl 被更新，后台异步重新索引
+    # 如果 schema_ddl 被更新，立即刷新 SchemaGraph 并后台重新索引
     if data.schema_ddl is not None:
+        _refresh_schema_graph(conn.id, conn.schema_ddl)
         asyncio.create_task(_trigger_schema_indexing(conn.id, conn.schema_ddl))
     return ConnectionResponse.from_orm_model(conn)
 
@@ -327,11 +344,14 @@ async def test_connection(connection_id: str, db: AsyncSession = Depends(get_db)
     # 广播状态变更到 SSE 订阅者
     try:
         from app.services.connection_health_checker import get_health_checker
-        await get_health_checker()._broadcast({
-            "type": "status",
-            "connection_id": connection_id,
-            "status": status,
-        })
+
+        await get_health_checker()._broadcast(
+            {
+                "type": "status",
+                "connection_id": connection_id,
+                "status": status,
+            }
+        )
     except Exception:
         pass
     return TestConnectionResponse(status=status, message=message, driver=conn.driver_type)
@@ -372,7 +392,8 @@ async def sync_schema_from_db(connection_id: str, db: AsyncSession = Depends(get
     await db.commit()
     await db.refresh(conn)
 
-    # 触发向量化
+    # 立即刷新 SchemaGraph，再后台触发向量化
+    _refresh_schema_graph(conn.id, conn.schema_ddl)
     asyncio.create_task(_trigger_schema_indexing(conn.id, conn.schema_ddl))
 
     return SyncSchemaResponse(tables=len(schemas), synced_at=conn.last_synced_at)

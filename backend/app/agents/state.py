@@ -1,33 +1,34 @@
-"""v3.4 Agent state — minimal, messages-first."""
+"""Typed state contract for the v3.4 semantic NL2SQL graph."""
 
-from typing import Annotated
+from __future__ import annotations
 
+from typing import Annotated, Any, TypedDict
+
+from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 
-class AgentState(dict):
-    """Typed state for the v3.4 Semantic NL2SQL Graph.
+class AgentState(TypedDict, total=False):
+    """Fields are merged by LangGraph instead of replacing the whole state."""
 
-    Core fields:
-    - messages: conversation history (add_messages reducer)
-    - db_connection_id: target database
-    - resolved_question: resolved question after multi-turn merge
-    - semantic_context: SemanticContext dataclass
-    - query_ir: Query IR dict
-    - sql_candidate: current SQL being verified
-    - sql_history: list of previous SQL attempts
-    - validation_report: result from semantic validator
-    - query_result: execution result from SubmitSQLTool
-    - final_response: final answer text
+    messages: Annotated[list[BaseMessage], add_messages]
+    db_connection_id: str | None
+    resolved_question: str
+    semantic_context: Any
+    query_ir: dict[str, Any]
+    should_clarify: bool
+    planning_error: str
+    sql_candidate: str
+    sql_history: list[dict[str, Any]]
+    validation_report: dict[str, Any]
+    should_retry: bool
+    retry_hint: str
+    execution_count: int
+    query_result: dict[str, Any]
+    final_response: str
+    semantic_logic: str
 
-    No CBState, no ExploreState, no SQLState. Messages IS the state.
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.setdefault("messages", [])
-        self.setdefault("sql_history", [])
-
-    @property
-    def messages(self) -> list:
-        return self.get("messages", [])
+    # Compatibility namespaces retained for persisted/legacy callers.
+    supervisor: dict[str, Any]
+    sql: dict[str, Any]
+    knowledge: dict[str, Any]
