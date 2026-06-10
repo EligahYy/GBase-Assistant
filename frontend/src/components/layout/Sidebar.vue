@@ -9,7 +9,7 @@ import {
   CloseCircleOutline,
   SettingsOutline,
   AlertCircleOutline,
-  TerminalOutline,
+  CodeSlashOutline,
   LibraryOutline,
   ChevronBackOutline,
   ChevronForwardOutline,
@@ -256,7 +256,7 @@ function navigateTo(path: string) {
 }
 
 const navItems = [
-  { path: '/sql-editor', icon: TerminalOutline, label: 'SQL 编辑器' },
+  { path: '/sql-editor', icon: CodeSlashOutline, label: 'SQL 编辑器' },
   { path: '/tools/error-code', icon: AlertCircleOutline, label: '错误码查询' },
   { path: '/knowledge', icon: LibraryOutline, label: '知识库' },
   { path: '/settings', icon: SettingsOutline, label: '设置' },
@@ -315,7 +315,7 @@ const navItems = [
         <div class="sidebar-header">
           <div class="brand">
             <div class="brand-icon">G</div>
-            <span class="brand-text">GBase</span>
+            <span class="brand-text">GBase Copilot</span>
           </div>
           <button class="collapse-btn" @click="toggleCollapse" title="收起侧边栏">
             <n-icon :component="ChevronBackOutline" size="16" />
@@ -667,9 +667,9 @@ const navItems = [
 }
 .brand-text {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-0);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.03em;
 }
 
 .collapse-btn {
