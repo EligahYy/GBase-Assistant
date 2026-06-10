@@ -212,8 +212,24 @@ function handleDelete(id: string, name: string) {
     <!-- Body -->
     <div class="settings-body">
       <main class="settings-main">
+        <h1 class="settings-page-title">系统设置</h1>
+
         <!-- ── General ── -->
         <section class="tab-panel">
+          <div class="section-label">通用设置</div>
+          <div class="setting-card">
+            <div class="card-label">
+              <n-icon :component="SunnyOutline" size="16" />
+              <span>外观主题</span>
+            </div>
+            <div class="card-control">
+              <div style="display:flex;background:#f4f4f4;border-radius:7px;padding:1px;">
+                <button style="padding:4px 12px;font-size:11px;font-weight:600;color:#111;background:#fff;border-radius:6px;border:none;cursor:pointer;">浅色</button>
+                <button style="padding:4px 12px;font-size:11px;color:#aaa;background:transparent;border:none;cursor:pointer;">深色</button>
+              </div>
+            </div>
+          </div>
+
           <div class="setting-card">
             <div class="card-label">
               <n-icon :component="LayersOutline" size="16" />
@@ -250,6 +266,7 @@ function handleDelete(id: string, name: string) {
 
         <!-- ── Connections ── -->
         <section class="tab-panel">
+          <div class="section-label">数据库连接</div>
           <button
             v-if="!showAddForm"
             class="add-connection-btn"
@@ -377,6 +394,7 @@ function handleDelete(id: string, name: string) {
 
         <!-- ── Admin ── -->
         <section class="tab-panel">
+          <div class="section-label">SQL 反馈统计</div>
           <div v-if="feedbackStats" class="setting-card">
             <div class="card-label">
               <n-icon :component="BarChartOutline" size="16" />
@@ -537,6 +555,24 @@ function handleDelete(id: string, name: string) {
 .tab-panel {
   animation: fadeInUp 0.25s var(--ease-out-expo) both;
   max-width: 760px;
+}
+
+.settings-page-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #111;
+  letter-spacing: -0.02em;
+  margin-bottom: 28px;
+}
+
+.section-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #bbb;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+  padding: 0 2px;
 }
 
 /* ── Setting Card ── */
