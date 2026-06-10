@@ -245,6 +245,11 @@ function formatCell(val: unknown): string {
           />
         </div>
 
+        <!-- Progress bar -->
+        <div v-if="isExecuting" class="exec-progress">
+          <div class="exec-progress-bar"></div>
+        </div>
+
         <!-- Result -->
         <div v-if="result" class="result-card">
           <div class="result-header">
@@ -497,13 +502,13 @@ function formatCell(val: unknown): string {
   cursor: not-allowed;
 }
 .header-btn.primary {
-  background: var(--text-0);
-  border-color: var(--text-0);
-  color: var(--bg-void);
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
 }
 .header-btn.primary:hover:not(:disabled) {
-  background: var(--text-1);
-  border-color: var(--text-1);
+  background: #15803d;
+  border-color: #15803d;
 }
 .header-btn.primary.loading {
   opacity: 0.7;
@@ -530,18 +535,16 @@ function formatCell(val: unknown): string {
 
 /* ── Input Card ── */
 .input-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-lg);
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
   overflow: hidden;
   flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   transition: border-color var(--duration-fast);
 }
-.input-card:hover {
-  border-color: var(--seam-2);
-}
 .input-card:focus-within {
-  border-color: var(--text-0);
+  border-color: #aaa;
 }
 
 .input-header {
@@ -572,20 +575,37 @@ function formatCell(val: unknown): string {
 
 .sql-textarea {
   width: 100%;
-  min-height: 160px;
-  max-height: 320px;
-  padding: 16px;
+  min-height: 200px;
+  max-height: 420px;
+  padding: 18px 20px;
   border: none;
-  background: var(--bg-panel);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  line-height: 1.7;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  font-family: 'JetBrains Mono', var(--font-mono);
+  font-size: 13px;
+  line-height: 1.8;
   resize: vertical;
   outline: none;
+  border-radius: 0 0 12px 12px;
 }
 .sql-textarea::placeholder {
-  color: var(--text-3);
+  color: #666;
+}
+
+/* ── Execution Progress Bar ── */
+.exec-progress {
+  height: 3px;
+  background: #eee;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.exec-progress-bar {
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, #16a34a, transparent);
+  border-radius: 2px;
+  animation: progressFlow 1.5s infinite linear;
 }
 
 /* ── Result Card ── */
