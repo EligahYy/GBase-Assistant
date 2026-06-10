@@ -135,7 +135,15 @@ async function handleUpload(options: { file: UploadFileInfo; onFinish: () => voi
   }
 }
 
-async function remove(doc: KnowledgeDocument) {
+const deleteTarget = ref<KnowledgeDocument | null>(null)
+
+function confirmRemove(doc: KnowledgeDocument) {
+  deleteTarget.value = doc
+}
+
+async function doRemove() {
+  if (!deleteTarget.value) return
+  const doc = deleteTarget.value
   try {
     await deleteDocument(doc.id)
     documents.value = documents.value.filter(d => d.id !== doc.id)
@@ -146,6 +154,11 @@ async function remove(doc: KnowledgeDocument) {
   } catch (e: any) {
     msg.error(e.message || '删除失败')
   }
+  deleteTarget.value = null
+}
+
+async function remove(doc: KnowledgeDocument) {
+  confirmRemove(doc)
 }
 
 async function reindex(doc: KnowledgeDocument) {
@@ -424,6 +437,27 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
         @keydown.enter="handleReindexAll"
       />
     </n-modal>
+
+    <!-- Delete Document Modal -->
+    <n-modal
+      :show="deleteTarget !== null"
+      :on-update:show="(v: boolean) => { if (!v) deleteTarget = null }"
+      transform-origin="center"
+    >
+      <div class="delete-modal">
+        <div class="delete-modal-body">
+          <div class="delete-modal-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div class="delete-modal-title">确认删除文档？</div>
+          <div class="delete-modal-desc">将永久删除「{{ deleteTarget?.filename || '' }}」及其向量索引，此操作无法恢复。</div>
+        </div>
+        <div class="delete-modal-actions">
+          <button class="delete-modal-btn cancel" @click="deleteTarget = null">取消</button>
+          <button class="delete-modal-btn confirm" @click="doRemove">确认删除</button>
+        </div>
+      </div>
+    </n-modal>
   </div>
 </template>
 
@@ -606,4 +640,51 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 .table-wrapper :deep(.n-data-table__pagination) {
   justify-content: center;
 }
+
+/* ── Delete Modal ── */
+.delete-modal {
+  background: #fff;
+  border-radius: 18px;
+  overflow: hidden;
+  width: 380px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  animation: modalIn 0.25s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+.delete-modal-body {
+  padding: 32px 24px 20px;
+  text-align: center;
+}
+.delete-modal-icon {
+  width: 52px; height: 52px;
+  background: #fef2f2; border: 1px solid #fecaca;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 16px;
+}
+.delete-modal-title {
+  font-size: 17px; font-weight: 700;
+  color: #111; letter-spacing: -0.01em;
+  margin-bottom: 8px;
+}
+.delete-modal-desc {
+  font-size: 13px; color: #888; line-height: 1.5;
+  max-width: 280px; margin: 0 auto;
+}
+.delete-modal-actions {
+  display: flex; border-top: 1px solid #eee;
+}
+.delete-modal-btn {
+  flex: 1; padding: 14px;
+  font-size: 14px; font-weight: 500;
+  background: none; border: none; cursor: pointer;
+  transition: background 0.15s;
+}
+.delete-modal-btn.cancel {
+  color: #888; border-right: 1px solid #eee;
+}
+.delete-modal-btn.cancel:hover { background: #f5f5f5; }
+.delete-modal-btn.confirm {
+  color: #dc2626; font-weight: 600;
+}
+.delete-modal-btn.confirm:hover { background: #fef2f2; }
 </style>

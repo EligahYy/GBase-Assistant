@@ -116,17 +116,18 @@ async function confirmRenameFolder() {
 
 function cancelRenameFolder() { editingFolderId.value = null }
 
+const deleteConvTarget = ref<{ id: string; title: string | null } | null>(null)
+const deleteFolderTarget = ref<string | null>(null)
+
 async function confirmDeleteFolder(id: string) {
-  dialog.warning({
-    title: '删除文件夹',
-    content: '文件夹中的所有对话也会被删除，确定继续？',
-    positiveText: '删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      await chatStore.removeFolder(id)
-      naiveMsg.success('已删除')
-    },
-  })
+  deleteFolderTarget.value = id
+}
+
+async function doDeleteFolder() {
+  if (!deleteFolderTarget.value) return
+  await chatStore.removeFolder(deleteFolderTarget.value)
+  naiveMsg.success('已删除')
+  deleteFolderTarget.value = null
 }
 
 // Computed: conversations NOT in any folder
@@ -240,15 +241,16 @@ function handleRenameKeydown(e: KeyboardEvent) {
 }
 
 function confirmDelete(conv: { id: string; title: string | null }) {
-  dialog.warning({
-    title: '删除对话',
-    content: `确定删除「${conv.title || '新对话'}」？`,
-    positiveText: '删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try { await chatStore.deleteConv(conv.id); naiveMsg.success('已删除') } catch { naiveMsg.error('删除失败') }
-    },
-  })
+  deleteConvTarget.value = conv
+}
+
+async function doDeleteConv() {
+  if (!deleteConvTarget.value) return
+  try {
+    await chatStore.deleteConv(deleteConvTarget.value.id)
+    naiveMsg.success('已删除')
+  } catch { naiveMsg.error('删除失败') }
+  deleteConvTarget.value = null
 }
 
 function navigateTo(path: string) {
@@ -512,6 +514,48 @@ const navItems = [
     @negative-click="showTagModal = false"
   >
     <n-input v-model:value="tagEditingValue" placeholder="输入标签，用逗号分隔" style="margin-top: 8px" />
+  </n-modal>
+
+  <!-- Delete Conversation Modal -->
+  <n-modal
+    :show="deleteConvTarget !== null"
+    :on-update:show="(v: boolean) => { if (!v) deleteConvTarget = null }"
+    transform-origin="center"
+  >
+    <div class="delete-modal">
+      <div class="delete-modal-body">
+        <div class="delete-modal-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="delete-modal-title">确认删除对话？</div>
+        <div class="delete-modal-desc">此操作将永久删除「{{ deleteConvTarget?.title || '新对话' }}」及其所有历史记录，且无法恢复。</div>
+      </div>
+      <div class="delete-modal-actions">
+        <button class="delete-modal-btn cancel" @click="deleteConvTarget = null">取消</button>
+        <button class="delete-modal-btn confirm" @click="doDeleteConv">确认删除</button>
+      </div>
+    </div>
+  </n-modal>
+
+  <!-- Delete Folder Modal -->
+  <n-modal
+    :show="deleteFolderTarget !== null"
+    :on-update:show="(v: boolean) => { if (!v) deleteFolderTarget = null }"
+    transform-origin="center"
+  >
+    <div class="delete-modal">
+      <div class="delete-modal-body">
+        <div class="delete-modal-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="delete-modal-title">确认删除文件夹？</div>
+        <div class="delete-modal-desc">文件夹中的所有对话也会被删除，确定继续？</div>
+      </div>
+      <div class="delete-modal-actions">
+        <button class="delete-modal-btn cancel" @click="deleteFolderTarget = null">取消</button>
+        <button class="delete-modal-btn confirm" @click="doDeleteFolder">确认删除</button>
+      </div>
+    </div>
   </n-modal>
 </template>
 
@@ -1107,6 +1151,53 @@ const navItems = [
 .batch-btn:hover { border-color: var(--seam-2); color: var(--text-0); }
 .batch-btn.danger { color: var(--error); border-color: var(--error); }
 .batch-btn.danger:hover { background: var(--error); color: #fff; }
+
+/* ── Delete Modal ── */
+.delete-modal {
+  background: #fff;
+  border-radius: 18px;
+  overflow: hidden;
+  width: 380px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  animation: modalIn 0.25s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+.delete-modal-body {
+  padding: 32px 24px 20px;
+  text-align: center;
+}
+.delete-modal-icon {
+  width: 52px; height: 52px;
+  background: #fef2f2; border: 1px solid #fecaca;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 16px;
+}
+.delete-modal-title {
+  font-size: 17px; font-weight: 700;
+  color: #111; letter-spacing: -0.01em;
+  margin-bottom: 8px;
+}
+.delete-modal-desc {
+  font-size: 13px; color: #888; line-height: 1.5;
+  max-width: 280px; margin: 0 auto;
+}
+.delete-modal-actions {
+  display: flex; border-top: 1px solid #eee;
+}
+.delete-modal-btn {
+  flex: 1; padding: 14px;
+  font-size: 14px; font-weight: 500;
+  background: none; border: none; cursor: pointer;
+  transition: background 0.15s;
+}
+.delete-modal-btn.cancel {
+  color: #888; border-right: 1px solid #eee;
+}
+.delete-modal-btn.cancel:hover { background: #f5f5f5; }
+.delete-modal-btn.confirm {
+  color: #dc2626; font-weight: 600;
+}
+.delete-modal-btn.confirm:hover { background: #fef2f2; }
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
