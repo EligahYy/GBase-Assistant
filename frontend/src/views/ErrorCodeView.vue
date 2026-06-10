@@ -7,12 +7,19 @@ import {
   SearchOutline,
   CodeSlashOutline,
   AlertCircleOutline,
+  ChevronDownOutline,
+  ChevronUpOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { queryErrorCode, type ErrorCodeItem, type ErrorCodeMode } from '@/api/tools'
 
 const router = useRouter()
 const naiveMsg = useMessage()
+
+const expandedIndex = ref<number | null>(null)
+function toggleExpand(index: number) {
+  expandedIndex.value = expandedIndex.value === index ? null : index
+}
 
 const inputText = ref('')
 const isLoading = ref(false)
@@ -168,18 +175,23 @@ function categoryLabel(cat: string): string {
               class="result-card"
               :style="{ animationDelay: `${index * 0.05}s` }"
             >
-              <header class="card-head">
+              <header class="card-head" @click="toggleExpand(index)" style="cursor:pointer;">
                 <div class="head-main">
                   <n-icon :component="AlertCircleOutline" size="16" class="head-icon" />
-                  <span class="code-label" :class="{ 'is-manual': item.code === '手册参考' }">{{ item.code === '手册参考' ? '📖' : '' }} {{ item.code }}</span>
+                  <span class="code-label">{{ item.code }}</span>
                 </div>
                 <div class="head-meta">
                   <span class="category-badge">{{ categoryLabel(item.category) }}</span>
                   <span v-if="item.score !== null" class="score">相关度 {{ (item.score * 100).toFixed(0) }}%</span>
+                  <n-icon
+                    :component="expandedIndex === index ? ChevronUpOutline : ChevronDownOutline"
+                    size="16"
+                    style="color:var(--text-3);flex-shrink:0;"
+                  />
                 </div>
               </header>
 
-              <section class="card-body">
+              <section v-show="expandedIndex === index" class="card-body">
                 <div class="body-block">
                   <h3 class="block-title">{{ item.code === '手册参考' ? '手册章节' : '描述' }}</h3>
                   <p class="block-text">{{ item.description }}</p>
@@ -478,16 +490,14 @@ function categoryLabel(cat: string): string {
   flex-shrink: 0;
 }
 .code-label {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   font-family: var(--font-mono);
-  color: var(--text-0);
-  letter-spacing: 0.02em;
-}
-.code-label.is-manual {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  color: #8b5cf6;
+  background: #fef7ed;
+  color: #d97706;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid #fde68a;
 }
 .head-meta {
   display: flex;
