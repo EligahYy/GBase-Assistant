@@ -413,6 +413,7 @@ function handleDelete(id: string, name: string) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #fafafa;
 }
 
 /* ── Header ── */

@@ -95,55 +95,30 @@ function categoryLabel(cat: string): string {
 
 <template>
   <div class="page-shell errorcode-page">
-    <!-- Header -->
-    <header class="errorcode-header">
-      <div class="header-left">
-        <button class="back-btn" @click="router.push('/')">
-          <n-icon :component="ArrowBackOutline" size="16" />
-          <span>返回</span>
-        </button>
-        <div class="header-brand">
-          <div class="brand-icon">
-            <n-icon :component="AlertCircleOutline" size="18" />
-          </div>
-          <span>错误码查询</span>
-        </div>
-      </div>
-    </header>
-
     <!-- Main -->
     <div class="errorcode-main">
+      <!-- Hero -->
+      <div class="errorcode-hero">
+        <h1 class="hero-title">错误码查询</h1>
+        <p class="hero-sub">输入 GBase 8a 错误码或关键词，获取详细解决方案</p>
+      </div>
+
       <!-- Search -->
-      <div class="search-card">
-        <div class="search-header">
-          <span class="search-label">
-            <n-icon :component="CodeSlashOutline" size="14" />
-            错误码查询
-          </span>
-        </div>
+      <div class="search-wrap">
         <div class="search-box">
-          <n-icon :component="SearchOutline" size="18" class="search-icon" />
+          <n-icon :component="SearchOutline" size="20" class="search-icon" />
           <n-input
             v-model:value="inputText"
-            placeholder="如：1064、GBA-2001、连接超时、数据倾斜..."
+            placeholder="搜索错误码或关键词，如 1146、连接超时..."
             :disabled="isLoading"
             @keydown="handleKeydown"
           />
-          <button
-            class="header-btn primary"
-            :class="{ loading: isLoading }"
-            :disabled="!inputText.trim()"
-            @click="handleSearch()"
-          >
-            <n-icon :component="SearchOutline" size="14" />
-            <span>{{ isLoading ? '查询中...' : '查询' }}</span>
-          </button>
+          <span class="search-hint">Enter 搜索</span>
         </div>
       </div>
 
       <!-- Quick queries -->
       <div class="quick-list">
-        <span class="quick-label">快捷查询</span>
         <button
           v-for="q in quickQueries"
           :key="q"
@@ -214,212 +189,52 @@ function categoryLabel(cat: string): string {
 
 <style scoped>
 .errorcode-page {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  background: #fafafa;
 }
-
-/* ── Header ── */
-.errorcode-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--seam-1);
-  background: var(--bg-void);
-  flex-shrink: 0;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-3);
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: all var(--duration-fast);
-}
-.back-btn:hover {
-  color: var(--text-0);
-  border-color: var(--seam-2);
-  background: var(--bg-surface);
-}
-
-.header-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-0);
-}
-.brand-icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  color: var(--text-2);
-}
-
-/* ── Main ── */
 .errorcode-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 24px;
+  flex: 1; min-width: 0; overflow-y: auto;
+  max-width: 800px; margin: 0 auto; padding: 48px 28px 80px;
 }
 
-/* ── Search Card ── */
-.search-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  margin-bottom: 16px;
-  transition: border-color var(--duration-fast);
-}
-.search-card:hover {
-  border-color: var(--seam-2);
-}
-.search-card:focus-within {
-  border-color: var(--text-0);
-}
+/* ── Hero ── */
+.errorcode-hero { text-align: center; margin-bottom: 32px; }
+.hero-title { font-size: 26px; font-weight: 700; color: #111; letter-spacing: -0.02em; margin-bottom: 8px; }
+.hero-sub { font-size: 14px; color: #999; }
 
-.search-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--seam-1);
-  background: var(--bg-surface);
-}
-.search-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-0);
-  letter-spacing: 0.02em;
-}
-.search-label .n-icon {
-  color: var(--text-3);
-}
-
+/* ── Search ── */
+.search-wrap { max-width: 560px; margin: 0 auto 24px; }
 .search-box {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; background: #fff;
+  border: 1.5px solid #e0e0e0; border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+  transition: border-color 0.15s;
 }
-.search-icon {
-  color: var(--text-3);
+.search-box:focus-within { border-color: #aaa; }
+.search-icon { color: #bbb; flex-shrink: 0; }
+.search-hint {
+  font-size: 10px; color: #bbb; background: #f4f4f4;
+  padding: 3px 8px; border-radius: 6px; font-family: monospace;
   flex-shrink: 0;
 }
-
 .search-box :deep(.n-input) {
-  --n-border: none !important;
-  --n-border-hover: none !important;
-  --n-border-focus: none !important;
-  background: transparent !important;
-  flex: 1;
+  --n-border: none !important; --n-border-hover: none !important; --n-border-focus: none !important;
+  background: transparent !important; flex: 1;
 }
-.search-box :deep(.n-input__border),
-.search-box :deep(.n-input__state-border) {
-  display: none !important;
-}
-.search-box :deep(.n-input-wrapper) {
-  padding: 0 !important;
-  background: transparent !important;
-}
-.search-box :deep(.n-input__input) {
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.header-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--seam-1);
-  background: var(--bg-panel);
-  color: var(--text-1);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--duration-fast);
-  flex-shrink: 0;
-}
-.header-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--seam-2);
-}
-.header-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.header-btn.primary {
-  background: var(--text-0);
-  border-color: var(--text-0);
-  color: var(--bg-void);
-}
-.header-btn.primary:hover:not(:disabled) {
-  background: var(--text-1);
-  border-color: var(--text-1);
-}
+.search-box :deep(.n-input__border), .search-box :deep(.n-input__state-border) { display: none !important; }
+.search-box :deep(.n-input-wrapper) { padding: 0 !important; background: transparent !important; }
+.search-box :deep(.n-input__input) { font-size: 14px; }
 
 /* ── Quick queries ── */
-.quick-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 24px;
-}
-.quick-label {
-  font-size: 12px;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  margin-right: 4px;
-}
+.quick-list { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 28px; }
 .quick-pill {
-  padding: 5px 12px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--seam-1);
-  background: var(--bg-panel);
-  color: var(--text-2);
-  cursor: pointer;
-  transition: all var(--duration-fast);
+  padding: 5px 12px; font-size: 11px; font-family: var(--font-mono);
+  border-radius: 6px; border: 1px solid #e8e8e8; background: #fff;
+  color: #888; cursor: pointer; transition: all 0.15s;
 }
-.quick-pill:hover:not(:disabled) {
-  border-color: var(--seam-2);
-  color: var(--text-0);
-  background: var(--bg-hover);
-}
-.quick-pill:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.quick-pill:hover:not(:disabled) { border-color: #aaa; color: #111; }
+.quick-pill:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Result section ── */
 .result-section {
@@ -458,16 +273,15 @@ function categoryLabel(cat: string): string {
 
 /* ── Result card ── */
 .result-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-lg);
-  padding: 18px 20px;
-  transition: border-color var(--duration-fast);
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 14px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  transition: border-color 0.15s;
   animation: fadeInUp 0.3s var(--ease-out-expo) both;
 }
-.result-card:hover {
-  border-color: var(--seam-2);
-}
+.result-card:hover { border-color: #ccc; }
 
 .card-head {
   display: flex;

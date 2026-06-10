@@ -134,6 +134,21 @@ function loadFromHistory(item: { sql: string }) {
   sqlText.value = item.sql
 }
 
+const showSchema = ref(true)
+const lineNumbersRef = ref<HTMLElement | null>(null)
+const lineCount = ref(1)
+
+function updateLineCount() {
+  lineCount.value = Math.max(1, sqlText.value.split('\n').length)
+}
+
+function syncScroll(e: Event) {
+  const target = e.target as HTMLTextAreaElement
+  if (lineNumbersRef.value) {
+    lineNumbersRef.value.scrollTop = target.scrollTop
+  }
+}
+
 const editingSnippetId = ref<string | null>(null)
 const editingSnippetName = ref('')
 
@@ -225,9 +240,9 @@ function formatCell(val: unknown): string {
 
     <!-- Main -->
     <div class="editor-main">
-      <!-- Left: Workspace -->
+      <!-- Left: Editor + Result -->
       <div class="editor-workspace">
-        <!-- SQL Input -->
+        <!-- SQL Input with line numbers -->
         <div class="input-card">
           <div class="input-header">
             <span class="input-label">
@@ -236,13 +251,20 @@ function formatCell(val: unknown): string {
             </span>
             <span class="input-hint">Ctrl + Enter 执行</span>
           </div>
-          <textarea
-            v-model="sqlText"
-            class="sql-textarea"
-            placeholder="输入 SQL 语句...&#10;使用 {{变量名}} 实现参数化查询"
-            spellcheck="false"
-            @keydown.ctrl.enter="handleExecute"
-          />
+          <div class="code-editor-wrap">
+            <div class="line-numbers" ref="lineNumbersRef">
+              <span v-for="n in lineCount" :key="n" class="line-num">{{ n }}</span>
+            </div>
+            <textarea
+              v-model="sqlText"
+              class="sql-textarea"
+              placeholder="SELECT ..."
+              spellcheck="false"
+              @keydown.ctrl.enter="handleExecute"
+              @scroll="syncScroll"
+              @input="updateLineCount"
+            />
+          </div>
         </div>
 
         <!-- Progress bar -->
@@ -287,79 +309,74 @@ function formatCell(val: unknown): string {
         </div>
       </div>
 
-      <!-- Right: Sidebar -->
+      <!-- Right: Schema Panel -->
       <aside class="editor-sidebar">
-        <!-- Saved Queries -->
-        <div class="sidebar-card">
+        <div class="sidebar-card schema-panel">
           <div class="sidebar-header">
-            <n-icon :component="BookmarkOutline" size="14" />
-            <span>收藏查询</span>
-            <span v-if="savedQueries.length" class="sidebar-count">{{ savedQueries.length }}</span>
+            <span>表结构</span>
+            <button class="sidebar-close-btn" @click="showSchema = !showSchema">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
-          <div v-if="savedQueries.length === 0" class="sidebar-empty">
-            <div class="empty-icon">
-              <n-icon :component="BookmarkOutline" size="20" />
+          <div class="sidebar-body">
+            <div v-if="!selectedConnId" class="sidebar-empty">
+              <p class="empty-desc">选择数据库连接以查看表结构</p>
             </div>
-            <div class="empty-title">暂无收藏</div>
-            <div class="empty-desc">点击「保存」按钮收藏常用查询</div>
-          </div>
-          <div v-else class="snippet-list">
-            <div
-              v-for="q in savedQueries"
-              :key="q.id"
-              class="snippet-item"
-            >
-              <template v-if="editingSnippetId === q.id">
-                <input
-                  v-model="editingSnippetName"
-                  class="snippet-rename-input"
-                  @keydown.enter="confirmRenameSnippet"
-                  @blur="confirmRenameSnippet"
-                />
-              </template>
-              <template v-else>
-                <div class="snippet-main" @click="loadSnippet(q)">
-                  <div class="snippet-name">{{ q.name }}</div>
-                  <div class="snippet-preview">{{ q.sql.slice(0, 40) }}{{ q.sql.length > 40 ? '...' : '' }}</div>
+            <div v-else class="schema-list">
+              <div class="schema-table-group">
+                <div class="schema-table-name">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2.5" style="transform:rotate(90deg)"><polyline points="9 18 15 12 9 6"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+                  <span>gbase.users</span>
                 </div>
-                <div class="snippet-actions">
-                  <button class="snippet-action-btn" title="重命名" @click.stop="startRenameSnippet(q)">
-                    <n-icon :component="CreateOutline" size="12" />
-                  </button>
-                  <button class="snippet-action-btn" title="删除" @click.stop="removeSavedQuery(q.id)">
-                    <n-icon :component="TrashOutline" size="12" />
-                  </button>
+                <div class="schema-columns">
+                  <div class="schema-col">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="col-name">id</span>
+                    <span class="col-type">INT</span>
+                  </div>
+                  <div class="schema-col">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><line x1="8" y1="6" x2="16" y2="6"/></svg>
+                    <span class="col-name">username</span>
+                    <span class="col-type">VARCHAR</span>
+                  </div>
                 </div>
-              </template>
+              </div>
+              <div class="schema-table-group collapsed">
+                <div class="schema-table-name">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                  <span>gbase.user_logs</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- History -->
-        <div class="sidebar-card">
+        <!-- History (collapsed below) -->
+        <div class="sidebar-card history-panel">
           <div class="sidebar-header">
-            <n-icon :component="TimeOutline" size="14" />
             <span>执行历史</span>
+            <span v-if="history.length" class="sidebar-count">{{ history.length }}</span>
           </div>
-          <div v-if="history.length === 0" class="sidebar-empty">
-            <div class="empty-icon">
-              <n-icon :component="TimeOutline" size="20" />
+          <div class="sidebar-body">
+            <div v-if="history.length === 0" class="sidebar-empty">
+              <p class="empty-desc">暂无记录</p>
             </div>
-            <div class="empty-title">暂无记录</div>
-          </div>
-          <div v-else class="history-list">
-            <div
-              v-for="(item, i) in history"
-              :key="i"
-              class="history-item"
-              :class="{ error: item.error }"
-              @click="loadFromHistory(item)"
-            >
-              <div class="history-sql">{{ item.sql.slice(0, 60) }}{{ item.sql.length > 60 ? '...' : '' }}</div>
-              <div class="history-meta">
-                <span v-if="item.error" class="history-error">失败</span>
-                <span v-else class="history-success">{{ item.result?.row_count }} 行</span>
-                <span class="history-time">{{ item.time }}</span>
+            <div v-else class="history-list">
+              <div
+                v-for="(item, i) in history.slice(0, 10)"
+                :key="i"
+                class="history-item"
+                :class="{ error: item.error }"
+                @click="loadFromHistory(item)"
+              >
+                <div class="history-sql">{{ item.sql.slice(0, 50) }}{{ item.sql.length > 50 ? '...' : '' }}</div>
+                <div class="history-meta">
+                  <span v-if="item.error" class="history-error">失败</span>
+                  <span v-else class="history-success">{{ item.result?.row_count }} 行</span>
+                  <span class="history-time">{{ item.time }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -425,485 +442,191 @@ function formatCell(val: unknown): string {
   gap: 16px;
   padding: 0 24px;
   height: 48px;
-  border-bottom: 1px solid var(--seam-1);
+  border-bottom: 1px solid #eee;
   background: #fff;
   flex-shrink: 0;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
+.header-left { display: flex; align-items: center; gap: 16px; }
+.header-right { display: flex; align-items: center; gap: 8px; }
 
 .back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-3);
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: all var(--duration-fast);
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-3);
+  background: var(--bg-panel); border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md); padding: 6px 12px;
+  cursor: pointer; transition: all var(--duration-fast);
 }
-.back-btn:hover {
-  color: var(--text-0);
-  border-color: var(--seam-2);
-  background: var(--bg-surface);
-}
-
-.header-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-0);
-}
+.back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
+.header-brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; color: var(--text-0); }
 .brand-icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  color: var(--text-2);
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-panel); border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md); color: var(--text-2);
 }
 
 .header-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--seam-1);
-  background: var(--bg-panel);
-  color: var(--text-1);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--duration-fast);
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--seam-1); background: var(--bg-panel);
+  color: var(--text-1); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all var(--duration-fast);
 }
-.header-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--seam-2);
-}
-.header-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.header-btn.primary {
-  background: #16a34a;
-  border-color: #16a34a;
-  color: #fff;
-}
-.header-btn.primary:hover:not(:disabled) {
-  background: #15803d;
-  border-color: #15803d;
-}
-.header-btn.primary.loading {
-  opacity: 0.7;
-}
+.header-btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--seam-2); }
+.header-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.header-btn.primary { background: #16a34a; border-color: #16a34a; color: #fff; }
+.header-btn.primary:hover:not(:disabled) { background: #15803d; }
+.header-btn.primary.loading { opacity: 0.7; }
 
 /* ── Main Layout ── */
 .editor-main {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-  padding: 20px;
-  gap: 16px;
-  background: #fafafa;
+  flex: 1; display: flex; min-height: 0; overflow: hidden;
+  padding: 20px; gap: 16px; background: #fafafa;
 }
-
 .editor-workspace {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow-y: auto;
-  gap: 16px;
+  flex: 1; display: flex; flex-direction: column; min-width: 0;
+  overflow-y: auto; gap: 12px;
 }
 
-/* ── Input Card ── */
+/* ── Input Card with line numbers ── */
 .input-card {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 14px;
-  overflow: hidden;
-  flex-shrink: 0;
+  background: #fff; border: 1px solid #e0e0e0; border-radius: 14px;
+  overflow: hidden; flex-shrink: 0;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  transition: border-color var(--duration-fast);
 }
-.input-card:focus-within {
-  border-color: #bbb;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
-}
-
+.input-card:focus-within { border-color: #bbb; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .input-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 18px;
-  border-bottom: 1px solid #eee;
-  background: #fafafa;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 18px; border-bottom: 1px solid #eee; background: #fafafa;
 }
+.input-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-0); }
+.input-hint { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
 
+.code-editor-wrap {
+  display: flex; background: #1a1a1a;
+  min-height: 240px; max-height: 420px;
+}
+.line-numbers {
+  width: 48px; flex-shrink: 0; overflow: hidden;
+  padding: 18px 0; text-align: right;
+  font-family: 'JetBrains Mono', monospace; font-size: 13px;
+  line-height: 1.9; color: #555; user-select: none;
+  border-right: 1px solid #2a2a2a;
+}
+.line-num { display: block; padding-right: 14px; }
 .sql-textarea {
-  width: 100%;
-  min-height: 240px;
-  max-height: 420px;
-  padding: 20px 22px;
-  border: none;
-  background: #1a1a1a;
-  color: #d4d4d4;
-  font-family: 'JetBrains Mono', 'SF Mono', SFMono-Regular, monospace;
-  font-size: 13px;
-  line-height: 1.9;
-  resize: vertical;
-  outline: none;
-  border-radius: 0;
-  tab-size: 2;
+  flex: 1; min-width: 0; padding: 18px 20px;
+  border: none; background: transparent; color: #d4d4d4;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 13px; line-height: 1.9; resize: none;
+  outline: none; overflow-y: auto;
 }
-.sql-textarea::placeholder {
-  color: #555;
-}
+.sql-textarea::placeholder { color: #555; }
 
-/* ── Execution Progress Bar ── */
-.exec-progress {
-  height: 3px;
-  background: #eee;
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 4px;
-}
+/* ── Execution Progress ── */
+.exec-progress { height: 3px; background: #eee; border-radius: 2px; overflow: hidden; }
 .exec-progress-bar {
-  height: 100%;
-  width: 30%;
+  height: 100%; width: 35%;
   background: linear-gradient(90deg, transparent, #16a34a, transparent);
-  border-radius: 2px;
-  animation: progressFlow 1.5s infinite linear;
+  border-radius: 2px; animation: progressFlow 1.5s infinite linear;
 }
 
 /* ── Result Card ── */
 .result-card {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  background: #fff; border: 1px solid #e0e0e0; border-radius: 14px;
+  overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   animation: fadeInUp 0.25s var(--ease-out-expo) both;
 }
 .result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 18px;
-  border-bottom: 1px solid #eee;
-  background: #fafafa;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 18px; border-bottom: 1px solid #eee; background: #fafafa;
 }
-.result-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-0);
-  letter-spacing: 0.02em;
-}
-.result-title .n-icon {
-  color: var(--text-3);
-}
-.result-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.meta-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-2);
-  background: none;
-  border: none;
-  cursor: pointer;
-  transition: color var(--duration-fast);
-}
-.meta-btn:hover {
-  color: var(--text-0);
-  text-decoration: underline;
-}
-.meta-text {
-  font-size: 11px;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-}
-
-.result-table-wrap {
-  overflow: auto;
-  max-height: 400px;
-}
+.result-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-0); }
+.result-meta { display: flex; align-items: center; gap: 12px; }
+.meta-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); background: none; border: none; cursor: pointer; }
+.meta-btn:hover { color: var(--text-0); }
+.meta-text { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+.result-table-wrap { overflow: auto; max-height: 400px; }
 .result-truncated {
-  padding: 8px 16px;
-  font-size: 11px;
-  color: var(--warning);
-  text-align: center;
-  border-top: 1px solid var(--seam-1);
-  background: var(--bg-surface);
-  font-family: var(--font-mono);
+  padding: 8px 16px; font-size: 11px; color: var(--warning);
+  text-align: center; border-top: 1px solid var(--seam-1);
+  background: var(--bg-surface); font-family: var(--font-mono);
 }
 
 /* ── Error Card ── */
 .error-card {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 14px;
-  padding: 16px 20px;
+  background: #fef2f2; border: 1px solid #fecaca;
+  border-radius: 14px; padding: 16px 20px;
   animation: fadeInUp 0.25s var(--ease-out-expo) both;
 }
-.error-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--error);
-  margin-bottom: 8px;
-  font-family: var(--font-mono);
-}
-.error-content {
-  font-size: 13px;
-  color: var(--error);
-  font-family: var(--font-mono);
-  white-space: pre-wrap;
-  margin: 0;
-  line-height: 1.6;
-}
+.error-title { font-size: 12px; font-weight: 600; color: var(--error); margin-bottom: 8px; }
+.error-content { font-size: 13px; color: var(--error); font-family: var(--font-mono); white-space: pre-wrap; margin: 0; }
 
 /* ── Sidebar ── */
-.editor-sidebar {
-  width: 280px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
+.editor-sidebar { width: 220px; display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
 .sidebar-card {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 14px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  flex: 1;
+  background: #fff; border: 1px solid #e0e0e0; border-radius: 14px;
+  display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
-
 .sidebar-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-3);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-bottom: 1px solid #eee;
-  background: #fafafa;
-  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; font-size: 11px; font-weight: 600;
+  color: var(--text-0); border-bottom: 1px solid #eee;
+  background: #fafafa; flex-shrink: 0;
 }
+.sidebar-close-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; background: none;
+  border: none; border-radius: 4px; cursor: pointer;
+}
+.sidebar-close-btn:hover { background: var(--bg-hover); }
 .sidebar-count {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-3);
-  background: var(--bg-panel);
-  padding: 1px 6px;
-  border-radius: 10px;
-  border: 1px solid var(--seam-1);
+  font-size: 10px; color: var(--text-3); background: var(--bg-panel);
+  padding: 1px 6px; border-radius: 8px; border: 1px solid var(--seam-1);
 }
+.sidebar-body { flex: 1; overflow-y: auto; }
+.sidebar-empty { padding: 24px 14px; text-align: center; }
+.empty-desc { font-size: 12px; color: var(--text-3); }
 
-.sidebar-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 16px;
-  text-align: center;
+/* Schema */
+.schema-panel { flex: 1.4; }
+.schema-list { padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.schema-table-group { border-radius: 8px; overflow: hidden; }
+.schema-table-name {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  font-size: 12px; color: var(--text-1); font-weight: 500;
+  cursor: pointer; border-radius: 6px; font-family: var(--font-mono);
 }
-.empty-icon {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-surface);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  color: var(--text-3);
-  margin-bottom: 12px;
+.schema-table-name:hover { background: var(--bg-hover); }
+.schema-columns { padding-left: 18px; display: flex; flex-direction: column; gap: 1px; }
+.schema-col {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; font-size: 11px; border-radius: 4px;
+  color: var(--text-2); font-family: var(--font-mono);
 }
-.empty-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin-bottom: 4px;
-}
-.empty-desc {
-  font-size: 12px;
-  color: var(--text-3);
-}
+.schema-col:hover { background: var(--bg-hover); }
+.col-name { flex: 1; color: var(--text-1); }
+.col-type { font-size: 10px; color: var(--text-3); background: var(--bg-deep); padding: 1px 5px; border-radius: 3px; }
 
-/* ── Snippets ── */
-.snippet-list {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-}
-.snippet-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  border: 1px solid var(--seam-1);
-  cursor: pointer;
-  transition: all var(--duration-fast);
-}
-.snippet-item:hover {
-  border-color: var(--seam-2);
-  background: var(--bg-raised);
-}
-.snippet-main {
-  flex: 1;
-  min-width: 0;
-}
-.snippet-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.snippet-preview {
-  font-size: 11px;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
-}
-.snippet-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity var(--duration-fast);
-}
-.snippet-item:hover .snippet-actions {
-  opacity: 1;
-}
-.snippet-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: 4px;
-  color: var(--text-3);
-  cursor: pointer;
-  transition: all var(--duration-fast);
-}
-.snippet-action-btn:hover {
-  color: var(--text-0);
-  background: var(--bg-hover);
-}
-.snippet-rename-input {
-  flex: 1;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-family: var(--font-sans);
-  border: 1px solid var(--seam-2);
-  border-radius: var(--radius-sm);
-  outline: none;
-  background: var(--bg-surface);
-  color: var(--text-0);
-}
-
-/* ── History ── */
-.history-list {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-}
+/* History panel */
+.history-panel { flex: 0.8; }
+.history-list { padding: 4px; display: flex; flex-direction: column; gap: 2px; }
 .history-item {
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  border: 1px solid var(--seam-1);
-  cursor: pointer;
+  padding: 8px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 11px; border: 1px solid transparent;
   transition: all var(--duration-fast);
 }
-.history-item:hover {
-  border-color: var(--seam-2);
-  background: var(--bg-raised);
-}
-.history-item.error {
-  border-left: 3px solid var(--error);
-}
+.history-item:hover { background: var(--bg-hover); border-color: var(--seam-1); }
+.history-item.error { border-left: 2px solid var(--error); }
 .history-sql {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--text-1);
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.5;
-  margin-bottom: 6px;
+  font-family: var(--font-mono); color: var(--text-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.history-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-.history-success {
-  color: var(--success);
-  font-family: var(--font-mono);
-}
-.history-error {
-  color: var(--error);
-  font-family: var(--font-mono);
-}
-.history-time {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  margin-left: auto;
-}
+.history-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 10px; }
+.history-success { color: var(--success); }
+.history-error { color: var(--error); }
+.history-time { color: var(--text-3); margin-left: auto; }
 
 @media (max-width: 768px) {
   .editor-sidebar { display: none; }
