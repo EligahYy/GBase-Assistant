@@ -6,11 +6,12 @@ import { listConnections, createConnection, updateConnection, deleteConnection, 
 import { listModels, type ModelInfo } from '@/api/models'
 import {
   ArrowBackOutline, ServerOutline, TrashOutline, CreateOutline, RefreshOutline,
-  CubeOutline, PulseOutline, BarChartOutline, KeyOutline, LayersOutline, AddOutline, CloseOutline,
+  CubeOutline, PulseOutline, BarChartOutline, LayersOutline, AddOutline, CloseOutline,
+  SunnyOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { useRouter } from 'vue-router'
-import { getHealthStatus, triggerReindex, getFeedbackStats, type HealthStatus, type FeedbackStats } from '@/api/admin'
+import { getHealthStatus, getFeedbackStats, type HealthStatus, type FeedbackStats } from '@/api/admin'
 
 const router = useRouter()
 const connStore = useConnectionStore()
@@ -38,9 +39,6 @@ const connections = ref(connStore.connections)
 // ── System status ──
 const health = ref<HealthStatus | null>(null)
 const healthLoading = ref(false)
-const adminToken = ref('')
-const reindexLoading = ref(false)
-const reindexResult = ref<string | null>(null)
 
 // ── Feedback stats ──
 const feedbackStats = ref<FeedbackStats | null>(null)
@@ -71,41 +69,11 @@ const expandedSchemas = ref<Set<string>>(new Set())
 const schemaCache = ref<Map<string, TableSchemaItem[]>>(new Map())
 const schemaLoading = ref<Set<string>>(new Set())
 
-// ── Active tab ──
-type TabKey = 'general' | 'connections' | 'admin'
-const activeTab = ref<TabKey>('general')
-
 async function loadHealth() {
   healthLoading.value = true
   try { health.value = await getHealthStatus() } catch { /* ignore */ } finally { healthLoading.value = false }
 }
 
-async function loadFeedbackStats() {
-  if (!adminToken.value.trim()) return
-  feedbackLoading.value = true
-  try { feedbackStats.value = await getFeedbackStats(adminToken.value) } catch { feedbackStats.value = null } finally { feedbackLoading.value = false }
-}
-
-async function handleReindex() {
-  if (!adminToken.value.trim()) { naiveMsg.warning('请输入管理 Token'); return }
-  reindexLoading.value = true; reindexResult.value = null
-  try {
-    const resp = await triggerReindex(adminToken.value)
-    const summary = Object.entries(resp.results).map(([k, v]) => `${k}: ${v} 条`).join('，')
-    reindexResult.value = summary
-    naiveMsg.success(`重建完成：${summary}`)
-    await loadHealth()
-  } catch (e: any) {
-    const msg = e?.message || '重建失败'
-    naiveMsg.error(msg)
-    reindexResult.value = `失败：${msg}`
-  } finally { reindexLoading.value = false }
-}
-
-watch(adminToken, async (val) => {
-  if (val.trim()) await loadFeedbackStats()
-  else feedbackStats.value = null
-})
 
 const statusColor = (s: string, key?: string) => {
   if (key === 'default_model') return 'var(--text-2)'
@@ -221,11 +189,6 @@ function handleDelete(id: string, name: string) {
   })
 }
 
-const tabs: { key: TabKey; label: string; icon: any }[] = [
-  { key: 'general', label: '通用', icon: CubeOutline },
-  { key: 'connections', label: '连接', icon: ServerOutline },
-  { key: 'admin', label: '管理', icon: KeyOutline },
-]
 </script>
 
 <template>
@@ -246,23 +209,11 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
       </div>
     </header>
 
-    <!-- Body: Nav + Content -->
+    <!-- Body -->
     <div class="settings-body">
-      <aside class="settings-nav">
-        <button
-          v-for="tab in tabs"
-          :key="tab.key"
-          :class="['nav-item', { active: activeTab === tab.key }]"
-          @click="activeTab = tab.key"
-        >
-          <n-icon :component="tab.icon" size="18" />
-          <span>{{ tab.label }}</span>
-        </button>
-      </aside>
-
       <main class="settings-main">
         <!-- ── General ── -->
-        <section v-if="activeTab === 'general'" class="tab-panel">
+        <section class="tab-panel">
           <div class="setting-card">
             <div class="card-label">
               <n-icon :component="LayersOutline" size="16" />
@@ -286,7 +237,7 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
                   class="status-cell"
                 >
                   <div class="status-dot" :style="{ background: statusColor(value, key) }" />
-                  <span class="status-name">{{ { database: '数据库', llm_api: 'LLM API', vector_db: '向量数据库', default_model: '默认模型', gbase_connections: 'GBase 连接' }[key] || key }}</span>
+                  <span class="status-name">{{ { database: 'SQLite 数据库', llm_api: 'LLM API', vector_db: 'Qdrant 向量库', gbase_connections: 'GBase 连接' }[key] || key }}</span>
                   <span class="status-value" :style="{ color: statusColor(value, key) }">{{ statusLabel(value, key) }}</span>
                 </div>
               </template>
@@ -297,7 +248,7 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
         </section>
 
         <!-- ── Connections ── -->
-        <section v-if="activeTab === 'connections'" class="tab-panel">
+        <section class="tab-panel">
           <button
             v-if="!showAddForm"
             class="add-connection-btn"
@@ -424,29 +375,7 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
         </section>
 
         <!-- ── Admin ── -->
-        <section v-if="activeTab === 'admin'" class="tab-panel">
-          <div class="setting-card">
-            <div class="card-label">
-              <n-icon :component="KeyOutline" size="16" />
-              <span>管理 Token</span>
-            </div>
-            <div class="admin-input-row">
-              <n-input v-model:value="adminToken" placeholder="X-Admin-Token" type="password" :disabled="reindexLoading" />
-            </div>
-          </div>
-
-          <div class="setting-card">
-            <div class="card-label">
-              <n-icon :component="RefreshOutline" size="16" />
-              <span>重建向量索引</span>
-            </div>
-            <div class="admin-action-row">
-              <n-button type="primary" :loading="reindexLoading" :disabled="!adminToken.trim()" @click="handleReindex">立即重建</n-button>
-              <span class="admin-hint">需要 ADMIN_TOKEN 环境变量，未设置时 debug 模式自动放行</span>
-            </div>
-            <div v-if="reindexResult" class="admin-result">{{ reindexResult }}</div>
-          </div>
-
+        <section class="tab-panel">
           <div v-if="feedbackStats" class="setting-card">
             <div class="card-label">
               <n-icon :component="BarChartOutline" size="16" />
@@ -641,8 +570,8 @@ const tabs: { key: TabKey; label: string; icon: any }[] = [
 /* ── Status Grid ── */
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 .status-cell {
   display: flex;
