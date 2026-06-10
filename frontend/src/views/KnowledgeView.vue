@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, h } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NDataTable, NUpload, NButton, NTag, NProgress,
   NIcon, NSpace, NModal, NAlert, useMessage,
@@ -8,6 +9,7 @@ import {
 import {
   TrashOutline, RefreshOutline, CloudUploadOutline,
   DocumentTextOutline, AlertCircleOutline, CheckmarkCircleOutline,
+  ArrowBackOutline,
 } from '@vicons/ionicons5'
 import {
   fetchDocuments, uploadDocument, deleteDocument, reindexDocument,
@@ -17,6 +19,7 @@ import {
 
 defineOptions({ name: 'KnowledgeView' })
 
+const router = useRouter()
 const msg = useMessage()
 const documents = ref<KnowledgeDocument[]>([])
 const indexState = ref<IndexStateResponse>({ total_documents: 0, total_chunks: 0, ready_documents: 0, last_indexed_at: null })
@@ -259,11 +262,19 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
 </script>
 
 <template>
-  <div class="knowledge-page">
+  <div class="page-shell knowledge-page">
     <!-- Header -->
+    <header class="kb-header">
+      <button class="back-btn" @click="router.push('/')">
+        <n-icon :component="ArrowBackOutline" size="16" />
+        <span>返回</span>
+      </button>
+      <span class="header-title">知识库管理</span>
+    </header>
+
+    <div class="kb-body">
     <div class="page-header">
       <div>
-        <h1>知识库管理</h1>
         <p class="page-subtitle">管理文档上传、索引和向量化，提升 RAG 检索质量</p>
       </div>
       <n-button quaternary @click="showReindexAllModal = true">
@@ -458,17 +469,36 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
         </div>
       </div>
     </n-modal>
+    </div><!-- kb-body -->
   </div>
 </template>
 
 <style scoped>
 .knowledge-page {
-  padding: 28px 36px;
-  max-width: 1160px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  background: #fafafa;
+}
+
+.kb-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 24px; height: 48px;
+  border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0;
+}
+.back-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-3);
+  background: var(--bg-panel); border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md); padding: 5px 10px;
+  cursor: pointer; transition: all var(--duration-fast);
+}
+.back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
+.header-title { font-size: 15px; font-weight: 600; color: #111; }
+
+.kb-body {
+  flex: 1; overflow-y: auto;
+  padding: 24px 28px 80px;
+  max-width: 1160px; margin: 0 auto; width: 100%;
+  display: flex; flex-direction: column; gap: 20px;
 }
 
 /* ── Header ── */
@@ -477,16 +507,10 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   align-items: flex-start;
   justify-content: space-between;
 }
-.page-header h1 {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-0);
-  margin: 0;
-}
 .page-subtitle {
   font-size: 13px;
   color: var(--text-3);
-  margin: 4px 0 0;
+  margin: 0;
 }
 
 /* ── Summary Cards ── */

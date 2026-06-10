@@ -207,18 +207,11 @@ function handleDelete(id: string, name: string) {
   <div class="page-shell settings-page">
     <!-- Header -->
     <header class="settings-header">
-      <div class="header-left">
-        <button class="back-btn" @click="router.push('/')">
-          <n-icon :component="ArrowBackOutline" size="16" />
-          <span>返回</span>
-        </button>
-        <div class="header-brand">
-          <div class="brand-icon">
-            <n-icon :component="ServerOutline" size="18" />
-          </div>
-          <span>设置</span>
-        </div>
-      </div>
+      <button class="back-btn" @click="router.push('/')">
+        <n-icon :component="ArrowBackOutline" size="16" />
+        <span>返回</span>
+      </button>
+      <span class="header-title">设置</span>
     </header>
 
     <!-- Body -->
@@ -457,122 +450,34 @@ function handleDelete(id: string, name: string) {
 .settings-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--seam-1);
-  background: var(--bg-void);
+  padding: 0 24px;
+  height: 48px;
+  border-bottom: 1px solid #eee;
+  background: #fff;
   flex-shrink: 0;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.settings-main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 36px 24px 80px;
 }
 
 .back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-3);
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: all var(--duration-fast);
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-3);
+  background: var(--bg-panel); border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md); padding: 5px 10px;
+  cursor: pointer; transition: all var(--duration-fast);
 }
-.back-btn:hover {
-  color: var(--text-0);
-  border-color: var(--seam-2);
-  background: var(--bg-surface);
-}
-
-.header-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-0);
-}
-.brand-icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  color: var(--text-2);
-}
-
-/* ── Body Layout ── */
-.settings-body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* ── Left Nav ── */
-.settings-nav {
-  width: 200px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--seam-1);
-  background: var(--bg-void);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 20px 12px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-2);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--duration-fast);
-  text-align: left;
-}
-.nav-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-1);
-}
-.nav-item.active {
-  background: var(--bg-panel);
-  color: var(--text-0);
-  border-color: var(--seam-1);
-  font-weight: 600;
-}
-.nav-item .n-icon {
-  flex-shrink: 0;
-  opacity: 0.6;
-}
-.nav-item.active .n-icon {
-  opacity: 1;
-}
-
-/* ── Content ── */
-.settings-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 40px 32px 80px;
-  max-width: 640px;
-  margin: 0 auto;
-  width: 100%;
-}
+.back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
+.header-title { font-size: 15px; font-weight: 600; color: #111; }
 
 .tab-panel {
   animation: fadeInUp 0.25s var(--ease-out-expo) both;

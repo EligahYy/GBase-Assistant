@@ -12,14 +12,12 @@ import {
 import {
   ArrowBackOutline,
   PlayOutline,
-  TerminalOutline,
   SaveOutline,
   TrashOutline,
   CreateOutline,
   BookmarkOutline,
   DownloadOutline,
   CodeSlashOutline,
-  TimeOutline,
   FlashOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -233,12 +231,7 @@ function formatCell(val: unknown): string {
           <n-icon :component="ArrowBackOutline" size="16" />
           <span>返回</span>
         </button>
-        <div class="header-brand">
-          <div class="brand-icon">
-            <n-icon :component="TerminalOutline" size="18" />
-          </div>
-          <span>SQL 编辑器</span>
-        </div>
+        <span class="header-title">SQL 编辑器</span>
       </div>
       <div class="header-right">
         <n-select
@@ -473,23 +466,18 @@ function formatCell(val: unknown): string {
   flex-shrink: 0;
 }
 
-.header-left { display: flex; align-items: center; gap: 16px; }
+.header-left { display: flex; align-items: center; gap: 12px; }
 .header-right { display: flex; align-items: center; gap: 8px; }
 
 .back-btn {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 13px; color: var(--text-3);
   background: var(--bg-panel); border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md); padding: 6px 12px;
+  border-radius: var(--radius-md); padding: 5px 10px;
   cursor: pointer; transition: all var(--duration-fast);
 }
 .back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
-.header-brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; color: var(--text-0); }
-.brand-icon {
-  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-  background: var(--bg-panel); border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md); color: var(--text-2);
-}
+.header-title { font-size: 15px; font-weight: 600; color: #111; }
 
 .header-btn {
   display: inline-flex; align-items: center; gap: 6px;

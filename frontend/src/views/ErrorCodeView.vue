@@ -95,6 +95,15 @@ function categoryLabel(cat: string): string {
 
 <template>
   <div class="page-shell errorcode-page">
+    <!-- Header -->
+    <header class="errorcode-header">
+      <button class="back-btn" @click="router.push('/')">
+        <n-icon :component="ArrowBackOutline" size="16" />
+        <span>返回</span>
+      </button>
+      <span class="header-title">错误码查询</span>
+    </header>
+
     <!-- Main -->
     <div class="errorcode-main">
       <!-- Hero -->
@@ -192,9 +201,25 @@ function categoryLabel(cat: string): string {
   height: 100vh; display: flex; flex-direction: column; overflow: hidden;
   background: #fafafa;
 }
+
+.errorcode-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 24px; height: 48px;
+  border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0;
+}
+.back-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-3);
+  background: var(--bg-panel); border: 1px solid var(--seam-1);
+  border-radius: var(--radius-md); padding: 5px 10px;
+  cursor: pointer; transition: all var(--duration-fast);
+}
+.back-btn:hover { color: var(--text-0); border-color: var(--seam-2); }
+.header-title { font-size: 15px; font-weight: 600; color: #111; }
+
 .errorcode-main {
   flex: 1; min-width: 0; overflow-y: auto;
-  max-width: 800px; margin: 0 auto; padding: 48px 28px 80px;
+  max-width: 800px; margin: 0 auto; padding: 40px 28px 80px;
 }
 
 /* ── Hero ── */
