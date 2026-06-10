@@ -22,6 +22,7 @@ const documents = ref<KnowledgeDocument[]>([])
 const indexState = ref<IndexStateResponse>({ total_documents: 0, total_chunks: 0, ready_documents: 0, last_indexed_at: null })
 const loading = ref(false)
 const showReindexAllModal = ref(false)
+const reindexPassword = ref('')
 const progressMap = ref<Record<string, { phase: string; indexed: number; total: number; error?: string }>>({})
 const eventSources: Record<string, EventSource> = {}
 
@@ -160,13 +161,18 @@ async function reindex(doc: KnowledgeDocument) {
 }
 
 async function handleReindexAll() {
+  if (!reindexPassword.value.trim()) {
+    msg.warning('请输入管理密码')
+    return
+  }
   try {
-    await reindexAll()
+    await reindexAll(reindexPassword.value)
     showReindexAllModal.value = false
+    reindexPassword.value = ''
     msg.success('全量重建已触发')
     load()
   } catch (e: any) {
-    msg.error(e.message || '失败')
+    msg.error(e.message || '重建失败，请检查密码是否正确')
   }
 }
 
@@ -293,21 +299,23 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
       </div>
     </div>
 
-    <!-- Upload Toolbar -->
-    <div class="toolbar-row">
+    <!-- Drag Upload Zone -->
+    <div class="upload-zone">
+      <div class="upload-icon-wrap">
+        <n-icon :component="CloudUploadOutline" size="22" />
+      </div>
+      <div class="upload-title">点击或拖拽文件到此处上传</div>
+      <div class="upload-hint">支持 PDF, Markdown, TXT, DOCX（最大 50MB）</div>
       <n-upload
         multiple
         directory-dnd
-        accept=".pdf,.md"
+        accept=".pdf,.md,.txt,.docx"
         :custom-request="handleUpload"
         :show-file-list="false"
+        style="margin-top:12px;"
       >
-        <n-button size="small">
-          <template #icon><n-icon :component="CloudUploadOutline" /></template>
-          上传文档
-        </n-button>
+        <n-button size="small" type="primary">选择文件</n-button>
       </n-upload>
-      <span class="toolbar-hint">支持 PDF 和 Markdown，上传后自动解析、切片、向量化</span>
     </div>
 
     <!-- Indexing Progress -->
@@ -401,12 +409,21 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
     <n-modal
       v-model:show="showReindexAllModal"
       preset="dialog"
-      title="全量重建索引"
-      content="将重新解析并索引所有已上传文档，可能需要几分钟。确认继续？"
-      positive-text="确认"
+      title="重建向量索引"
+      positive-text="确认重建"
       negative-text="取消"
+      :show-icon="false"
       @positive-click="handleReindexAll"
-    />
+    >
+      <p style="margin-bottom:12px;font-size:13px;color:#888;">此操作将重新解析所有文档并重建向量索引，可能需要几分钟。</p>
+      <n-input
+        v-model:value="reindexPassword"
+        type="password"
+        placeholder="输入管理密码"
+        show-password-on="click"
+        @keydown.enter="handleReindexAll"
+      />
+    </n-modal>
   </div>
 </template>
 
@@ -479,7 +496,35 @@ const columns: DataTableColumn<KnowledgeDocument>[] = [
   font-weight: 500;
 }
 
-/* ── Toolbar ── */
+/* ── Upload Zone ── */
+.upload-zone {
+  border: 2px dashed #e0e0e0;
+  border-radius: 14px;
+  padding: 32px;
+  text-align: center;
+  background: #fff;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.upload-zone:hover {
+  border-color: #111;
+  background: #fafafa;
+}
+.upload-icon-wrap {
+  width: 48px; height: 48px;
+  background: #f9f9f9; border: 1px solid #eee;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 12px; color: #999;
+}
+.upload-title {
+  font-size: 14px; font-weight: 600; color: #111; margin-bottom: 4px;
+}
+.upload-hint {
+  font-size: 11px; color: #bbb;
+}
+
+/* ── Toolbar (removed, absorbed by upload zone) ── */
 .toolbar-row {
   display: flex;
   align-items: center;

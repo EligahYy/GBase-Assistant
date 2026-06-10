@@ -60,8 +60,10 @@ export async function cancelIndexing(id: string): Promise<void> {
   await apiClient.post(`/admin/knowledge/documents/${id}/cancel`)
 }
 
-export async function reindexAll(): Promise<void> {
-  await apiClient.post('/admin/knowledge/reindex-all')
+export async function reindexAll(token?: string): Promise<void> {
+  await apiClient.post('/admin/knowledge/reindex-all', {}, {
+    headers: token ? { 'X-Admin-Token': token } : {},
+  })
 }
 
 export async function fetchIndexState(): Promise<IndexStateResponse> {
