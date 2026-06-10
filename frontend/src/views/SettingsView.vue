@@ -350,25 +350,33 @@ function handleDelete(id: string, name: string) {
           </div>
           <div v-else class="connection-list">
             <div v-for="c in connections" :key="c.id" class="connection-card">
-              <div class="conn-main">
-                <div class="conn-icon-wrap">
-                  <n-icon :component="ServerOutline" size="18" />
+              <div class="conn-top">
+                <div class="conn-main">
+                  <div
+                    class="conn-icon-wrap"
+                    :class="{
+                      'conn-ok': connStore.connStatusMap[c.id] === 'ok',
+                      'conn-err': connStore.connStatusMap[c.id] === 'error',
+                    }"
+                  >
+                    <n-icon :component="ServerOutline" size="18" />
+                  </div>
+                  <div class="conn-info">
+                    <span class="conn-name">{{ c.name }}</span>
+                    <div class="conn-detail">
+                      <template v-if="c.host">{{ c.host }}:{{ c.port }}</template>
+                      <template v-else-if="c.driver_type === 'sqlite'">本地 SQLite</template>
+                      <template v-else>手动模式</template>
+                    </div>
+                    <div class="conn-meta">
+                      <span :class="['conn-badge', c.has_schema ? 'ok' : 'muted']">{{ c.has_schema ? '已配置 Schema' : '无 Schema' }}</span>
+                      <span class="conn-badge">{{ c.driver_type === 'manual' ? '手动' : c.driver_type === 'sqlite' ? 'SQLite' : '原生驱动' }}</span>
+                    </div>
+                  </div>
                 </div>
-                <div class="conn-info">
-                  <span class="conn-name">{{ c.name }}</span>
-                  <div class="conn-detail">
-                    <template v-if="c.host">{{ c.host }}:{{ c.port }}</template>
-                    <template v-else-if="c.driver_type === 'sqlite'">本地 SQLite</template>
-                    <template v-else>手动模式</template>
-                    <span v-if="c.driver_type !== 'manual'" style="margin-left:8px;">
-                      <span class="conn-status-dot" :class="connStore.connStatusMap[c.id] === 'ok' ? 'ok' : connStore.connStatusMap[c.id] === 'error' ? 'err' : ''"></span>
-                      {{ connStore.connStatusMap[c.id] === 'ok' ? '已连通' : connStore.connStatusMap[c.id] === 'error' ? '已断开' : '待检测' }}
-                    </span>
-                  </div>
-                  <div class="conn-meta">
-                    <span :class="['conn-badge', c.has_schema ? 'ok' : 'muted']">{{ c.has_schema ? '已配置 Schema' : '无 Schema' }}</span>
-                    <span class="conn-badge">{{ c.driver_type === 'manual' ? '手动' : c.driver_type === 'sqlite' ? 'SQLite' : '原生驱动' }}</span>
-                  </div>
+                <div v-if="c.driver_type !== 'manual'" class="conn-status-badge" :class="connStore.connStatusMap[c.id] === 'ok' ? 'ok' : connStore.connStatusMap[c.id] === 'error' ? 'err' : ''">
+                  <span class="conn-status-dot" :class="connStore.connStatusMap[c.id] === 'ok' ? 'ok' : connStore.connStatusMap[c.id] === 'error' ? 'err' : ''"></span>
+                  {{ connStore.connStatusMap[c.id] === 'ok' ? '已连接' : connStore.connStatusMap[c.id] === 'error' ? '连接失败' : '待检测' }}
                 </div>
               </div>
               <div class="conn-actions">
@@ -718,16 +726,27 @@ function handleDelete(id: string, name: string) {
   border-color: var(--seam-2);
 }
 
+.conn-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
 .conn-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 14px;
 }
 .conn-icon-wrap {
   width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
-  background: #ecfdf5; border: 1px solid #bbf7d0;
-  border-radius: 12px; color: #16a34a; flex-shrink: 0;
+  background: #f5f5f5; border: 1px solid #e8e8e8;
+  border-radius: 12px; color: #999; flex-shrink: 0;
+}
+.conn-icon-wrap.conn-ok {
+  background: #ecfdf5; border-color: #bbf7d0; color: #16a34a;
+}
+.conn-icon-wrap.conn-err {
+  background: #fef2f2; border-color: #fecaca; color: #dc2626;
 }
 .conn-info {
   flex: 1;
@@ -750,6 +769,18 @@ function handleDelete(id: string, name: string) {
 }
 .conn-status-dot.ok { background: #16a34a; }
 .conn-status-dot.err { background: #dc2626; }
+
+.conn-status-badge {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 600;
+  padding: 3px 10px; border-radius: 6px;
+  background: #f5f5f5; color: #999; border: 1px solid #e8e8e8;
+  flex-shrink: 0;
+}
+.conn-status-badge.ok { background: #ecfdf5; color: #16a34a; border-color: #bbf7d0; }
+.conn-status-badge.err { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+
+.conn-actions { display: flex; align-items: center; gap: 4px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; flex-wrap: wrap; }
 .conn-meta {
   display: flex;
   align-items: center;
