@@ -233,11 +233,12 @@ function handleDelete(id: string, name: string) {
               <template v-if="health">
                 <div
                   v-for="(value, key) in health.dependencies"
+                  v-show="key !== 'default_model'"
                   :key="key"
                   class="status-cell"
                 >
                   <div class="status-dot" :style="{ background: statusColor(value, key) }" />
-                  <span class="status-name">{{ { database: 'SQLite 数据库', llm_api: 'LLM API', vector_db: 'Qdrant 向量库', gbase_connections: 'GBase 连接' }[key] || key }}</span>
+                  <span class="status-name">{{ { database: 'SQLite 数据库', llm_api: 'LLM API', vector_db: 'Qdrant 向量库', default_model: '', gbase_connections: 'GBase 连接' }[key] || key }}</span>
                   <span class="status-value" :style="{ color: statusColor(value, key) }">{{ statusLabel(value, key) }}</span>
                 </div>
               </template>
