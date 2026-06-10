@@ -85,47 +85,6 @@ onMounted(() => {
   position: relative;
 }
 
-/* Starfield background */
-.app-shell::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(1px 1px at 20px 30px, rgba(45,212,191,0.15), transparent),
-    radial-gradient(1px 1px at 40px 70px, rgba(45,212,191,0.08), transparent),
-    radial-gradient(1px 1px at 50px 160px, rgba(255,255,255,0.06), transparent),
-    radial-gradient(1px 1px at 90px 40px, rgba(45,212,191,0.10), transparent),
-    radial-gradient(1px 1px at 130px 80px, rgba(255,255,255,0.04), transparent),
-    radial-gradient(1px 1px at 160px 120px, rgba(45,212,191,0.06), transparent),
-    radial-gradient(1.5px 1.5px at 200px 50px, rgba(255,255,255,0.08), transparent),
-    radial-gradient(1px 1px at 250px 180px, rgba(45,212,191,0.05), transparent),
-    radial-gradient(1px 1px at 300px 90px, rgba(255,255,255,0.04), transparent),
-    radial-gradient(1px 1px at 350px 150px, rgba(45,212,191,0.07), transparent),
-    radial-gradient(1.5px 1.5px at 400px 60px, rgba(255,255,255,0.06), transparent),
-    radial-gradient(1px 1px at 450px 200px, rgba(45,212,191,0.04), transparent),
-    radial-gradient(1px 1px at 500px 110px, rgba(255,255,255,0.05), transparent),
-    radial-gradient(1px 1px at 550px 170px, rgba(45,212,191,0.06), transparent),
-    radial-gradient(1px 1px at 600px 80px, rgba(255,255,255,0.04), transparent),
-    radial-gradient(1.5px 1.5px at 650px 140px, rgba(45,212,191,0.08), transparent),
-    radial-gradient(1px 1px at 700px 190px, rgba(255,255,255,0.05), transparent),
-    radial-gradient(1px 1px at 750px 100px, rgba(45,212,191,0.06), transparent),
-    radial-gradient(1px 1px at 800px 160px, rgba(255,255,255,0.04), transparent),
-    radial-gradient(1.5px 1.5px at 850px 70px, rgba(45,212,191,0.07), transparent),
-    radial-gradient(1px 1px at 900px 130px, rgba(255,255,255,0.05), transparent),
-    radial-gradient(1px 1px at 950px 180px, rgba(45,212,191,0.05), transparent),
-    radial-gradient(1px 1px at 1000px 90px, rgba(255,255,255,0.06), transparent);
-}
-
-html[data-theme="light"] .app-shell::before {
-  background:
-    radial-gradient(1px 1px at 20px 30px, rgba(13,148,136,0.08), transparent),
-    radial-gradient(1px 1px at 40px 70px, rgba(13,148,136,0.04), transparent),
-    radial-gradient(1px 1px at 50px 160px, rgba(0,0,0,0.03), transparent),
-    radial-gradient(1px 1px at 90px 40px, rgba(13,148,136,0.06), transparent),
-    radial-gradient(1px 1px at 130px 80px, rgba(0,0,0,0.02), transparent);
-}
 
 .main-stage {
   flex: 1;
