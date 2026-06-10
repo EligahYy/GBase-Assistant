@@ -7,7 +7,7 @@ import { listModels, type ModelInfo } from '@/api/models'
 import {
   ArrowBackOutline, ServerOutline, TrashOutline, CreateOutline, RefreshOutline,
   CubeOutline, PulseOutline, BarChartOutline, LayersOutline, AddOutline, CloseOutline,
-  SunnyOutline,
+  SunnyOutline, SparklesOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { useRouter } from 'vue-router'
@@ -217,50 +217,58 @@ function handleDelete(id: string, name: string) {
         <!-- ── General ── -->
         <section class="tab-panel">
           <div class="section-label">通用设置</div>
-          <div class="setting-card">
-            <div class="card-label">
-              <n-icon :component="SunnyOutline" size="16" />
-              <span>外观主题</span>
-            </div>
-            <div class="card-control">
-              <div style="display:flex;background:#f4f4f4;border-radius:7px;padding:1px;">
-                <button style="padding:4px 12px;font-size:11px;font-weight:600;color:#111;background:#fff;border-radius:6px;border:none;cursor:pointer;">浅色</button>
-                <button style="padding:4px 12px;font-size:11px;color:#aaa;background:transparent;border:none;cursor:pointer;">深色</button>
+
+          <!-- Theme item card -->
+          <div class="item-card">
+            <div class="item-left">
+              <div class="item-icon">
+                <n-icon :component="SunnyOutline" size="18" />
+              </div>
+              <div>
+                <div class="item-title">外观主题</div>
+                <div class="item-status">当前：浅色模式</div>
               </div>
             </div>
-          </div>
-
-          <div class="setting-card">
-            <div class="card-label">
-              <n-icon :component="LayersOutline" size="16" />
-              <span>默认模型</span>
-            </div>
-            <div class="card-control">
-              <n-select v-model:value="selectedModel" :options="modelOptions" />
+            <div class="theme-toggle">
+              <button class="toggle-option active">浅色</button>
+              <button class="toggle-option">深色</button>
             </div>
           </div>
 
-          <div class="setting-card">
-            <div class="card-label">
-              <n-icon :component="PulseOutline" size="16" />
-              <span>系统状态</span>
-            </div>
-            <div class="status-grid">
-              <template v-if="health">
-                <div
-                  v-for="(value, key) in health.dependencies"
-                  v-show="key !== 'default_model'"
-                  :key="key"
-                  class="status-cell"
-                >
-                  <div class="status-dot" :style="{ background: statusColor(value, key) }" />
-                  <span class="status-name">{{ { database: 'SQLite 数据库', llm_api: 'LLM API', vector_db: 'Qdrant 向量库', default_model: '', gbase_connections: 'GBase 连接' }[key] || key }}</span>
-                  <span class="status-value" :style="{ color: statusColor(value, key) }">{{ statusLabel(value, key) }}</span>
+          <!-- Model item card -->
+          <div class="item-card">
+            <div class="item-left">
+              <div class="item-icon" style="background:#f5f3ff;border-color:#ddd6fe;">
+                <n-icon :component="SparklesOutline" size="18" color="#7c3aed" />
+              </div>
+              <div>
+                <div class="item-title">默认模型</div>
+                <div class="item-status">
+                  当前：<code>deepseek-chat</code>
+                  <span class="status-indicator ok">可用</span>
                 </div>
-              </template>
-              <div v-else-if="healthLoading" class="status-empty">加载中...</div>
-              <div v-else class="status-empty">状态获取失败</div>
+              </div>
             </div>
+            <n-select v-model:value="selectedModel" :options="modelOptions" style="width:200px;" size="small" />
+          </div>
+
+          <!-- System Status -->
+          <div class="section-label" style="margin-top:28px;">系统状态</div>
+          <div class="status-grid">
+            <template v-if="health">
+              <div
+                v-for="(value, key) in health.dependencies"
+                v-show="key !== 'default_model'"
+                :key="key"
+                class="status-cell"
+              >
+                <div class="status-dot" :style="{ background: statusColor(value, key) }" />
+                <span class="status-name">{{ { database: 'SQLite 数据库', llm_api: 'LLM API', vector_db: 'Qdrant 向量库', default_model: '', gbase_connections: 'GBase 连接' }[key] || key }}</span>
+                <span class="status-value" :style="{ color: statusColor(value, key) }">{{ statusLabel(value, key) }}</span>
+              </div>
+            </template>
+            <div v-else-if="healthLoading" class="status-empty">加载中...</div>
+            <div v-else class="status-empty">状态获取失败</div>
           </div>
         </section>
 
@@ -343,13 +351,18 @@ function handleDelete(id: string, name: string) {
                 </div>
                 <div class="conn-info">
                   <span class="conn-name">{{ c.name }}</span>
+                  <div class="conn-detail">
+                    <template v-if="c.host">{{ c.host }}:{{ c.port }}</template>
+                    <template v-else-if="c.driver_type === 'sqlite'">本地 SQLite</template>
+                    <template v-else>手动模式</template>
+                    <span v-if="c.driver_type !== 'manual'" style="margin-left:8px;">
+                      <span class="conn-status-dot" :class="connStore.connStatusMap[c.id] === 'ok' ? 'ok' : connStore.connStatusMap[c.id] === 'error' ? 'err' : ''"></span>
+                      {{ connStore.connStatusMap[c.id] === 'ok' ? '已连通' : connStore.connStatusMap[c.id] === 'error' ? '已断开' : '待检测' }}
+                    </span>
+                  </div>
                   <div class="conn-meta">
                     <span :class="['conn-badge', c.has_schema ? 'ok' : 'muted']">{{ c.has_schema ? '已配置 Schema' : '无 Schema' }}</span>
                     <span class="conn-badge">{{ c.driver_type === 'manual' ? '手动' : c.driver_type === 'sqlite' ? 'SQLite' : '原生驱动' }}</span>
-                    <span v-if="c.driver_type !== 'manual'" :class="['conn-badge', connStore.connStatusMap[c.id] === 'ok' ? 'ok' : connStore.connStatusMap[c.id] === 'error' ? 'warn' : 'muted']">
-                      {{ connStore.connStatusMap[c.id] === 'ok' ? '已连通' : connStore.connStatusMap[c.id] === 'error' ? '已断开' : '待检测' }}
-                    </span>
-                    <span class="conn-date">{{ new Date(c.created_at).toLocaleDateString() }}</span>
                   </div>
                 </div>
               </div>
@@ -394,29 +407,23 @@ function handleDelete(id: string, name: string) {
 
         <!-- ── Admin ── -->
         <section class="tab-panel">
-          <div class="section-label">SQL 反馈统计</div>
-          <div v-if="feedbackStats" class="setting-card">
-            <div class="card-label">
-              <n-icon :component="BarChartOutline" size="16" />
-              <span>SQL 反馈统计</span>
+          <div class="section-label" style="margin-top:28px;">SQL 反馈统计</div>
+          <div v-if="feedbackStats" class="feedback-grid">
+            <div class="feedback-stat">
+              <span class="feedback-value">{{ feedbackStats.total }}</span>
+              <span class="feedback-label">总反馈</span>
             </div>
-            <div class="feedback-grid">
-              <div class="feedback-stat">
-                <span class="feedback-value">{{ feedbackStats.total }}</span>
-                <span class="feedback-label">总反馈</span>
-              </div>
-              <div class="feedback-stat">
-                <span class="feedback-value" style="color: var(--success)">{{ feedbackStats.accepted }}</span>
-                <span class="feedback-label">已接受</span>
-              </div>
-              <div class="feedback-stat">
-                <span class="feedback-value" style="color: var(--warning)">{{ feedbackStats.modified }}</span>
-                <span class="feedback-label">已修改</span>
-              </div>
-              <div class="feedback-stat">
-                <span class="feedback-value" style="color: var(--error)">{{ feedbackStats.rejected }}</span>
-                <span class="feedback-label">已拒绝</span>
-              </div>
+            <div class="feedback-stat accepted">
+              <span class="feedback-value">{{ feedbackStats.accepted }}</span>
+              <span class="feedback-label">已接受</span>
+            </div>
+            <div class="feedback-stat modified">
+              <span class="feedback-value">{{ feedbackStats.modified }}</span>
+              <span class="feedback-label">已修改</span>
+            </div>
+            <div class="feedback-stat rejected">
+              <span class="feedback-value">{{ feedbackStats.rejected }}</span>
+              <span class="feedback-label">已拒绝</span>
             </div>
           </div>
         </section>
@@ -574,6 +581,37 @@ function handleDelete(id: string, name: string) {
   margin-bottom: 10px;
   padding: 0 2px;
 }
+
+/* ── Item Card ── */
+.item-card {
+  display: flex; align-items: center; justify-content: space-between;
+  background: #fff; border: 1px solid #eee;
+  border-radius: 12px; padding: 14px 16px; margin-bottom: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.item-left { display: flex; align-items: flex-start; gap: 12px; }
+.item-icon {
+  width: 36px; height: 36px;
+  background: #f9f9f9; border: 1px solid #eee;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: #888; flex-shrink: 0;
+}
+.item-title { font-size: 13px; font-weight: 600; color: #111; margin-bottom: 2px; }
+.item-status { font-size: 10px; color: #aaa; }
+.item-status code { color: #111; font-family: monospace; font-weight: 500; background:#f5f5f5; padding:1px 4px; border-radius:3px; }
+.status-indicator { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; font-size: 10px; font-weight: 500; }
+.status-indicator.ok { color: #16a34a; }
+.status-indicator::before { content: ''; width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
+
+/* ── Theme Toggle ── */
+.theme-toggle { display: flex; background: #f4f4f4; border-radius: 8px; padding: 2px; }
+.toggle-option {
+  padding: 5px 14px; font-size: 11px; font-weight: 500;
+  border: none; background: transparent; color: #aaa;
+  border-radius: 6px; cursor: pointer; transition: all 0.15s;
+}
+.toggle-option.active { background: #fff; color: #111; font-weight: 600; box-shadow: 0 1px 1px rgba(0,0,0,0.04); }
 
 /* ── Setting Card ── */
 .setting-card {
@@ -766,28 +804,32 @@ function handleDelete(id: string, name: string) {
   gap: 14px;
 }
 .conn-icon-wrap {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-surface);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
-  color: var(--text-2);
-  flex-shrink: 0;
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  background: #ecfdf5; border: 1px solid #bbf7d0;
+  border-radius: 12px; color: #16a34a; flex-shrink: 0;
 }
 .conn-info {
   flex: 1;
   min-width: 0;
 }
 .conn-name {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-0);
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
+.conn-detail {
+  font-size: 11px; color: #999; font-family: var(--font-mono);
+  margin-bottom: 4px; display: flex; align-items: center;
+}
+.conn-status-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #ccc; display: inline-block; margin-right: 4px;
+}
+.conn-status-dot.ok { background: #16a34a; }
+.conn-status-dot.err { background: #dc2626; }
 .conn-meta {
   display: flex;
   align-items: center;
@@ -962,20 +1004,26 @@ function handleDelete(id: string, name: string) {
 }
 .feedback-stat {
   text-align: center;
-  padding: 20px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-md);
+  padding: 16px 10px;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 10px;
 }
+.feedback-stat.accepted { background: #ecfdf5; border-color: #bbf7d0; }
+.feedback-stat.modified { background: #fef7ed; border-color: #fde68a; }
+.feedback-stat.rejected { background: #fef2f2; border-color: #fecaca; }
 .feedback-value {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
-  color: var(--text-0);
+  color: #111;
   font-family: var(--font-mono);
   line-height: 1;
 }
+.feedback-stat.accepted .feedback-value { color: #16a34a; }
+.feedback-stat.modified .feedback-value { color: #d97706; }
+.feedback-stat.rejected .feedback-value { color: #dc2626; }
 .feedback-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-3);
   margin-top: 6px;
 }
