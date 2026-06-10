@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NSelect,
@@ -24,7 +24,7 @@ import {
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { useConnectionStore } from '@/stores/connection'
-import { executeQuery, type QueryResultResponse } from '@/api/connections'
+import { executeQuery, getSchemaTables, type QueryResultResponse, type TableSchemaItem } from '@/api/connections'
 import {
   useSavedQueries,
   extractParams,
@@ -57,7 +57,33 @@ const connOptions = computed(() =>
     .map(c => ({ label: `${c.name}`, value: c.id })),
 )
 
+const schemaTables = ref<TableSchemaItem[]>([])
+const expandedTables = ref<Set<string>>(new Set())
+const schemaLoading = ref(false)
+
+function toggleTable(tableName: string) {
+  const next = new Set(expandedTables.value)
+  if (next.has(tableName)) next.delete(tableName)
+  else next.add(tableName)
+  expandedTables.value = next
+}
+
+async function loadSchema() {
+  if (!selectedConnId.value) { schemaTables.value = []; return }
+  schemaLoading.value = true
+  try {
+    schemaTables.value = await getSchemaTables(selectedConnId.value)
+    expandedTables.value = new Set()
+  } catch {
+    schemaTables.value = []
+  } finally {
+    schemaLoading.value = false
+  }
+}
+
 onMounted(() => { connStore.loadConnections() })
+
+watch(selectedConnId, () => { loadSchema() })
 
 async function doExecute(rawSql: string) {
   const sql = rawSql.trim()
@@ -320,33 +346,33 @@ function formatCell(val: unknown): string {
           </div>
           <div class="sidebar-body">
             <div v-if="!selectedConnId" class="sidebar-empty">
-              <p class="empty-desc">选择数据库连接以查看表结构</p>
+              <p class="empty-desc">选择连接以查看表结构</p>
+            </div>
+            <div v-else-if="schemaLoading" class="sidebar-empty">
+              <p class="empty-desc">加载中...</p>
+            </div>
+            <div v-else-if="schemaTables.length === 0" class="sidebar-empty">
+              <p class="empty-desc">该连接暂无 Schema 信息</p>
             </div>
             <div v-else class="schema-list">
-              <div class="schema-table-group">
-                <div class="schema-table-name">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2.5" style="transform:rotate(90deg)"><polyline points="9 18 15 12 9 6"/></svg>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
-                  <span>gbase.users</span>
+              <div
+                v-for="table in schemaTables"
+                :key="table.table_name"
+                class="schema-table-group"
+              >
+                <div class="schema-table-name" @click="toggleTable(table.table_name)">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" :stroke="expandedTables.has(table.table_name) ? '#999' : '#ccc'" stroke-width="2.5"
+                    :style="{ transform: expandedTables.has(table.table_name) ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
+                    <polyline points="9 18 15 12 9 6"/>
+                  </svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                  <span>{{ table.table_name }}</span>
                 </div>
-                <div class="schema-columns">
-                  <div class="schema-col">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
-                    <span class="col-name">id</span>
-                    <span class="col-type">INT</span>
-                  </div>
-                  <div class="schema-col">
+                <div v-show="expandedTables.has(table.table_name)" class="schema-columns">
+                  <div v-for="col in table.columns" :key="col" class="schema-col">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><line x1="8" y1="6" x2="16" y2="6"/></svg>
-                    <span class="col-name">username</span>
-                    <span class="col-type">VARCHAR</span>
+                    <span class="col-name">{{ col }}</span>
                   </div>
-                </div>
-              </div>
-              <div class="schema-table-group collapsed">
-                <div class="schema-table-name">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-                  <span>gbase.user_logs</span>
                 </div>
               </div>
             </div>
