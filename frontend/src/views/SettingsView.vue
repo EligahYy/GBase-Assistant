@@ -61,8 +61,20 @@ onMounted(async () => {
     ]
   }
   await loadHealth()
+  await loadFeedbackStats()
   connStore.startStatusStream()
 })
+
+async function loadFeedbackStats() {
+  feedbackLoading.value = true
+  try {
+    feedbackStats.value = await getFeedbackStats('123456')
+  } catch {
+    feedbackStats.value = null
+  } finally {
+    feedbackLoading.value = false
+  }
+}
 
 
 const expandedSchemas = ref<Set<string>>(new Set())
@@ -556,7 +568,10 @@ function handleDelete(id: string, name: string) {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 32px 40px 80px;
+  padding: 40px 32px 80px;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .tab-panel {
