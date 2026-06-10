@@ -183,9 +183,13 @@ function handleKeydown(e: KeyboardEvent) {
     <!-- Header -->
     <header class="chat-header">
       <div class="header-left">
-        <button class="header-icon-btn" @click="toggleSidebar">
+        <button class="header-icon-btn" @click="toggleSidebar" title="切换侧边栏">
           <n-icon :component="SparklesOutline" size="18" />
         </button>
+        <span class="header-title">AI 问答</span>
+        <span class="header-badge">GBase 8a 专家模式</span>
+      </div>
+      <div class="header-right">
         <div
           v-if="activeConn"
           class="conn-badge"
@@ -198,15 +202,12 @@ function handleKeydown(e: KeyboardEvent) {
           <div class="dot" :class="{ pulsing: connStore.connStatusMap[activeConn.id] !== 'error' }" />
           <n-icon :component="ServerOutline" size="12" />
           <span>{{ activeConn.name }}</span>
-          <span v-if="connStore.connStatusMap[activeConn.id] === 'testing'" class="status-checking">检测中</span>
         </div>
         <div v-else class="conn-badge muted">
           <div class="dot" />
           <n-icon :component="ServerOutline" size="12" />
           <span>未选择数据库</span>
         </div>
-      </div>
-      <div class="header-right">
         <span class="model-label" :title="selectedModel">{{ modelDisplayName }}</span>
         <button
           class="theme-toggle"
@@ -348,6 +349,22 @@ function handleKeydown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.header-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111;
+  letter-spacing: -0.01em;
+}
+.header-badge {
+  font-size: 10px;
+  color: #888;
+  background: #f7f7f7;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-weight: 500;
+  border: 1px solid #eee;
 }
 
 .header-icon-btn {
