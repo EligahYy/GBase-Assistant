@@ -4,6 +4,7 @@ import { useMessage } from 'naive-ui'
 import {
   SendOutline, ServerOutline, SunnyOutline, MoonOutline,
   StopCircleOutline, BookOutline, SparklesOutline,
+  GridOutline, SettingsOutline, AlertCircleOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 
@@ -175,12 +176,6 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-const hints = [
-  '查询每个部门薪资最高的 3 名员工',
-  '统计最近 30 天每天的订单数和总金额',
-  'GBase 8a 支持窗口函数吗？',
-  '如何建表并指定分布键？',
-]
 </script>
 
 <template>
@@ -231,17 +226,29 @@ const hints = [
           <div class="monogram-wrap">
             <div class="monogram">G</div>
           </div>
-          <h2 class="empty-title">GBase 助手</h2>
-          <p class="empty-sub">输入自然语言查询，自动生成 SQL 并执行</p>
+          <h2 class="empty-title">今天我能帮你做什么？</h2>
+          <p class="empty-sub">GBase 8a MPP 数据库专家助手 — 用自然语言查询数据、优化 SQL、诊断问题</p>
         </div>
         <div class="hint-grid">
-          <button
-            v-for="hint in hints"
-            :key="hint"
-            class="hint-card"
-            @click="inputText = hint"
-          >
-            {{ hint }}
+          <button class="hint-card" @click="inputText = '查询每个部门薪资最高的 3 名员工'">
+            <n-icon :component="GridOutline" size="22" />
+            <span class="hint-card-title">数据查询</span>
+            <span class="hint-card-desc">用自然语言生成并执行 GBase SQL</span>
+          </button>
+          <button class="hint-card" @click="inputText = '帮我优化这条 SQL 的查询性能'">
+            <n-icon :component="SettingsOutline" size="22" />
+            <span class="hint-card-title">SQL 优化</span>
+            <span class="hint-card-desc">执行计划分析与分布键优化建议</span>
+          </button>
+          <button class="hint-card" @click="inputText = 'GBase 8a 支持窗口函数吗？'">
+            <n-icon :component="BookOutline" size="22" />
+            <span class="hint-card-title">知识问答</span>
+            <span class="hint-card-desc">基于官方手册回答 GBase 8a 问题</span>
+          </button>
+          <button class="hint-card" @click="inputText = '错误码 1146 怎么解决？'">
+            <n-icon :component="AlertCircleOutline" size="22" />
+            <span class="hint-card-title">错误诊断</span>
+            <span class="hint-card-desc">错误码查询与解决方案</span>
           </button>
         </div>
       </div>
@@ -551,34 +558,36 @@ const hints = [
   animation: fadeIn 0.5s var(--ease-out-expo) both;
 }
 .empty-brand {
-  margin-bottom: 32px;
+  margin-bottom: 36px;
 }
 .monogram-wrap {
   position: relative;
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   margin: 0 auto 24px;
   animation: fadeInUp 0.4s 0.1s var(--ease-out-expo) both;
 }
 .monogram {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   background: var(--text-0);
   color: var(--bg-void);
-  border-radius: var(--radius-lg);
-  font-size: 24px;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  border-radius: 18px;
+  font-size: 34px;
+  font-weight: 800;
+  font-family: var(--font-sans);
   display: flex;
   align-items: center;
   justify-content: center;
+  letter-spacing: -2px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 .empty-title {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   color: var(--text-0);
-  letter-spacing: -0.02em;
-  margin-bottom: 8px;
+  letter-spacing: -0.03em;
+  margin-bottom: 10px;
   animation: fadeInUp 0.4s 0.2s var(--ease-out-expo) both;
 }
 .empty-sub {
@@ -592,8 +601,8 @@ const hints = [
 .hint-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  max-width: 480px;
+  gap: 12px;
+  max-width: 520px;
   width: 100%;
   animation: fadeInUp 0.4s 0.3s var(--ease-out-expo) both;
 }
@@ -601,23 +610,35 @@ const hints = [
   .hint-grid { grid-template-columns: 1fr; }
 }
 .hint-card {
-  padding: 14px 16px;
-  background: var(--bg-panel);
-  border: 1px solid var(--seam-1);
-  border-radius: var(--radius-lg);
-  font-size: 13px;
-  color: var(--text-2);
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 14px;
   text-align: left;
   cursor: pointer;
   font-family: var(--font-sans);
-  font-weight: 500;
-  transition: all var(--duration-fast);
-  line-height: 1.5;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.3;
 }
 .hint-card:hover {
-  background: var(--bg-raised);
-  border-color: var(--seam-2);
-  color: var(--text-0);
+  border-color: #ccc;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+.hint-card .n-icon {
+  color: var(--text-2);
+}
+.hint-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111;
+}
+.hint-card-desc {
+  font-size: 11px;
+  color: #999;
 }
 
 /* ── Input ── */
