@@ -176,14 +176,16 @@ async def query_error_code(payload: ErrorCodeQuery) -> ErrorCodeResponse:
         if manual_chunks:
             for chunk in manual_chunks:
                 score = chunk.get("score", 0)
-                results.append(ErrorCodeItem(
-                    code="手册参考",
-                    category="manual",
-                    description=chunk.get("title", ""),
-                    solution=chunk.get("content", "")[:500],
-                    keywords=[],
-                    score=score,
-                ))
+                results.append(
+                    ErrorCodeItem(
+                        code="手册参考",
+                        category="manual",
+                        description=chunk.get("title", ""),
+                        solution=chunk.get("content", "")[:500],
+                        keywords=[],
+                        score=score,
+                    )
+                )
 
     return ErrorCodeResponse(query=payload.query, mode=mode, results=results)
 

@@ -18,10 +18,9 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from app.database import Base  # noqa: E402
-
 # 必须导入所有模型，Base.metadata 才能包含完整的表定义
 import app.models  # noqa: E402, F401
+from app.database import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

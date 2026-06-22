@@ -64,9 +64,7 @@ class TestHybridKnowledgeRetriever:
         from app.vector.hybrid_retriever import HybridKnowledgeRetriever
 
         grep = FakeKnowledgeRetriever(results=[])
-        vector = FakeKnowledgeRetriever(
-            results=[make_chunk("关于连接数的说明", "faq.json", "faq")]
-        )
+        vector = FakeKnowledgeRetriever(results=[make_chunk("关于连接数的说明", "faq.json", "faq")])
 
         hybrid = HybridKnowledgeRetriever(vector=vector, grep=grep)
         results = await hybrid.retrieve("错误码 1040")
@@ -81,9 +79,7 @@ class TestHybridKnowledgeRetriever:
         from app.vector.hybrid_retriever import HybridKnowledgeRetriever
 
         vector = FakeKnowledgeRetriever(results=[])
-        grep = FakeKnowledgeRetriever(
-            results=[make_chunk("触发器相关文档", "faq.json", "faq")]
-        )
+        grep = FakeKnowledgeRetriever(results=[make_chunk("触发器相关文档", "faq.json", "faq")])
 
         hybrid = HybridKnowledgeRetriever(vector=vector, grep=grep)
         results = await hybrid.retrieve("GBase 8a 支持触发器吗")
@@ -132,9 +128,7 @@ class TestHybridKnowledgeRetriever:
         from app.vector.hybrid_retriever import HybridKnowledgeRetriever
 
         grep = FakeKnowledgeRetriever(should_fail=True)
-        vector = FakeKnowledgeRetriever(
-            results=[make_chunk("fallback content", "faq.json", "faq")]
-        )
+        vector = FakeKnowledgeRetriever(results=[make_chunk("fallback content", "faq.json", "faq")])
 
         hybrid = HybridKnowledgeRetriever(vector=vector, grep=grep)
         results = await hybrid.retrieve("错误码 1040")

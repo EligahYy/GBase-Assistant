@@ -25,17 +25,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _READ_ONLY_BLOCKED: set[str] = {
-    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
-    "TRUNCATE", "CREATE", "GRANT", "REVOKE",
-    "MERGE", "REPLACE", "RENAME", "LOAD", "SET",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "TRUNCATE",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+    "MERGE",
+    "REPLACE",
+    "RENAME",
+    "LOAD",
+    "SET",
 }
 
 _READ_ONLY_ALLOWED = {"SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "WITH"}
 
 # Keywords that are dangerous even inside subqueries
 _BLOCKED_AST_KEYWORDS = {
-    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
-    "TRUNCATE", "CREATE", "GRANT", "REVOKE", "MERGE", "REPLACE",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "TRUNCATE",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+    "MERGE",
+    "REPLACE",
 }
 
 
@@ -54,9 +74,7 @@ class SQLSandbox:
         if first_word in _READ_ONLY_BLOCKED:
             raise SQLSandboxError(f"禁止执行 {first_word} 语句（沙箱只读模式）")
         if first_word not in _READ_ONLY_ALLOWED:
-            raise SQLSandboxError(
-                f"不允许的 SQL 类型: {first_word}（仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH）"
-            )
+            raise SQLSandboxError(f"不允许的 SQL 类型: {first_word}（仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH）")
 
     @staticmethod
     def _validate_single_statement(sql: str) -> None:
@@ -66,15 +84,15 @@ class SQLSandbox:
         that separate multiple statements. A trailing semicolon is allowed.
         """
         # Strip single-line comments
-        no_comments = re.sub(r'--[^\n]*', '', sql)
+        no_comments = re.sub(r"--[^\n]*", "", sql)
         # Strip block comments
-        no_comments = re.sub(r'/\*.*?\*/', '', no_comments, flags=re.DOTALL)
+        no_comments = re.sub(r"/\*.*?\*/", "", no_comments, flags=re.DOTALL)
         # Strip the trailing semicolon if present
         stripped = no_comments.strip()
-        if stripped.endswith(';'):
+        if stripped.endswith(";"):
             stripped = stripped[:-1].strip()
         # Check for remaining semicolons inside the statement
-        if ';' in stripped:
+        if ";" in stripped:
             raise SQLSandboxError("禁止执行多条 SQL 语句（检测到分号分隔）")
 
     @staticmethod
@@ -93,7 +111,22 @@ class SQLSandbox:
 
         # Check statement type
         stmt_type = type(stmt).__name__.upper()
-        if any(kw in stmt_type for kw in ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "GRANT", "REVOKE", "MERGE", "REPLACE"]):
+        if any(
+            kw in stmt_type
+            for kw in [
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "DROP",
+                "ALTER",
+                "TRUNCATE",
+                "CREATE",
+                "GRANT",
+                "REVOKE",
+                "MERGE",
+                "REPLACE",
+            ]
+        ):
             raise SQLSandboxError(f"禁止执行 {stmt_type} 语句（沙箱只读模式）")
 
         # Walk AST for blocked keywords in subclauses

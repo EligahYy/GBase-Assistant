@@ -218,13 +218,16 @@ async def _index_document(doc_id: str, file_path: str, file_type: str):
             # 预检查：验证 Qdrant 和 embedding 可用
             from app.vector.client import is_qdrant_available
             from app.vector.embedder import get_embedder
+
             if not is_qdrant_available():
                 raise RuntimeError("Qdrant 服务未连接，请确认 Qdrant 已启动 (localhost:6333)")
             try:
                 embedder = get_embedder()
                 logger.info("Embedder ready: dim=%d", embedder.dimension)
             except Exception as e:
-                raise RuntimeError(f"Embedding 模型加载失败 — 请检查 models.yaml 中 embedding 配置及对应的 API Key: {e}")
+                raise RuntimeError(
+                    f"Embedding 模型加载失败 — 请检查 models.yaml 中 embedding 配置及对应的 API Key: {e}"
+                )
 
             count = await run_indexing_pipeline(
                 document_id=doc_id,
@@ -362,6 +365,7 @@ async def cancel_indexing(request: Request, document_id: str, db: AsyncSession =
             await db.commit()
         return {"status": "cancelled", "document_id": document_id}
     raise HTTPException(status_code=404, detail="未找到正在进行的索引任务")
+
 
 @router.post("/reindex-all")
 async def reindex_all(request: Request) -> dict:

@@ -53,7 +53,7 @@ class DocumentChunk:
 class SemanticChunker:
     """按段落边界切分，重叠窗口保留跨块上下文，超长段落回退句子切分。"""
 
-    _SENTENCE_BOUNDARY = re.compile(r'(?<=[。！？])\s*')
+    _SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？])\s*")
 
     def __init__(self, config: ChunkConfig | None = None):
         self.config = config or ChunkConfig()
@@ -69,11 +69,15 @@ class SemanticChunker:
 
     def _chunk_section(self, section: Section, source_file: str, document_id: str) -> list[DocumentChunk]:
         if len(section.content) <= self.config.max_chunk_size:
-            return [DocumentChunk(
-                chapter_title=section.heading, content=section.content,
-                source_file=source_file, document_id=document_id,
-                metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3"},
-            )]
+            return [
+                DocumentChunk(
+                    chapter_title=section.heading,
+                    content=section.content,
+                    source_file=source_file,
+                    document_id=document_id,
+                    metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3"},
+                )
+            ]
 
         # 按段落边界切分
         paragraphs = re.split(r"\n{2,}", section.content)
@@ -103,7 +107,9 @@ class SemanticChunker:
 
         return chunks
 
-    def _split_long_paragraph(self, text: str, heading: str, source_file: str, document_id: str, start_part: int) -> list[DocumentChunk]:
+    def _split_long_paragraph(
+        self, text: str, heading: str, source_file: str, document_id: str, start_part: int
+    ) -> list[DocumentChunk]:
         """超长段落按句子边界切分。"""
         sentences = self._SENTENCE_BOUNDARY.split(text)
         chunks: list[DocumentChunk] = []
@@ -127,8 +133,10 @@ class SemanticChunker:
     def _make_chunk(self, heading: str, content: str, source_file: str, document_id: str, part: int) -> DocumentChunk:
         title = heading if part == 0 else f"{heading} (第{part + 1}部分)"
         return DocumentChunk(
-            chapter_title=title, content=content,
-            source_file=source_file, document_id=document_id,
+            chapter_title=title,
+            content=content,
+            source_file=source_file,
+            document_id=document_id,
             metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3"},
         )
 
@@ -140,7 +148,7 @@ class SemanticChunker:
         for i in range(1, len(chunks)):
             prev = chunks[i - 1]
             if len(prev.content) > self.config.chunk_overlap:
-                overlap_text = prev.content[-self.config.chunk_overlap:]
+                overlap_text = prev.content[-self.config.chunk_overlap :]
                 chunks[i].content = overlap_text + "\n\n" + chunks[i].content
 
         return chunks

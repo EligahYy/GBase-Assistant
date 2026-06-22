@@ -63,9 +63,7 @@ class GetDatabaseStatusTool:
             return {"error": "未选择数据库连接"}
 
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(DbConnection).where(DbConnection.id == self._db_connection_id)
-            )
+            result = await session.execute(select(DbConnection).where(DbConnection.id == self._db_connection_id))
             conn = result.scalar_one_or_none()
             if not conn:
                 return {"error": "连接不存在"}
@@ -80,10 +78,7 @@ class GetDatabaseStatusTool:
                 "SELECT id, user, host, db, time, state, LEFT(info,200) AS info "
                 "FROM information_schema.PROCESSLIST WHERE time > 0"
             ),
-            "运行时间": (
-                "SELECT DATEDIFF(NOW(), MIN(create_time)) AS running_days "
-                "FROM information_schema.TABLES"
-            ),
+            "运行时间": ("SELECT DATEDIFF(NOW(), MIN(create_time)) AS running_days FROM information_schema.TABLES"),
             "表概况": (
                 "SELECT TABLE_NAME, TABLE_ROWS, ROUND(DATA_LENGTH/1024/1024,2) AS size_mb "
                 "FROM information_schema.TABLES "
@@ -95,9 +90,7 @@ class GetDatabaseStatusTool:
         async def _run_one(label: str, sql: str) -> tuple[str, dict]:
             try:
                 sandbox = SQLSandbox()
-                qr = await sandbox.execute_readonly(
-                    connector, conn_config, sql, max_rows=100, timeout_seconds=10
-                )
+                qr = await sandbox.execute_readonly(connector, conn_config, sql, max_rows=100, timeout_seconds=10)
                 return label, {
                     "columns": qr.columns,
                     "rows": qr.rows,
@@ -132,7 +125,7 @@ class GetDatabaseStatusTool:
 
         if isinstance(result, dict) and "error" in result:
             return {
-                "summary": f'数据库状态查询失败: {result["error"]}',
+                "summary": f"数据库状态查询失败: {result['error']}",
                 "detail": None,
                 "truncated": False,
             }

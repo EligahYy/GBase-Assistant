@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 @dataclass
 class ScoreResult:
     """单个用例的评分结果。"""
+
     case_id: str
     passed: bool
     scores: dict[str, float] = field(default_factory=dict)
@@ -118,8 +119,13 @@ def score_case(
         details["row_count"] = f"expected {expected.get('row_count')}, got {actual_row_count}"
 
     # Overall: weighted average
-    weights = {"table_recall": 0.20, "column_recall": 0.15, "sql_pattern": 0.30,
-               "execution_success": 0.25, "row_count": 0.10}
+    weights = {
+        "table_recall": 0.20,
+        "column_recall": 0.15,
+        "sql_pattern": 0.30,
+        "execution_success": 0.25,
+        "row_count": 0.10,
+    }
     overall = sum(scores.get(k, 0) * w for k, w in weights.items())
 
     return ScoreResult(

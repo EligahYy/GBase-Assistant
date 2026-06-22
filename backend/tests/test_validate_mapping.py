@@ -1,18 +1,27 @@
 """Tests for SchemaGraph.validate_mapping() — supervisor check validation."""
+
 from app.agents.schema_graph import ColumnMeta, SchemaGraph, TableMeta
 
 
 def make_graph():
     """Create a test SchemaGraph with two tables."""
     graph = SchemaGraph(db_id="test")
-    t1 = TableMeta(name="orders", label="订单表", columns=[
-        ColumnMeta(name="id", data_type="INT", role="PRIMARY_KEY"),
-        ColumnMeta(name="amount", data_type="DECIMAL(12,2)", role="MEASURE", label="订单金额"),
-    ])
-    t2 = TableMeta(name="users", label="用户表", columns=[
-        ColumnMeta(name="id", data_type="INT", role="PRIMARY_KEY"),
-        ColumnMeta(name="name", data_type="VARCHAR(50)", role="UNKNOWN", label="用户名"),
-    ])
+    t1 = TableMeta(
+        name="orders",
+        label="订单表",
+        columns=[
+            ColumnMeta(name="id", data_type="INT", role="PRIMARY_KEY"),
+            ColumnMeta(name="amount", data_type="DECIMAL(12,2)", role="MEASURE", label="订单金额"),
+        ],
+    )
+    t2 = TableMeta(
+        name="users",
+        label="用户表",
+        columns=[
+            ColumnMeta(name="id", data_type="INT", role="PRIMARY_KEY"),
+            ColumnMeta(name="name", data_type="VARCHAR(50)", role="UNKNOWN", label="用户名"),
+        ],
+    )
     graph.tables = {"orders": t1, "users": t2}
     graph._built = True
     return graph

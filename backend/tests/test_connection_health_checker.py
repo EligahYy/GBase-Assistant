@@ -111,10 +111,7 @@ class TestConnectionHealthChecker:
                     mock_get_conn.return_value = mock_connector
 
                     with patch(
-                        (
-                            "app.services.connection_health_checker."
-                            "_to_connection_config"
-                        ),
+                        ("app.services.connection_health_checker._to_connection_config"),
                     ) as mock_to_config:
                         mock_config = MagicMock()
                         mock_config.connection_timeout = 5
@@ -164,10 +161,7 @@ class TestConnectionHealthChecker:
                     mock_get_conn.return_value = mock_connector
 
                     with patch(
-                        (
-                            "app.services.connection_health_checker."
-                            "_to_connection_config"
-                        ),
+                        ("app.services.connection_health_checker._to_connection_config"),
                     ) as mock_to_config:
                         mock_config = MagicMock()
                         mock_to_config.return_value = mock_config

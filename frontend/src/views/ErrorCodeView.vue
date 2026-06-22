@@ -5,7 +5,6 @@ import { useRouter } from 'vue-router'
 import {
   ArrowBackOutline,
   SearchOutline,
-  CodeSlashOutline,
   AlertCircleOutline,
   ChevronDownOutline,
   ChevronUpOutline,

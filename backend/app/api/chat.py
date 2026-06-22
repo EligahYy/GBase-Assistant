@@ -145,11 +145,7 @@ async def list_conversations(
     folder_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = (
-        select(Conversation)
-        .options(selectinload(Conversation.messages))
-        .where(Conversation.archived.is_(False))
-    )
+    stmt = select(Conversation).options(selectinload(Conversation.messages)).where(Conversation.archived.is_(False))
     if folder_id is not None:
         if folder_id == "":
             stmt = stmt.where(Conversation.folder_id.is_(None))
@@ -200,6 +196,7 @@ async def update_conversation(
         fid = payload["folder_id"]
         if fid is not None and fid != "":
             from app.models.folder import Folder
+
             f_result = await db.execute(select(Folder).where(Folder.id == fid))
             if not f_result.scalar_one_or_none():
                 raise HTTPException(status_code=404, detail="文件夹不存在")
@@ -320,9 +317,7 @@ async def delete_folder(folder_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="文件夹不存在")
 
     # 级联删除关联对话
-    convs_result = await db.execute(
-        select(Conversation).where(Conversation.folder_id == folder_id)
-    )
+    convs_result = await db.execute(select(Conversation).where(Conversation.folder_id == folder_id))
     for conv in convs_result.scalars().all():
         await db.delete(conv)
     await db.delete(folder)
@@ -351,9 +346,7 @@ async def batch_operate_conversations(
         if not f_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="目标文件夹不存在")
 
-    result = await db.execute(
-        select(Conversation).where(Conversation.id.in_(payload.ids))
-    )
+    result = await db.execute(select(Conversation).where(Conversation.id.in_(payload.ids)))
     convs = result.scalars().all()
 
     if payload.action == "archive":

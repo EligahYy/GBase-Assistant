@@ -15,9 +15,7 @@ app = create_app()
 @pytest.mark.asyncio
 async def test_v2_chat_stream_responds_ag_ui_events():
     """v2 端点应返回 AG-UI 标准事件。"""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/chat/stream",
             json={"message": "你好", "model": "deepseek/deepseek-chat"},
@@ -35,9 +33,7 @@ async def test_v2_chat_stream_responds_ag_ui_events():
 @pytest.mark.asyncio
 async def test_v2_chat_sql_intent():
     """SQL 意图应产生流式 TEXT_MESSAGE_CONTENT 和 RUN_FINISHED。"""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/chat/stream",
             json={"message": "查询所有订单", "model": "deepseek/deepseek-chat"},
@@ -52,9 +48,7 @@ async def test_v2_chat_sql_intent():
 @pytest.mark.asyncio
 async def test_v2_chat_general_intent():
     """通用意图应产生流式 TEXT_MESSAGE_CONTENT 回复。"""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/api/chat/stream",
             json={"message": "你好", "model": "deepseek/deepseek-chat"},

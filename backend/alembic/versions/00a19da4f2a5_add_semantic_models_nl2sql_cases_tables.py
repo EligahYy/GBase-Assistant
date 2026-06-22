@@ -1,18 +1,21 @@
 """add semantic models + nl2sql cases tables"""
 
-from typing import Sequence, Union
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
 
-revision: str = '00a19da4f2a5'
-down_revision: Union[str, Sequence[str], None] = '24d8ce000324'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+from alembic import op
+
+revision: str = "00a19da4f2a5"
+down_revision: str | Sequence[str] | None = "24d8ce000324"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     # ── Semantic models ──
-    op.create_table("semantic_models",
+    op.create_table(
+        "semantic_models",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("db_connection_id", sa.String(64), nullable=False, index=True),
         sa.Column("name", sa.String(128), nullable=False),
@@ -25,7 +28,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime),
         sa.Column("updated_at", sa.DateTime),
     )
-    op.create_table("semantic_metrics",
+    op.create_table(
+        "semantic_metrics",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("semantic_model_id", sa.String(32), sa.ForeignKey("semantic_models.id"), nullable=False, index=True),
         sa.Column("name", sa.String(128), nullable=False),
@@ -37,7 +41,8 @@ def upgrade() -> None:
         sa.Column("description", sa.Text, default=""),
         sa.Column("status", sa.String(16), default="draft"),
     )
-    op.create_table("semantic_dimensions",
+    op.create_table(
+        "semantic_dimensions",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("semantic_model_id", sa.String(32), sa.ForeignKey("semantic_models.id"), nullable=False, index=True),
         sa.Column("name", sa.String(128), nullable=False),
@@ -48,7 +53,8 @@ def upgrade() -> None:
         sa.Column("hierarchy", sa.JSON, nullable=True),
         sa.Column("status", sa.String(16), default="draft"),
     )
-    op.create_table("semantic_members",
+    op.create_table(
+        "semantic_members",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("dimension_id", sa.String(32), sa.ForeignKey("semantic_dimensions.id"), nullable=False, index=True),
         sa.Column("raw_value", sa.String(256), nullable=False),
@@ -57,7 +63,8 @@ def upgrade() -> None:
         sa.Column("frequency", sa.Integer, nullable=True),
         sa.Column("status", sa.String(16), default="draft"),
     )
-    op.create_table("semantic_joins",
+    op.create_table(
+        "semantic_joins",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("semantic_model_id", sa.String(32), sa.ForeignKey("semantic_models.id"), nullable=False, index=True),
         sa.Column("left_table", sa.String(64), nullable=False),
@@ -69,7 +76,8 @@ def upgrade() -> None:
         sa.Column("status", sa.String(16), default="candidate"),
     )
     # ── NL2SQL cases ──
-    op.create_table("nl2sql_cases",
+    op.create_table(
+        "nl2sql_cases",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("question", sa.Text, nullable=False),
         sa.Column("sql", sa.Text, nullable=False),
@@ -88,7 +96,8 @@ def upgrade() -> None:
         sa.Column("reviewed_at", sa.DateTime, nullable=True),
         sa.Column("created_at", sa.DateTime),
     )
-    op.create_table("nl2sql_attempts",
+    op.create_table(
+        "nl2sql_attempts",
         sa.Column("id", sa.String(32), primary_key=True),
         sa.Column("conversation_id", sa.String(64), nullable=False, index=True),
         sa.Column("question", sa.Text, nullable=False),

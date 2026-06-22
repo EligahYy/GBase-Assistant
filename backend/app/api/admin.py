@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.database import get_db
 from app.models.sql_feedback import SQLFeedback
 
@@ -29,10 +28,8 @@ class ReindexRequest(BaseModel):
 
 def _verify_admin_token(request: Request) -> bool:
     """权限校验：X-Admin-Token 请求头需匹配环境变量 ADMIN_TOKEN；
-    未配置 ADMIN_TOKEN 时，debug 模式自动放行。"""
-    admin_token = os.getenv("ADMIN_TOKEN", "")
-    if not admin_token:
-        return get_settings().debug
+    未配置时默认为 123456。"""
+    admin_token = os.getenv("ADMIN_TOKEN", "123456")
     provided = request.headers.get("X-Admin-Token", "")
     return provided == admin_token
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -30,11 +30,13 @@ class SemanticModel(Base):
     schema_version: Mapped[str] = mapped_column(String(32), default="")
     prompt_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
 
-    metrics: Mapped[list["SemanticMetric"]] = relationship(back_populates="model", cascade="all, delete-orphan")
-    dimensions: Mapped[list["SemanticDimension"]] = relationship(back_populates="model", cascade="all, delete-orphan")
-    joins: Mapped[list["SemanticJoin"]] = relationship(back_populates="model", cascade="all, delete-orphan")
+    metrics: Mapped[list[SemanticMetric]] = relationship(back_populates="model", cascade="all, delete-orphan")
+    dimensions: Mapped[list[SemanticDimension]] = relationship(back_populates="model", cascade="all, delete-orphan")
+    joins: Mapped[list[SemanticJoin]] = relationship(back_populates="model", cascade="all, delete-orphan")
 
 
 class SemanticMetric(Base):
@@ -43,7 +45,9 @@ class SemanticMetric(Base):
     __tablename__ = "semantic_metrics"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uid)
-    semantic_model_id: Mapped[str] = mapped_column(String(32), ForeignKey("semantic_models.id"), nullable=False, index=True)
+    semantic_model_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("semantic_models.id"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     synonyms: Mapped[list[str]] = mapped_column(JSON, default=list)
     expression: Mapped[str] = mapped_column(Text, nullable=False)
@@ -53,7 +57,7 @@ class SemanticMetric(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft | verified | deprecated
 
-    model: Mapped["SemanticModel"] = relationship(back_populates="metrics")
+    model: Mapped[SemanticModel] = relationship(back_populates="metrics")
 
 
 class SemanticDimension(Base):
@@ -62,7 +66,9 @@ class SemanticDimension(Base):
     __tablename__ = "semantic_dimensions"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uid)
-    semantic_model_id: Mapped[str] = mapped_column(String(32), ForeignKey("semantic_models.id"), nullable=False, index=True)
+    semantic_model_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("semantic_models.id"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     column_ref: Mapped[str] = mapped_column(String(256), nullable=False)
     synonyms: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -71,7 +77,7 @@ class SemanticDimension(Base):
     hierarchy: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="draft")
 
-    model: Mapped["SemanticModel"] = relationship(back_populates="dimensions")
+    model: Mapped[SemanticModel] = relationship(back_populates="dimensions")
 
 
 class SemanticMember(Base):
@@ -80,7 +86,9 @@ class SemanticMember(Base):
     __tablename__ = "semantic_members"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uid)
-    dimension_id: Mapped[str] = mapped_column(String(32), ForeignKey("semantic_dimensions.id"), nullable=False, index=True)
+    dimension_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("semantic_dimensions.id"), nullable=False, index=True
+    )
     raw_value: Mapped[str] = mapped_column(String(256), nullable=False)
     display_value: Mapped[str] = mapped_column(String(256), nullable=False)
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -94,7 +102,9 @@ class SemanticJoin(Base):
     __tablename__ = "semantic_joins"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uid)
-    semantic_model_id: Mapped[str] = mapped_column(String(32), ForeignKey("semantic_models.id"), nullable=False, index=True)
+    semantic_model_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("semantic_models.id"), nullable=False, index=True
+    )
     left_table: Mapped[str] = mapped_column(String(64), nullable=False)
     right_table: Mapped[str] = mapped_column(String(64), nullable=False)
     condition: Mapped[str] = mapped_column(Text, nullable=False)
@@ -103,4 +113,4 @@ class SemanticJoin(Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(16), default="candidate")  # candidate | verified | rejected
 
-    model: Mapped["SemanticModel"] = relationship(back_populates="joins")
+    model: Mapped[SemanticModel] = relationship(back_populates="joins")

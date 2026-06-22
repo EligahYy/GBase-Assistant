@@ -3,18 +3,21 @@ import { onMounted, ref, nextTick, computed } from 'vue'
 import type { DropdownOption } from 'naive-ui'
 import {
   AddOutline,
-  ChatbubbleEllipsesOutline,
+  ChatbubbleOutline,
   EllipsisHorizontalOutline,
   CheckmarkOutline,
   CloseCircleOutline,
   SettingsOutline,
   AlertCircleOutline,
-  CodeSlashOutline,
-  LibraryOutline,
+  TerminalOutline,
+  BookOutline,
+  FolderOutline,
+  CheckboxOutline,
+  SquareOutline,
   ChevronBackOutline,
   ChevronForwardOutline,
 } from '@vicons/ionicons5'
-import { NIcon, NDropdown, NModal, NInput, useMessage, useDialog } from 'naive-ui'
+import { NIcon, NDropdown, NModal, NInput, useMessage } from 'naive-ui'
 import { useChatStore } from '@/stores/chat'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -27,7 +30,6 @@ const chatStore = useChatStore()
 const router = useRouter()
 const route = useRoute()
 const naiveMsg = useMessage()
-const dialog = useDialog()
 
 const editingId = ref<string | null>(null)
 const editingTitle = ref('')
@@ -116,8 +118,13 @@ async function confirmRenameFolder() {
 
 function cancelRenameFolder() { editingFolderId.value = null }
 
-const deleteConvTarget = ref<{ id: string; title: string | null } | null>(null)
+type DeleteConversationTarget = { id: string; title: string }
+
+const deleteConvTarget = ref<DeleteConversationTarget | null>(null)
+const deleteConvModalVisible = ref(false)
 const deleteFolderTarget = ref<string | null>(null)
+const isDeletingConv = ref(false)
+let deleteConvCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 async function confirmDeleteFolder(id: string) {
   deleteFolderTarget.value = id
@@ -240,17 +247,57 @@ function handleRenameKeydown(e: KeyboardEvent) {
   else if (e.key === 'Escape') cancelRename()
 }
 
+function clearDeleteConvCloseTimer() {
+  if (deleteConvCloseTimer) {
+    clearTimeout(deleteConvCloseTimer)
+    deleteConvCloseTimer = null
+  }
+}
+
+function closeDeleteConvModal() {
+  deleteConvModalVisible.value = false
+  clearDeleteConvCloseTimer()
+  deleteConvCloseTimer = setTimeout(() => {
+    if (!deleteConvModalVisible.value) {
+      deleteConvTarget.value = null
+    }
+    deleteConvCloseTimer = null
+  }, 240)
+}
+
+function handleDeleteConvModalShow(show: boolean) {
+  if (show) {
+    deleteConvModalVisible.value = true
+    return
+  }
+  closeDeleteConvModal()
+}
+
 function confirmDelete(conv: { id: string; title: string | null }) {
-  deleteConvTarget.value = conv
+  clearDeleteConvCloseTimer()
+  deleteConvTarget.value = {
+    id: conv.id,
+    title: conv.title?.trim() || '未命名对话',
+  }
+  deleteConvModalVisible.value = true
 }
 
 async function doDeleteConv() {
-  if (!deleteConvTarget.value) return
+  if (!deleteConvTarget.value || isDeletingConv.value) return
+  const target = deleteConvTarget.value
+  isDeletingConv.value = true
+  closeDeleteConvModal()
   try {
-    await chatStore.deleteConv(deleteConvTarget.value.id)
+    await chatStore.deleteConv(target.id)
     naiveMsg.success('已删除')
-  } catch { naiveMsg.error('删除失败') }
-  deleteConvTarget.value = null
+  } catch {
+    naiveMsg.error('删除失败')
+    clearDeleteConvCloseTimer()
+    deleteConvTarget.value = target
+    deleteConvModalVisible.value = true
+  } finally {
+    isDeletingConv.value = false
+  }
 }
 
 function navigateTo(path: string) {
@@ -258,9 +305,9 @@ function navigateTo(path: string) {
 }
 
 const navItems = [
-  { path: '/sql-editor', icon: CodeSlashOutline, label: 'SQL 编辑器' },
+  { path: '/sql-editor', icon: TerminalOutline, label: 'SQL 编辑器' },
   { path: '/tools/error-code', icon: AlertCircleOutline, label: '错误码查询' },
-  { path: '/knowledge', icon: LibraryOutline, label: '知识库' },
+  { path: '/knowledge', icon: BookOutline, label: '知识库' },
   { path: '/settings', icon: SettingsOutline, label: '设置' },
 ]
 </script>
@@ -337,7 +384,7 @@ const navItems = [
         <div class="section-label-row">
           <span class="section-label">项目</span>
           <button class="add-folder-btn" @click="startAddFolder" title="新建文件夹">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            <n-icon :component="AddOutline" size="14" />
           </button>
         </div>
 
@@ -358,10 +405,11 @@ const navItems = [
         <nav class="folder-list">
           <div v-for="folder in chatStore.folders" :key="folder.id" class="folder-group">
             <div class="folder-item" @click="toggleFolder(folder.id)">
-              <svg
+              <n-icon
+                :component="ChevronForwardOutline"
                 :class="['folder-chevron', { expanded: expandedFolders.has(folder.id) }]"
-                width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-              ><path d="M9 18l6-6-6-6"/></svg>
+                size="12"
+              />
 
               <template v-if="editingFolderId === folder.id">
                 <input
@@ -375,24 +423,25 @@ const navItems = [
                 />
               </template>
               <template v-else>
+                <n-icon :component="FolderOutline" size="16" class="folder-icon" />
                 <span class="folder-name">{{ folder.name }}</span>
-                <span class="folder-count">{{ folder.conversation_count }}</span>
-                <button class="folder-new-chat-btn" @click.stop="chatStore.activeFolderId = folder.id; chatStore.newConversation(); navigateTo('/')" title="在此文件夹新建对话">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                </button>
+                <div class="folder-actions">
+                  <button class="folder-action-btn" @click.stop="chatStore.activeFolderId = folder.id; chatStore.newConversation(); navigateTo('/')" title="在此文件夹新建对话">
+                    <n-icon :component="AddOutline" size="14" />
+                  </button>
+                  <n-dropdown trigger="click" :options="[
+                    { label: '重命名', key: 'rename' },
+                    { label: '删除文件夹', key: 'delete' },
+                  ]" @select="(key: string) => {
+                    if (key === 'rename') startRenameFolder(folder.id, folder.name)
+                    else if (key === 'delete') confirmDeleteFolder(folder.id)
+                  }">
+                    <button class="folder-action-btn" @click.stop>
+                      <n-icon :component="EllipsisHorizontalOutline" size="14" />
+                    </button>
+                  </n-dropdown>
+                </div>
               </template>
-
-              <n-dropdown trigger="click" :options="[
-                { label: '重命名', key: 'rename' },
-                { label: '删除文件夹', key: 'delete' },
-              ]" @select="(key: string) => {
-                if (key === 'rename') startRenameFolder(folder.id, folder.name)
-                else if (key === 'delete') confirmDeleteFolder(folder.id)
-              }">
-                <button class="folder-more-btn" @click.stop>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
-                </button>
-              </n-dropdown>
             </div>
 
             <!-- 展开的对话子列表 -->
@@ -403,11 +452,12 @@ const navItems = [
                 :class="['conv-item', 'conv-child', { active: conv.id === chatStore.currentConversationId && route.path === '/' }]"
               >
                 <button class="conv-main" @click="chatStore.loadConversation(conv.id); navigateTo('/')">
+                  <n-icon :component="ChatbubbleOutline" size="13" class="conv-icon" />
                   <span class="conv-title">{{ conv.title || '新对话' }}</span>
                 </button>
                 <n-dropdown v-if="!batchMode" trigger="click" :options="menuOptions(conv)" @select="(key: string) => handleMenuSelect(key, conv)">
                   <button class="action-btn more-btn" @click.stop>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                    <n-icon :component="EllipsisHorizontalOutline" size="14" />
                   </button>
                 </n-dropdown>
               </div>
@@ -451,14 +501,17 @@ const navItems = [
             </template>
             <template v-else>
               <div v-if="batchMode" class="conv-checkbox" @click="toggleSelect(conv.id)">
-                <svg v-if="selectedIds.has(conv.id)" width="18" height="18" viewBox="0 0 24 24" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="2"><path d="M9 12l2 2 4-4M4 4h16v16H4z"/></svg>
-                <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+                <n-icon
+                  :component="selectedIds.has(conv.id) ? CheckboxOutline : SquareOutline"
+                  :class="['checkbox-icon', { selected: selectedIds.has(conv.id) }]"
+                  size="18"
+                />
               </div>
               <button
                 class="conv-main"
                 @click="!batchMode && (chatStore.loadConversation(conv.id), navigateTo('/'))"
               >
-                <n-icon :component="ChatbubbleEllipsesOutline" size="14" class="conv-icon" />
+                <n-icon :component="ChatbubbleOutline" size="14" class="conv-icon" />
                 <div class="conv-text">
                   <span class="conv-title">{{ conv.title || '新对话' }}</span>
                   <div v-if="conv.tags && conv.tags.length" class="conv-tags">
@@ -518,21 +571,23 @@ const navItems = [
 
   <!-- Delete Conversation Modal -->
   <n-modal
-    :show="deleteConvTarget !== null"
-    :on-update:show="(v: boolean) => { if (!v) deleteConvTarget = null }"
+    :show="deleteConvModalVisible"
+    :on-update:show="handleDeleteConvModalShow"
     transform-origin="center"
   >
     <div class="delete-modal">
       <div class="delete-modal-body">
         <div class="delete-modal-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <n-icon :component="AlertCircleOutline" size="24" />
         </div>
         <div class="delete-modal-title">确认删除对话？</div>
-        <div class="delete-modal-desc">此操作将永久删除「{{ deleteConvTarget?.title || '新对话' }}」及其所有历史记录，且无法恢复。</div>
+        <div class="delete-modal-desc">此操作将永久删除「{{ deleteConvTarget?.title }}」及其所有历史记录，且无法恢复。</div>
       </div>
       <div class="delete-modal-actions">
-        <button class="delete-modal-btn cancel" @click="deleteConvTarget = null">取消</button>
-        <button class="delete-modal-btn confirm" @click="doDeleteConv">确认删除</button>
+        <button class="delete-modal-btn cancel" :disabled="isDeletingConv" @click="closeDeleteConvModal">取消</button>
+        <button class="delete-modal-btn confirm" :disabled="isDeletingConv" @click="doDeleteConv">
+          {{ isDeletingConv ? '删除中...' : '确认删除' }}
+        </button>
       </div>
     </div>
   </n-modal>
@@ -546,7 +601,7 @@ const navItems = [
     <div class="delete-modal">
       <div class="delete-modal-body">
         <div class="delete-modal-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <n-icon :component="AlertCircleOutline" size="24" />
         </div>
         <div class="delete-modal-title">确认删除文件夹？</div>
         <div class="delete-modal-desc">文件夹中的所有对话也会被删除，确定继续？</div>
@@ -566,7 +621,7 @@ const navItems = [
   top: 0;
   left: 0;
   height: 100vh;
-  background: var(--bg-surface);
+  background: var(--bg-raised);
   border-right: 1px solid var(--seam-1);
   z-index: 100;
   transition: width var(--duration-normal) var(--ease-smooth);
@@ -600,6 +655,9 @@ const navItems = [
   cursor: pointer;
   transition: all var(--duration-fast);
   flex-shrink: 0;
+}
+.collapsed-btn .n-icon {
+  opacity: 0.8;
 }
 .collapsed-btn:hover {
   background: var(--bg-hover);
@@ -746,9 +804,9 @@ const navItems = [
   width: 100%;
   padding: 8px 12px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--seam-1);
-  background: var(--bg-panel);
-  color: var(--text-1);
+  border: 1px solid var(--text-0);
+  background: var(--text-0);
+  color: var(--bg-void);
   font-size: 13px;
   font-weight: 500;
   font-family: var(--font-sans);
@@ -757,14 +815,14 @@ const navItems = [
   transition: all var(--duration-fast);
 }
 .new-chat-btn:hover {
-  border-color: var(--seam-2);
-  background: var(--bg-raised);
+  border-color: var(--text-1);
+  background: var(--text-1);
 }
 .new-chat-btn:active {
   transform: scale(0.98);
 }
 .new-chat-btn .n-icon {
-  color: var(--text-2);
+  color: currentColor;
   flex-shrink: 0;
 }
 
@@ -841,10 +899,11 @@ const navItems = [
 }
 .conv-icon {
   flex-shrink: 0;
-  opacity: 0.4;
+  color: var(--text-4);
+  opacity: 1;
 }
 .conv-item.active .conv-icon {
-  opacity: 0.7;
+  color: var(--text-2);
 }
 .conv-text {
   flex: 1;
@@ -958,14 +1017,24 @@ const navItems = [
   transition: all var(--duration-fast);
   text-align: left;
 }
+.nav-item .n-icon {
+  flex-shrink: 0;
+  color: var(--text-4);
+}
 .nav-item:hover {
   background: var(--bg-hover);
   color: var(--text-1);
+}
+.nav-item:hover .n-icon {
+  color: var(--text-2);
 }
 .nav-item.active {
   background: var(--bg-hover);
   color: var(--text-0);
   font-weight: 600;
+}
+.nav-item.active .n-icon {
+  color: var(--text-0);
 }
 
 /* ── Section Label Row ── */
@@ -1016,69 +1085,75 @@ const navItems = [
 .folder-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
   cursor: pointer;
   font-size: 13px;
   color: var(--text-2);
   transition: all var(--duration-fast);
 }
-.folder-item:hover { background: var(--bg-hover); color: var(--text-1); }
+.folder-item:hover,
+.folder-item:focus-within {
+  background: var(--bg-hover);
+  color: var(--text-1);
+  border-color: var(--seam-1);
+}
 
 .folder-chevron {
   flex-shrink: 0;
   transition: transform var(--duration-fast);
-  opacity: 0.5;
+  color: var(--text-4);
 }
 .folder-chevron.expanded { transform: rotate(90deg); }
 
+.folder-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+  opacity: 0.86;
+}
+
 .folder-name {
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 500;
 }
 
-.folder-count {
-  font-size: 11px;
-  color: var(--text-4);
+.folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transform: translateX(2px);
+  transition: opacity var(--duration-fast), transform var(--duration-fast);
+  flex-shrink: 0;
 }
-
-.folder-new-chat-btn {
-  display: none;
+.folder-item:hover .folder-actions,
+.folder-item:focus-within .folder-actions {
+  opacity: 1;
+  transform: translateX(0);
+}
+.folder-action-btn {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--text-4);
   cursor: pointer;
   flex-shrink: 0;
+  transition: all var(--duration-fast);
 }
-.folder-item:hover .folder-new-chat-btn { display: flex; }
-.folder-new-chat-btn:hover { background: var(--bg-hover); color: var(--text-1); }
-
-.folder-more-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: 4px;
-  color: var(--text-4);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.folder-item:hover .folder-more-btn { display: flex; }
-.folder-more-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+.folder-action-btn:hover { background: var(--bg-active); color: var(--text-1); }
 
 /* ── Folder Children ── */
 .folder-children { padding-left: 18px; }
@@ -1114,6 +1189,13 @@ const navItems = [
   padding: 0 4px;
   cursor: pointer;
   flex-shrink: 0;
+}
+.checkbox-icon {
+  color: var(--seam-2);
+  transition: color var(--duration-fast);
+}
+.checkbox-icon.selected {
+  color: var(--text-0);
 }
 
 .batch-bar {
@@ -1154,7 +1236,7 @@ const navItems = [
 
 /* ── Delete Modal ── */
 .delete-modal {
-  background: #fff;
+  background: var(--bg-header);
   border-radius: 18px;
   overflow: hidden;
   width: 380px;
@@ -1167,14 +1249,15 @@ const navItems = [
 }
 .delete-modal-icon {
   width: 52px; height: 52px;
-  background: #fef2f2; border: 1px solid #fecaca;
+  background: rgba(220, 38, 38, 0.08); border: 1px solid rgba(220, 38, 38, 0.18);
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   margin: 0 auto 16px;
+  color: var(--error);
 }
 .delete-modal-title {
   font-size: 17px; font-weight: 700;
-  color: #111; letter-spacing: -0.01em;
+  color: var(--text-brand); letter-spacing: -0.01em;
   margin-bottom: 8px;
 }
 .delete-modal-desc {
@@ -1182,7 +1265,7 @@ const navItems = [
   max-width: 280px; margin: 0 auto;
 }
 .delete-modal-actions {
-  display: flex; border-top: 1px solid #eee;
+  display: flex; border-top: 1px solid var(--seam-1);
 }
 .delete-modal-btn {
   flex: 1; padding: 14px;
@@ -1190,14 +1273,18 @@ const navItems = [
   background: none; border: none; cursor: pointer;
   transition: background 0.15s;
 }
+.delete-modal-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 .delete-modal-btn.cancel {
-  color: #888; border-right: 1px solid #eee;
+  color: var(--text-3); border-right: 1px solid var(--seam-1);
 }
-.delete-modal-btn.cancel:hover { background: #f5f5f5; }
+.delete-modal-btn.cancel:hover { background: var(--bg-hover); }
 .delete-modal-btn.confirm {
-  color: #dc2626; font-weight: 600;
+  color: var(--error); font-weight: 600;
 }
-.delete-modal-btn.confirm:hover { background: #fef2f2; }
+.delete-modal-btn.confirm:hover { background: rgba(220, 38, 38, 0.08); }
 
 /* ── Mobile ── */
 @media (max-width: 768px) {

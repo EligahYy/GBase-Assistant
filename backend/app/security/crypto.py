@@ -37,6 +37,7 @@ def _get_encryption_key() -> bytes:
 
     # 降级：从 Settings.secret_key 派生
     from app.config import get_settings
+
     secret = get_settings().secret_key
     if secret:
         return hashlib.sha256(secret.encode()).digest()

@@ -3,8 +3,9 @@ import { ref, computed, nextTick, watch, inject, onMounted, onBeforeUnmount } fr
 import { useMessage } from 'naive-ui'
 import {
   SendOutline, ServerOutline, SunnyOutline, MoonOutline,
-  StopCircleOutline, BookOutline, SparklesOutline,
+  StopCircleOutline, BookOutline,
   GridOutline, SettingsOutline, AlertCircleOutline,
+  MenuOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 
@@ -184,9 +185,9 @@ function handleKeydown(e: KeyboardEvent) {
     <header class="chat-header">
       <div class="header-left">
         <button class="header-icon-btn" @click="toggleSidebar" title="切换侧边栏">
-          <n-icon :component="SparklesOutline" size="18" />
+          <n-icon :component="MenuOutline" size="18" />
         </button>
-        <span class="header-title">AI 问答</span>
+        <span class="header-title">GBase Copilot</span>
         <span class="header-badge">GBase 8a 专家模式</span>
       </div>
       <div class="header-right">
@@ -315,7 +316,7 @@ function handleKeydown(e: KeyboardEvent) {
           <n-icon :component="SendOutline" size="16" />
         </button>
       </div>
-      <p class="input-hint">GBase 助手可能生成不准确的 SQL，请验证后使用</p>
+      <p class="input-hint">GBase Copilot 可能生成不准确的 SQL，请验证后使用</p>
     </div>
   </div>
 </template>
@@ -359,12 +360,12 @@ function handleKeydown(e: KeyboardEvent) {
 }
 .header-badge {
   font-size: 10px;
-  color: #888;
-  background: #f7f7f7;
+  color: var(--text-3);
+  background: var(--bg-panel);
   padding: 2px 8px;
   border-radius: 5px;
   font-weight: 500;
-  border: 1px solid #eee;
+  border: 1px solid var(--seam-1);
 }
 
 .header-icon-btn {
@@ -629,7 +630,7 @@ function handleKeydown(e: KeyboardEvent) {
 .hint-card {
   padding: 18px 20px;
   background: var(--bg-header);
-  border: 1px solid #eee;
+  border: 1px solid var(--seam-1);
   border-radius: 14px;
   text-align: left;
   cursor: pointer;
@@ -642,7 +643,7 @@ function handleKeydown(e: KeyboardEvent) {
   line-height: 1.3;
 }
 .hint-card:hover {
-  border-color: #ccc;
+  border-color: var(--seam-2);
   box-shadow: 0 4px 16px rgba(0,0,0,0.06);
 }
 .hint-card .n-icon {
@@ -655,7 +656,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 .hint-card-desc {
   font-size: 11px;
-  color: #999;
+  color: var(--text-3);
 }
 
 /* ── Input ── */
@@ -664,7 +665,7 @@ function handleKeydown(e: KeyboardEvent) {
   padding: 24px 28px 28px;
   position: relative;
   z-index: 20;
-  background: linear-gradient(to top, var(--bg-void) 60%, transparent 100%);
+  background: var(--bg-void);
   pointer-events: none;
 }
 .input-area > * {

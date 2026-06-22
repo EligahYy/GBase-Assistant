@@ -25,17 +25,17 @@ class LiteLLMChatAdapter(BaseChatModel):
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         raise NotImplementedError("Use async version")
 
-    async def _agenerate(
-        self, messages: list[BaseMessage], stop=None, run_manager=None, **kwargs
-    ) -> ChatResult:
+    async def _agenerate(self, messages: list[BaseMessage], stop=None, run_manager=None, **kwargs) -> ChatResult:
         dict_msgs = []
         for m in messages:
             if isinstance(m, ToolMessage):
-                dict_msgs.append({
-                    "role": "tool",
-                    "content": str(m.content),
-                    "tool_call_id": m.tool_call_id,
-                })
+                dict_msgs.append(
+                    {
+                        "role": "tool",
+                        "content": str(m.content),
+                        "tool_call_id": m.tool_call_id,
+                    }
+                )
                 continue
 
             role = "assistant" if m.type == "ai" else ("system" if m.type == "system" else "user")
@@ -57,7 +57,8 @@ class LiteLLMChatAdapter(BaseChatModel):
         tools = kwargs.pop("tools", None) or self._bound_tools
         if tools:
             kwargs["tools"] = [
-                t if isinstance(t, dict)
+                t
+                if isinstance(t, dict)
                 else {
                     "type": "function",
                     "function": {

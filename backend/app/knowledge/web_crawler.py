@@ -29,9 +29,9 @@ async def fetch_sitemap_urls() -> list[str]:
         resp = await client.get(SITEMAP_URL)
         resp.raise_for_status()
 
-    urls = re.findall(r'https://www\.gbase\.cn/docs/gbase-8a/[^<\s]+', resp.text)
+    urls = re.findall(r"https://www\.gbase\.cn/docs/gbase-8a/[^<\s]+", resp.text)
     # Filter out non-doc pages (categories/tags)
-    docs = [u for u in urls if '/category/' not in u and '/tag/' not in u]
+    docs = [u for u in urls if "/category/" not in u and "/tag/" not in u]
     logger.info("Found %d docs in sitemap", len(docs))
     return sorted(set(docs))
 
@@ -71,7 +71,7 @@ async def render_page(browser, url: str) -> str | None:
         }""")
 
         title = await page.title()
-        title = re.sub(r'\s*[|–-]\s*GBASE.*$', '', title).strip()
+        title = re.sub(r"\s*[|–-]\s*GBASE.*$", "", title).strip()
 
         if content and len(content) > 100:
             md = f"# {title}\n\n"
@@ -89,7 +89,7 @@ def url_to_filename(url: str) -> str:
     path = url.replace(f"{BASE_URL}{DOCS_PREFIX}", "").strip("/")
     parts = [p for p in path.split("/") if p]
     name = "_".join(parts[-3:]) if len(parts) > 3 else "_".join(parts)
-    name = re.sub(r'[<>:"/\\|?*]', '_', name)[:100]
+    name = re.sub(r'[<>:"/\\|?*]', "_", name)[:100]
     return f"{name}.md" if name else "index.md"
 
 
@@ -109,6 +109,7 @@ async def crawl_all(limit: int | None = None) -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     from playwright.async_api import async_playwright
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         try:

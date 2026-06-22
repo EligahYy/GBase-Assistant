@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { NInput, NButton, NSelect, NEmpty, useMessage, useDialog } from 'naive-ui'
 import { useConnectionStore } from '@/stores/connection'
 import { listConnections, createConnection, updateConnection, deleteConnection, getSchemaTables, testConnection, syncSchema, type ConnectionCreate, type TableSchemaItem } from '@/api/connections'
 import { listModels, type ModelInfo } from '@/api/models'
 import {
-  ArrowBackOutline, ServerOutline, TrashOutline, CreateOutline, RefreshOutline,
-  CubeOutline, PulseOutline, BarChartOutline, LayersOutline, AddOutline, CloseOutline,
-  SunnyOutline, SparklesOutline,
+  ArrowBackOutline, ServerOutline, TrashOutline, CreateOutline,
+  AddOutline, CloseOutline,
+  SunnyOutline, SparklesOutline, LanguageOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { useRouter } from 'vue-router'
@@ -24,6 +24,14 @@ const { theme, apply: applyTheme } = useTheme()
 const modelOptions = ref<{ label: string; value: string }[]>([])
 const selectedModel = ref(localStorage.getItem('gbase_model') || 'deepseek/deepseek-chat')
 watch(selectedModel, (val) => { localStorage.setItem('gbase_model', val) })
+const selectedModelName = computed(() => modelOptions.value.find(m => m.value === selectedModel.value)?.label || selectedModel.value.split('/').pop() || selectedModel.value)
+const languageOptions = [
+  { label: '简体中文', value: 'zh-CN' },
+  { label: 'English', value: 'en-US' },
+]
+const selectedLanguage = ref(localStorage.getItem('gbase_language') || 'zh-CN')
+watch(selectedLanguage, (val) => { localStorage.setItem('gbase_language', val) })
+const selectedLanguageName = computed(() => languageOptions.find(lang => lang.value === selectedLanguage.value)?.label || '简体中文')
 
 // ── Connection form ──
 const driverOptions = [
@@ -233,7 +241,7 @@ function handleDelete(id: string, name: string) {
               </div>
               <div>
                 <div class="item-title">外观主题</div>
-                <div class="item-status">当前：浅色模式</div>
+                <div class="item-status">当前：{{ theme === 'light' ? '浅色模式' : '深色模式' }}</div>
               </div>
             </div>
             <div class="theme-toggle">
@@ -242,21 +250,35 @@ function handleDelete(id: string, name: string) {
             </div>
           </div>
 
+          <!-- Language item card -->
+          <div class="item-card">
+            <div class="item-left">
+              <div class="item-icon">
+                <n-icon :component="LanguageOutline" size="18" />
+              </div>
+              <div>
+                <div class="item-title">界面语言</div>
+                <div class="item-status">当前：{{ selectedLanguageName }}</div>
+              </div>
+            </div>
+            <n-select v-model:value="selectedLanguage" :options="languageOptions" class="setting-select" size="small" />
+          </div>
+
           <!-- Model item card -->
           <div class="item-card">
             <div class="item-left">
-              <div class="item-icon" style="background:#f5f3ff;border-color:#ddd6fe;">
-                <n-icon :component="SparklesOutline" size="18" color="#7c3aed" />
+              <div class="item-icon">
+                <n-icon :component="SparklesOutline" size="18" />
               </div>
               <div>
                 <div class="item-title">默认模型</div>
                 <div class="item-status">
-                  当前：<code>deepseek-chat</code>
+                  当前：<code>{{ selectedModelName }}</code>
                   <span class="status-indicator ok">可用</span>
                 </div>
               </div>
             </div>
-            <n-select v-model:value="selectedModel" :options="modelOptions" style="width:200px;" size="small" />
+            <n-select v-model:value="selectedModel" :options="modelOptions" class="setting-select" size="small" />
           </div>
 
           <!-- System Status -->
@@ -527,8 +549,9 @@ function handleDelete(id: string, name: string) {
   background: var(--bg-header); border: 1px solid #eee;
   border-radius: 12px; padding: 14px 16px; margin-bottom: 6px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  gap: 16px;
 }
-.item-left { display: flex; align-items: flex-start; gap: 12px; }
+.item-left { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .item-icon {
   width: 36px; height: 36px;
   background: #f9f9f9; border: 1px solid #eee;
@@ -538,7 +561,19 @@ function handleDelete(id: string, name: string) {
 }
 .item-title { font-size: 13px; font-weight: 600; color: var(--text-brand); margin-bottom: 2px; }
 .item-status { font-size: 10px; color: var(--text-soft); }
-.item-status code { color: var(--text-brand); font-family: monospace; font-weight: 500; background:#f5f5f5; padding:1px 4px; border-radius:3px; }
+.item-status code {
+  color: var(--text-brand);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  background: var(--bg-panel);
+  border: 1px solid var(--seam-1);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.setting-select {
+  width: 200px;
+  flex-shrink: 0;
+}
 .status-indicator { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; font-size: 10px; font-weight: 500; }
 .status-indicator.ok { color: #16a34a; }
 .status-indicator::before { content: ''; width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
@@ -958,11 +993,27 @@ function handleDelete(id: string, name: string) {
 /* ── Feedback Grid ── */
 .feedback-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
-@media (max-width: 600px) {
+@media (max-width: 760px) {
   .feedback-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .item-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .setting-select,
+  .theme-toggle {
+    width: 100%;
+  }
+  .toggle-option {
+    flex: 1;
+  }
+}
+@media (max-width: 420px) {
+  .feedback-grid { grid-template-columns: 1fr; }
 }
 .feedback-stat {
   text-align: center;

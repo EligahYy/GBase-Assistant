@@ -37,6 +37,7 @@ class PdfParser:
         """Try to load TOC JSON; return empty list if unavailable."""
         if self._toc_path and Path(self._toc_path).exists():
             import json
+
             with open(self._toc_path, encoding="utf-8") as f:
                 return json.load(f)
         return []
@@ -56,12 +57,12 @@ class PdfParser:
 
     # 中文技术文档常见标题模式
     _HEADING_PATTERN = re.compile(
-        r'(?:^|\n)\s*'
-        r'(?:'
-        r'第[一二三四五六七八九十百千0-9]+[章节]'  # 第X章/第X节
-        r'|(?:[0-9]+\.)+[0-9]+'                     # 1.2.3 编号
-        r'|(?:[0-9]+[、．.])'                        # 1、 或 1.
-        r')\s*[^\n]{2,80}\n'                          # 标题文字
+        r"(?:^|\n)\s*"
+        r"(?:"
+        r"第[一二三四五六七八九十百千0-9]+[章节]"  # 第X章/第X节
+        r"|(?:[0-9]+\.)+[0-9]+"  # 1.2.3 编号
+        r"|(?:[0-9]+[、．.])"  # 1、 或 1.
+        r")\s*[^\n]{2,80}\n"  # 标题文字
     )
 
     def _extract_flat(self, pdf, total_pages: int) -> list[Section]:
@@ -122,11 +123,13 @@ class PdfParser:
 
             content = "\n\n".join(text_parts)
             if len(content.strip()) >= 50:
-                sections.append(Section(
-                    heading=f"{entry.get('num', '')} {entry['title']}",
-                    content=content,
-                    page=start_page,
-                ))
+                sections.append(
+                    Section(
+                        heading=f"{entry.get('num', '')} {entry['title']}",
+                        content=content,
+                        page=start_page,
+                    )
+                )
 
             if i % 50 == 0:
                 logger.info("PDF sectioning: %d/%d", i + 1, len(sorted_toc))

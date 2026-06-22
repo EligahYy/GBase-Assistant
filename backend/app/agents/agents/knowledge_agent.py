@@ -57,17 +57,14 @@ _KNOWLEDGE_QUERY_EXPANSIONS: dict[str, str] = {
 def expand_knowledge_query(query: str) -> str:
     """Append domain terms found inside a natural-language query."""
     lowered = query.lower()
-    expansions = [
-        expansion
-        for term, expansion in _KNOWLEDGE_QUERY_EXPANSIONS.items()
-        if term in lowered
-    ]
+    expansions = [expansion for term, expansion in _KNOWLEDGE_QUERY_EXPANSIONS.items() if term in lowered]
     return f"{query} {' '.join(expansions)}".strip() if expansions else query
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # Chunk merging — dedup across retrieval passes
 # ═══════════════════════════════════════════════════════════════════════════════════
+
 
 def merge_knowledge_chunks(*groups: list[Any], limit: int = 5) -> list[Any]:
     """Merge and dedup chunk groups, keeping the first `limit` unique chunks."""
@@ -88,6 +85,7 @@ def merge_knowledge_chunks(*groups: list[Any], limit: int = 5) -> list[Any]:
 # ═══════════════════════════════════════════════════════════════════════════════════
 # Retrieval status
 # ═══════════════════════════════════════════════════════════════════════════════════
+
 
 def _classify_retrieval_status(chunks: list[Any]) -> str:
     """Classify retrieval quality so the LLM can adjust its answer confidence.
@@ -137,6 +135,7 @@ def _build_knowledge_section(chunks: list[Any], max_per_chunk: int = 3000) -> tu
 # LLM call (self-contained — no dependency on graph.py helpers)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 async def _qa_call_llm(model: Any, messages: list) -> str:
     """Call LLM for QA — no tools, text-only response."""
     if hasattr(model, "_agenerate"):
@@ -156,6 +155,7 @@ async def _qa_call_llm(model: Any, messages: list) -> str:
 # Event emitter (self-contained — same pattern as graph.py's _emit)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+
 def _emit(key: str, value: Any) -> None:
     """Emit a custom event through LangGraph's stream writer."""
     try:
@@ -168,6 +168,7 @@ def _emit(key: str, value: Any) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════════
 # Node factory
 # ═══════════════════════════════════════════════════════════════════════════════════
+
 
 def make_knowledge_node(model: Any):
     """Create the Knowledge Agent node — auto-search → LLM formats answer.
@@ -212,18 +213,24 @@ def make_knowledge_node(model: Any):
         # ── Phase 2: Build knowledge context with status ──
         knowledge_section, source_names, status = _build_knowledge_section(chunks)
 
-        _emit("tool_call_start", {
-            "name": "search_knowledge",
-            "args": {"query": user_msg[:100]},
-            "agent_name": "knowledge_agent",
-        })
-        _emit("tool_call_result", {
-            "name": "search_knowledge",
-            "result": {
-                "summary": f"检索到 {len(chunks)} 条相关文档 (状态: {status})",
-                "status": status,
+        _emit(
+            "tool_call_start",
+            {
+                "name": "search_knowledge",
+                "args": {"query": user_msg[:100]},
+                "agent_name": "knowledge_agent",
             },
-        })
+        )
+        _emit(
+            "tool_call_result",
+            {
+                "name": "search_knowledge",
+                "result": {
+                    "summary": f"检索到 {len(chunks)} 条相关文档 (状态: {status})",
+                    "status": status,
+                },
+            },
+        )
         _emit("tool_call_end", {"name": "search_knowledge"})
 
         # ── Phase 3: Build grounded QA prompt ──

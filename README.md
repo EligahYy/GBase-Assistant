@@ -4,7 +4,7 @@
 
 当前核心架构为 **v3.4 Semantic NL2SQL Graph**。它不再依赖自由循环的 ReAct Agent，而是通过确定性的 LangGraph 状态机、语义资产约束、分层 SQL 校验和有限修复预算控制准确性与安全性。
 
-详细设计、代码导览和面试演示手册见 [ARCHITECTURE_INTERVIEW_GUIDE.md](ARCHITECTURE_INTERVIEW_GUIDE.md)。
+详细设计、代码导览见本文后续章节与 `CLAUDE.md`。
 
 ## 核心能力
 
@@ -155,20 +155,80 @@ GBase 8a 支持窗口函数吗？
 
 ## 主要 API
 
+### 对话与流式
+
 | 端点 | 说明 |
 |---|---|
-| `POST /api/chat/stream` | AG-UI SSE 对话入口 |
-| `GET /api/chat/conversations` | 对话历史与文件夹管理 |
-| `GET/POST /api/connections` | 数据库连接管理 |
+| `POST /api/chat/stream` | AG-UI SSE 对话入口（NL2SQL / 知识 / 监控 / 问候） |
+| `GET /api/chat/conversations` | 对话列表 |
+| `GET /api/chat/conversations/{id}` | 对话详情 |
+| `PATCH /api/chat/conversations/{id}` | 更新对话（重命名/归档等） |
+| `DELETE /api/chat/conversations/{id}` | 删除对话 |
+| `GET /api/chat/conversations/{id}/summary` | 对话摘要 |
+| `POST /api/chat/conversations/batch` | 批量操作（移动文件夹、删除等） |
+| `POST /api/chat/feedback` | 消息反馈（点赞/点踩） |
+| `GET/POST/PATCH/DELETE /api/chat/folders` | 对话文件夹管理 |
+
+### 数据库连接
+
+| 端点 | 说明 |
+|---|---|
+| `GET/POST /api/connections` | 连接列表 / 新建连接 |
+| `GET /api/connections/{id}` | 连接详情 |
+| `PATCH /api/connections/{id}` | 更新连接 |
+| `DELETE /api/connections/{id}` | 删除连接 |
+| `GET /api/connections/drivers/available` | 可用驱动列表 |
+| `POST /api/connections/{id}/test` | 测试连接 |
+| `GET /api/connections/{id}/schema/tables` | 表结构列表 |
 | `POST /api/connections/{id}/sync-schema` | 同步 Schema 并构建 SchemaGraph |
 | `POST /api/connections/{id}/query` | 直接只读查询 |
+| `GET /api/connections/status` | 连接状态快照 |
 | `GET /api/connections/status/stream` | 连接状态 SSE |
-| `GET/POST /api/semantic-models` | 语义模型、指标、维度和 JOIN 管理 |
-| `GET /api/health` | 应用、元数据数据库与 Qdrant 健康检查 |
-| `POST /api/admin/reindex*` | 知识库重建 |
+
+### 语义模型
+
+| 端点 | 说明 |
+|---|---|
+| `GET/POST /api/semantic-models` | 语义模型列表 / 创建 |
+| `GET/PATCH /api/semantic-models/{id}` | 模型详情 / 更新 |
+| `GET/POST /api/semantic-models/{id}/metrics` | 指标管理 |
+| `GET/POST /api/semantic-models/{id}/dimensions` | 维度管理 |
+| `GET/POST /api/semantic-models/{id}/joins` | JOIN 管理 |
+
+### 知识库与管理
+
+| 端点 | 说明 |
+|---|---|
+| `GET/POST /api/knowledge/documents` | 知识库文档列表 / 上传 |
+| `GET /api/knowledge/documents/{id}/index-progress` | 索引进度 |
+| `POST /api/knowledge/documents/{id}/reindex` | 重新索引 |
+| `DELETE /api/knowledge/documents/{id}` | 删除文档 |
+| `POST /api/knowledge/documents/{id}/cancel` | 取消索引 |
+| `GET /api/knowledge/index-state` | 全局索引状态 |
+| `POST /api/admin/reindex` | JSON 知识库重建 |
+| `POST /api/admin/reindex-pdf` | PDF 产品手册索引 |
+| `POST /api/admin/reindex-web` | 官网内容爬取索引 |
+| `GET /api/admin/feedback-stats` | 反馈统计 |
 | `POST /api/tools/error-code` | 错误码查询 |
 
+### 健康检查
+
+| 端点 | 说明 |
+|---|---|
+| `GET /api/health` | 应用、元数据数据库与 Qdrant 健康检查 |
+
 管理类接口使用 `X-Admin-Token`。未配置 `ADMIN_TOKEN` 时，仅 `DEBUG=true` 环境允许无 Token 调用。
+
+## 前端交互与 UI
+
+前端基于 Vue 3 + Naive UI + Pinia，通过 AG-UI SSE 与后端实时通信：
+
+- **实时主题切换**：支持浅色/深色/跟随系统，使用 CSS 变量实现无刷新切换。
+- **连接状态可视化**：连接卡片显示动态颜色图标（绿色正常、红色异常）与状态徽标。
+- **统一页面头部**：所有二级页面使用一致的 48px 标题栏，含返回按钮与标题。
+- **设置页**：卡片式项目列表，展示连接/语义模型状态、反馈统计、连接详情。
+- **聊天界面**：支持活动时间线、SQL 高亮、结果表格/图表/原始数据切换、消息反馈。
+- **知识库管理**：文档上传、索引进度、重新索引、取消索引。
 
 ## 项目结构
 
@@ -177,21 +237,28 @@ backend/app/
 ├── agents/graph.py               # v3.4 NL2SQL 图、快速路径与 AG-UI Runner
 ├── agents/state.py               # 图状态定义
 ├── agents/schema_graph.py        # Schema 元数据图与字段角色推断
+├── agents/agents/knowledge_agent.py  # 知识问答 Pipeline
+├── agents/tools/                 # SubmitSQLTool / GetDatabaseStatusTool
 ├── semantic/
 │   ├── context_builder.py        # 语义上下文、FocusedSchema、可信 JOIN
 │   ├── matcher.py                # 混合语义匹配
-│   ├── schema_assets.py          # 无业务语义模型时的 Schema 候选资产
+│   ├── models.py                 # 语义层 ORM 模型
 │   ├── planner.py                # 自然语言到受约束 Query IR
-│   └── query_ir.py               # 结构化查询意图
-├── sql/                          # 语义验证、方言验证、沙箱与错误分类
-├── db_connectors/                # Native / SQLite 连接器
+│   ├── query_ir.py               # 结构化查询意图
+│   └── schema_assets.py          # 无业务语义模型时的 Schema 候选资产
+├── api/                          # Chat、Connection、Semantic Model、Knowledge、Admin 等 API
+├── knowledge/                    # 文档分片、爬虫、索引
+├── llm/                          # LiteLLM 客户端
+├── sql/                          # 语义验证、方言验证、沙箱
 ├── vector/                       # Qdrant 与混合知识检索
-└── api/                          # Chat、Connection、Semantic Model 等 API
+└── db_connectors/                # Native / SQLite 连接器
 
 frontend/src/
-├── composables/useSSE.ts         # AG-UI SSE 解码
-├── stores/chat.ts                # 流式消息状态
-└── components/chat/              # 活动时间线、SQL、图表与表格
+├── composables/                  # useSSE / useAGUIClient / useTheme
+├── stores/                       # Pinia（chat、connection、theme）
+├── api/                          # Axios 客户端
+├── components/chat/              # ChatPanel、MessageBubble、SQL/图表/表格
+└── views/                        # 各页面（KnowledgeView、SettingsView、SqlEditorView 等）
 ```
 
 ## 验证命令

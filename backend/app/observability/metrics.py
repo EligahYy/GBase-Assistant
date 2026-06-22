@@ -47,7 +47,15 @@ class _Histogram:
 
 # 默认延迟桶（秒）：覆盖 LLM/SQL/Embedding 常见区间
 _DEFAULT_LATENCY_BUCKETS: tuple[float, ...] = (
-    0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    30.0,
 )
 
 
@@ -126,9 +134,7 @@ class MetricsRegistry:
             if completion_tokens:
                 self._llm_tokens_total[(task_type, model, "completion")] += completion_tokens
             if prompt_tokens or completion_tokens:
-                self._llm_tokens_total[(task_type, model, "total")] += (
-                    prompt_tokens + completion_tokens
-                )
+                self._llm_tokens_total[(task_type, model, "total")] += prompt_tokens + completion_tokens
 
     # ── 依赖健康 ────────────────────────────────────────────────────────────
     def set_dependency_up(self, name: str, value: float) -> None:
@@ -146,18 +152,16 @@ class MetricsRegistry:
                 "sql_execution_latency": {
                     "count": self._sql_exec_latency.total_count,
                     "sum": self._sql_exec_latency.total_sum,
-                    "buckets": list(zip(
-                        self._sql_exec_latency.buckets + (float("inf"),),
-                        self._sql_exec_latency.counts,
-                        strict=True,
-                    )),
+                    "buckets": list(
+                        zip(
+                            self._sql_exec_latency.buckets + (float("inf"),),
+                            self._sql_exec_latency.counts,
+                            strict=True,
+                        )
+                    ),
                 },
-                "llm_call_total": {
-                    f"{k[0]}|{k[1]}|{k[2]}": v for k, v in self._llm_call_total.items()
-                },
-                "llm_tokens_total": {
-                    f"{k[0]}|{k[1]}|{k[2]}": v for k, v in self._llm_tokens_total.items()
-                },
+                "llm_call_total": {f"{k[0]}|{k[1]}|{k[2]}": v for k, v in self._llm_call_total.items()},
+                "llm_tokens_total": {f"{k[0]}|{k[1]}|{k[2]}": v for k, v in self._llm_tokens_total.items()},
                 "llm_latency": {
                     "count": self._llm_latency.total_count,
                     "sum": self._llm_latency.total_sum,

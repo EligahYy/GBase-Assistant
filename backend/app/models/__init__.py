@@ -8,9 +8,9 @@ from app.models.conversation_summary import ConversationSummary
 from app.models.folder import Folder
 from app.models.knowledge_document import KnowledgeDocument
 from app.models.message import Message
+from app.models.nl2sql_case import NL2SQLAttempt, NL2SQLCase
 from app.models.sql_feedback import SQLFeedback
 from app.models.user_pattern import UserPattern
-from app.models.nl2sql_case import NL2SQLCase, NL2SQLAttempt
 from app.semantic.models import (
     SemanticDimension,
     SemanticJoin,

@@ -11,29 +11,30 @@ import {
 } from 'naive-ui'
 import {
   ArrowBackOutline,
+  ChevronForwardOutline,
+  CloseOutline,
   PlayOutline,
   SaveOutline,
-  TrashOutline,
-  CreateOutline,
-  BookmarkOutline,
   DownloadOutline,
   CodeSlashOutline,
   FlashOutline,
+  GridOutline,
+  RemoveOutline,
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
+import ChartRenderer from '@/components/chat/ChartRenderer.vue'
 import { useConnectionStore } from '@/stores/connection'
 import { executeQuery, getSchemaTables, type QueryResultResponse, type TableSchemaItem } from '@/api/connections'
 import {
   useSavedQueries,
   extractParams,
   applyParams,
-  type SavedQuery,
 } from '@/composables/useSavedQueries'
 
 const router = useRouter()
 const connStore = useConnectionStore()
 const naiveMsg = useMessage()
-const { queries: savedQueries, add: addSavedQuery, remove: removeSavedQuery, rename: renameSavedQuery } = useSavedQueries()
+const { add: addSavedQuery } = useSavedQueries()
 
 const selectedConnId = ref<string | null>(null)
 const sqlText = ref('')
@@ -149,11 +150,6 @@ function confirmSave() {
   showSaveModal.value = false
 }
 
-function loadSnippet(q: SavedQuery) {
-  sqlText.value = q.sql
-  naiveMsg.info(`已加载: ${q.name}`)
-}
-
 function loadFromHistory(item: { sql: string }) {
   sqlText.value = item.sql
 }
@@ -161,6 +157,20 @@ function loadFromHistory(item: { sql: string }) {
 const showSchema = ref(true)
 const lineNumbersRef = ref<HTMLElement | null>(null)
 const lineCount = ref(1)
+const resultView = ref<'chart' | 'table' | 'raw'>('table')
+
+const hasChart = computed(() => {
+  if (!result.value) return false
+  const { rows, columns } = result.value
+  if (rows.length < 2 || rows.length > 50 || columns.length < 2) return false
+  return columns.some((_, columnIndex) =>
+    rows.some((row) => typeof row[columnIndex] === 'number'),
+  )
+})
+
+watch(result, () => {
+  resultView.value = hasChart.value ? 'chart' : 'table'
+})
 
 function updateLineCount() {
   lineCount.value = Math.max(1, sqlText.value.split('\n').length)
@@ -170,21 +180,6 @@ function syncScroll(e: Event) {
   const target = e.target as HTMLTextAreaElement
   if (lineNumbersRef.value) {
     lineNumbersRef.value.scrollTop = target.scrollTop
-  }
-}
-
-const editingSnippetId = ref<string | null>(null)
-const editingSnippetName = ref('')
-
-function startRenameSnippet(q: SavedQuery) {
-  editingSnippetId.value = q.id
-  editingSnippetName.value = q.name
-}
-
-function confirmRenameSnippet() {
-  if (editingSnippetId.value) {
-    renameSavedQuery(editingSnippetId.value, editingSnippetName.value)
-    editingSnippetId.value = null
   }
 }
 
@@ -254,6 +249,9 @@ function formatCell(val: unknown): string {
           <n-icon :component="PlayOutline" size="14" />
           <span>{{ isExecuting ? '执行中...' : '执行' }}</span>
         </button>
+        <button class="header-btn icon-only" :class="{ active: showSchema }" @click="showSchema = !showSchema" title="切换表结构面板">
+          <n-icon :component="GridOutline" size="14" />
+        </button>
       </div>
     </header>
 
@@ -304,9 +302,27 @@ function formatCell(val: unknown): string {
                 导出 CSV
               </button>
               <span class="meta-text">{{ result.row_count }} 行 · {{ result.execution_time_ms }}ms</span>
+              <div class="view-toggles">
+                <button
+                  v-if="hasChart"
+                  :class="['view-toggle', { active: resultView === 'chart' }]"
+                  @click="resultView = 'chart'"
+                >图表</button>
+                <button
+                  :class="['view-toggle', { active: resultView === 'table' }]"
+                  @click="resultView = 'table'"
+                >表格</button>
+                <button
+                  :class="['view-toggle', { active: resultView === 'raw' }]"
+                  @click="resultView = 'raw'"
+                >原始</button>
+              </div>
             </div>
           </div>
-          <div class="result-table-wrap">
+          <div v-if="resultView === 'chart' && hasChart" class="chart-result">
+            <ChartRenderer :result="result" />
+          </div>
+          <div v-else-if="resultView === 'table'" class="result-table-wrap">
             <table class="data-table-fancy">
               <thead>
                 <tr><th v-for="col in result.columns" :key="col">{{ col }}</th></tr>
@@ -318,6 +334,7 @@ function formatCell(val: unknown): string {
               </tbody>
             </table>
           </div>
+          <pre v-else class="raw-result">{{ JSON.stringify(result, null, 2) }}</pre>
           <div v-if="result.truncated" class="result-truncated">结果已截断，最多展示 1000 行</div>
         </div>
 
@@ -330,11 +347,11 @@ function formatCell(val: unknown): string {
 
       <!-- Right: Schema Panel -->
       <aside class="editor-sidebar">
-        <div class="sidebar-card schema-panel">
+        <div v-if="showSchema" class="sidebar-card schema-panel">
           <div class="sidebar-header">
             <span>表结构</span>
             <button class="sidebar-close-btn" @click="showSchema = !showSchema">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <n-icon :component="CloseOutline" size="14" />
             </button>
           </div>
           <div class="sidebar-body">
@@ -354,16 +371,17 @@ function formatCell(val: unknown): string {
                 class="schema-table-group"
               >
                 <div class="schema-table-name" @click="toggleTable(table.table_name)">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" :stroke="expandedTables.has(table.table_name) ? '#999' : '#ccc'" stroke-width="2.5"
-                    :style="{ transform: expandedTables.has(table.table_name) ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
-                    <polyline points="9 18 15 12 9 6"/>
-                  </svg>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                  <n-icon
+                    :component="ChevronForwardOutline"
+                    :class="['schema-chevron', { expanded: expandedTables.has(table.table_name) }]"
+                    size="12"
+                  />
+                  <n-icon :component="GridOutline" size="14" class="schema-table-icon" />
                   <span>{{ table.table_name }}</span>
                 </div>
                 <div v-show="expandedTables.has(table.table_name)" class="schema-columns">
                   <div v-for="col in table.columns" :key="col" class="schema-col">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><line x1="8" y1="6" x2="16" y2="6"/></svg>
+                    <n-icon :component="RemoveOutline" size="10" class="schema-col-icon" />
                     <span class="col-name">{{ col }}</span>
                   </div>
                 </div>
@@ -371,6 +389,10 @@ function formatCell(val: unknown): string {
             </div>
           </div>
         </div>
+        <button v-else class="sidebar-card schema-reopen" @click="showSchema = true">
+          <n-icon :component="GridOutline" size="16" />
+          <span>显示表结构</span>
+        </button>
 
         <!-- History (collapsed below) -->
         <div class="sidebar-card history-panel">
@@ -491,6 +513,16 @@ function formatCell(val: unknown): string {
 .header-btn.primary { background: #16a34a; border-color: #16a34a; color: #fff; }
 .header-btn.primary:hover:not(:disabled) { background: #15803d; }
 .header-btn.primary.loading { opacity: 0.7; }
+.header-btn.icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+.header-btn.icon-only.active {
+  background: var(--bg-active);
+  color: var(--text-0);
+  border-color: var(--seam-2);
+}
 
 /* ── Main Layout ── */
 .editor-main {
@@ -556,11 +588,59 @@ function formatCell(val: unknown): string {
   padding: 10px 18px; border-bottom: 1px solid var(--border-card); background: var(--bg-page);
 }
 .result-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-0); }
-.result-meta { display: flex; align-items: center; gap: 12px; }
+.result-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .meta-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); background: none; border: none; cursor: pointer; }
 .meta-btn:hover { color: var(--text-0); }
 .meta-text { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+.view-toggles {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--seam-1);
+  border-radius: var(--radius-sm);
+}
+.view-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+.view-toggle:hover {
+  color: var(--text-0);
+}
+.view-toggle.active {
+  background: var(--bg-header);
+  color: var(--text-0);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.chart-result {
+  padding: 14px;
+}
+.chart-result :deep(.chart-block) {
+  margin-top: 0;
+  background: var(--bg-header);
+}
 .result-table-wrap { overflow: auto; max-height: 400px; }
+.raw-result {
+  margin: 0;
+  padding: 16px 18px;
+  max-height: 400px;
+  overflow: auto;
+  background: var(--bg-header);
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.7;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}
 .result-truncated {
   padding: 8px 16px; font-size: 11px; color: var(--warning);
   text-align: center; border-top: 1px solid var(--seam-1);
@@ -595,6 +675,22 @@ function formatCell(val: unknown): string {
   border: none; border-radius: 4px; cursor: pointer;
 }
 .sidebar-close-btn:hover { background: var(--bg-hover); }
+.schema-reopen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+.schema-reopen:hover {
+  color: var(--text-0);
+  border-color: var(--seam-2);
+}
 .sidebar-count {
   font-size: 10px; color: var(--text-3); background: var(--bg-panel);
   padding: 1px 6px; border-radius: 8px; border: 1px solid var(--seam-1);
@@ -613,6 +709,17 @@ function formatCell(val: unknown): string {
   cursor: pointer; border-radius: 6px; font-family: var(--font-mono);
 }
 .schema-table-name:hover { background: var(--bg-hover); }
+.schema-chevron {
+  flex-shrink: 0;
+  color: var(--text-4);
+  transition: transform var(--duration-fast);
+}
+.schema-chevron.expanded { transform: rotate(90deg); }
+.schema-table-icon,
+.schema-col-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
 .schema-columns { padding-left: 18px; display: flex; flex-direction: column; gap: 1px; }
 .schema-col {
   display: flex; align-items: center; gap: 6px;

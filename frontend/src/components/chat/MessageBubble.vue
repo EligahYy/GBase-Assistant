@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue'
-import { useMessage } from 'naive-ui'
+import { NIcon, useMessage } from 'naive-ui'
+import {
+  CopyOutline,
+  PersonCircleOutline,
+  ThumbsDownOutline,
+  ThumbsUpOutline,
+} from '@vicons/ionicons5'
 import SqlBlock from './SqlBlock.vue'
 import AgentActivity from './AgentActivity.vue'
 import ChartRenderer from './ChartRenderer.vue'
@@ -224,13 +230,13 @@ function renderInline(text: string): string {
         <!-- Hover action buttons -->
         <div v-if="!isUser && !isTyping" class="msg-actions">
           <button class="hover-action-btn" title="复制" @click="copyContent">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <n-icon :component="CopyOutline" size="14" />
           </button>
           <button class="hover-action-btn" title="点赞">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/></svg>
+            <n-icon :component="ThumbsUpOutline" size="14" />
           </button>
           <button class="hover-action-btn" title="点踩">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V4H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/></svg>
+            <n-icon :component="ThumbsDownOutline" size="14" />
           </button>
         </div>
 
@@ -248,9 +254,7 @@ function renderInline(text: string): string {
 
       <!-- User avatar -->
       <div v-if="isUser" class="avatar user-avatar">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-        </svg>
+        <n-icon :component="PersonCircleOutline" size="16" />
       </div>
     </div>
   </div>

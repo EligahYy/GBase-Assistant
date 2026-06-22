@@ -57,12 +57,12 @@ class MDChapterSlicer:
 
         # Extract page title from first # heading
         page_title = source
-        title_match = re.match(r'^#\s+(.+)', content)
+        title_match = re.match(r"^#\s+(.+)", content)
         if title_match:
             page_title = title_match.group(1).strip()
 
         # Split by ## headings
-        sections = re.split(r'\n(?=##\s)', content)
+        sections = re.split(r"\n(?=##\s)", content)
         chunks = []
 
         for section in sections:
@@ -71,7 +71,7 @@ class MDChapterSlicer:
                 continue
 
             # Extract section heading
-            heading_match = re.match(r'^#{1,3}\s+(.+)', section)
+            heading_match = re.match(r"^#{1,3}\s+(.+)", section)
             section_title = heading_match.group(1).strip() if heading_match else page_title
 
             # Build full title path
@@ -85,18 +85,19 @@ class MDChapterSlicer:
 
     def _split_if_large(self, content: str, title: str, source: str, url: str) -> list[DocumentChunk]:
         if len(content) <= self.MAX_CHUNK_SIZE:
-            return [DocumentChunk(
-                chapter_title=title,
-                content=content,
-                source_file=source,
-                metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
-            )]
+            return [
+                DocumentChunk(
+                    chapter_title=title,
+                    content=content,
+                    source_file=source,
+                    metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
+                )
+            ]
 
         # Split by sub-headings or fixed size
-        sub_headings = list(re.finditer(
-            r'(?:^|\n)(?:#{1,4}\s+[^\n]{2,80}|[A-Z_]+\s*\([^)]*\)[^\n]{0,60})\n',
-            content, re.MULTILINE
-        ))
+        sub_headings = list(
+            re.finditer(r"(?:^|\n)(?:#{1,4}\s+[^\n]{2,80}|[A-Z_]+\s*\([^)]*\)[^\n]{0,60})\n", content, re.MULTILINE)
+        )
 
         chunks = []
         if len(sub_headings) >= 2:
@@ -106,13 +107,15 @@ class MDChapterSlicer:
                 chunk_content = content[start:end].strip()
                 if len(chunk_content) < 50:
                     continue
-                sub_title = m.group(0).strip().lstrip('#').strip()
-                chunks.append(DocumentChunk(
-                    chapter_title=f"{title} > {sub_title}",
-                    content=chunk_content,
-                    source_file=source,
-                    metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
-                ))
+                sub_title = m.group(0).strip().lstrip("#").strip()
+                chunks.append(
+                    DocumentChunk(
+                        chapter_title=f"{title} > {sub_title}",
+                        content=chunk_content,
+                        source_file=source,
+                        metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
+                    )
+                )
             if chunks:
                 return chunks
 
@@ -121,12 +124,14 @@ class MDChapterSlicer:
         part = 0
         while pos < len(content):
             end = min(pos + self.MAX_CHUNK_SIZE, len(content))
-            chunks.append(DocumentChunk(
-                chapter_title=f"{title} (第{part + 1}部分)",
-                content=content[pos:end],
-                source_file=source,
-                metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
-            ))
+            chunks.append(
+                DocumentChunk(
+                    chapter_title=f"{title} (第{part + 1}部分)",
+                    content=content[pos:end],
+                    source_file=source,
+                    metadata={"source": "GBase 8a MPP Cluster产品手册", "version": "V9.5.3", "url": url},
+                )
+            )
             pos = end - self.CHUNK_OVERLAP
             part += 1
         return chunks
@@ -172,9 +177,7 @@ class QdrantKnowledgeIndexer:
                 embeddings = await embedder.embed(texts)
                 points = [
                     PointStruct(
-                        id=int(hashlib.sha256(
-                            f"{c.chapter_title}:{c.source_file}".encode()
-                        ).hexdigest()[:16], 16),
+                        id=int(hashlib.sha256(f"{c.chapter_title}:{c.source_file}".encode()).hexdigest()[:16], 16),
                         vector=embeddings[j],
                         payload=c.to_qdrant_payload(),
                     )
@@ -185,7 +188,7 @@ class QdrantKnowledgeIndexer:
 
         tasks = []
         for i in range(0, len(chunks), batch_size):
-            tasks.append(embed_and_upsert(i, chunks[i:i + batch_size]))
+            tasks.append(embed_and_upsert(i, chunks[i : i + batch_size]))
 
         total = 0
         for coro in asyncio.as_completed(tasks):
@@ -218,8 +221,7 @@ async def build_knowledge_from_md_dir(
     # 检查是否需要重建
     state_file = md_path / ".index_state.json"
     current_hash = hashlib.sha256(
-        "".join(f"{f.name}:{f.stat().st_mtime}:{f.stat().st_size}"
-                for f in sorted(md_files)).encode()
+        "".join(f"{f.name}:{f.stat().st_mtime}:{f.stat().st_size}" for f in sorted(md_files)).encode()
     ).hexdigest()[:16]
 
     if not clear_existing and state_file.exists():
@@ -255,6 +257,7 @@ async def build_knowledge_from_md_dir(
 # PDF 页面缓存（一次性提取，后续秒级加载）
 # ═══════════════════════════════════════════════════════════════════
 
+
 def _knowledge_dir() -> Path:
     return Path(__file__).parent.parent.parent.parent / "knowledge"
 
@@ -279,19 +282,19 @@ class PDFPageCache:
         for i, page in enumerate(pdf.pages):
             text = page.extract_text()
             if text:
-                text = re.sub(r'^GBase 8a MPP Cluster.*?\n', '', text)
-                text = re.sub(
-                    r'文档版本953.*?南大通用数据技术股份有限公司.*?\n?$',
-                    '', text, flags=re.MULTILINE
-                )
+                text = re.sub(r"^GBase 8a MPP Cluster.*?\n", "", text)
+                text = re.sub(r"文档版本953.*?南大通用数据技术股份有限公司.*?\n?$", "", text, flags=re.MULTILINE)
                 pages[i + 1] = text.strip()
         pdf.close()
 
         with open(self.cache_path, "w", encoding="utf-8") as f:
             json.dump(pages, f, ensure_ascii=False)
-        logger.info("PDF cache saved: %d pages -> %s (%.1f MB)",
-                     len(pages), self.cache_path,
-                     self.cache_path.stat().st_size / 1024 / 1024)
+        logger.info(
+            "PDF cache saved: %d pages -> %s (%.1f MB)",
+            len(pages),
+            self.cache_path,
+            self.cache_path.stat().st_size / 1024 / 1024,
+        )
         return len(pages)
 
     def load(self) -> dict[int, str]:

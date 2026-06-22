@@ -68,7 +68,8 @@ class ConnectionHealthChecker:
         if not connector:
             logger.warning(
                 "HealthChecker: 连接 %s 的驱动 %s 不可用",
-                conn.name, conn.driver_type,
+                conn.name,
+                conn.driver_type,
             )
             return
 
@@ -95,21 +96,23 @@ class ConnectionHealthChecker:
         if old_status != new_status:
             logger.info(
                 "HealthChecker: 连接 %s 状态变更 %s -> %s",
-                conn.name, old_status, new_status,
+                conn.name,
+                old_status,
+                new_status,
             )
-            await self._broadcast({
-                "type": "status",
-                "connection_id": conn.id,
-                "status": new_status,
-            })
+            await self._broadcast(
+                {
+                    "type": "status",
+                    "connection_id": conn.id,
+                    "status": new_status,
+                }
+            )
 
     async def _probe_all(self) -> None:
         """并行探测所有活跃连接并广播变更。"""
         try:
             async with async_session_factory() as session:
-                result = await session.execute(
-                    select(DbConnection).where(DbConnection.is_active.is_(True))
-                )
+                result = await session.execute(select(DbConnection).where(DbConnection.is_active.is_(True)))
                 connections = result.scalars().all()
         except Exception as e:
             logger.warning("HealthChecker: 查询连接列表失败: %s", e)
@@ -123,7 +126,8 @@ class ConnectionHealthChecker:
         """后台循环。"""
         logger.info(
             "HealthChecker 已启动 (interval=%ss, timeout=%ss)",
-            self._probe_interval, self._test_timeout,
+            self._probe_interval,
+            self._test_timeout,
         )
         while True:
             try:

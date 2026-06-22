@@ -41,9 +41,7 @@ class EventEncoder:
 
     @staticmethod
     def run_started(conversation_id: str) -> str:
-        return EventEncoder._encode(
-            EventType.RUN_STARTED, conversation_id=conversation_id
-        )
+        return EventEncoder._encode(EventType.RUN_STARTED, conversation_id=conversation_id)
 
     @staticmethod
     def text_delta(content: str) -> str:
@@ -61,9 +59,7 @@ class EventEncoder:
 
     @staticmethod
     def tool_call_result(tool_name: str, result: dict) -> str:
-        return EventEncoder._encode(
-            EventType.TOOL_CALL_RESULT, tool_name=tool_name, result=result
-        )
+        return EventEncoder._encode(EventType.TOOL_CALL_RESULT, tool_name=tool_name, result=result)
 
     @staticmethod
     def state_delta(path: str, value: dict) -> str:
@@ -92,7 +88,9 @@ class EventEncoder:
     @staticmethod
     def step_started(agent_name: str, step_index: int = 0) -> str:
         return EventEncoder._encode(
-            EventType.STEP_STARTED, agent_name=agent_name, step_index=step_index,
+            EventType.STEP_STARTED,
+            agent_name=agent_name,
+            step_index=step_index,
         )
 
     @staticmethod
@@ -102,20 +100,14 @@ class EventEncoder:
     @staticmethod
     def chart_config(config: dict) -> str:
         """发送图表配置给前端。"""
-        return EventEncoder._encode(
-            EventType.STATE_DELTA, path="chart_config", value=config
-        )
+        return EventEncoder._encode(EventType.STATE_DELTA, path="chart_config", value=config)
 
     @staticmethod
     def sql_event(sql: str) -> str:
         """发送生成的 SQL 给前端。"""
-        return EventEncoder._encode(
-            EventType.STATE_DELTA, path="sql", value={"sql": sql}
-        )
+        return EventEncoder._encode(EventType.STATE_DELTA, path="sql", value={"sql": sql})
 
     @staticmethod
     def result_event(result: dict) -> str:
         """发送查询结果给前端。"""
-        return EventEncoder._encode(
-            EventType.STATE_DELTA, path="result", value=result
-        )
+        return EventEncoder._encode(EventType.STATE_DELTA, path="result", value=result)

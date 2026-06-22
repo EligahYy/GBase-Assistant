@@ -85,9 +85,7 @@ class NL2SQLFeedbackService:
 
     async def verify_case(self, case_id: str, reviewer: str) -> NL2SQLCase | None:
         """Admin verifies a case for inclusion in the trusted example set."""
-        result = await self._session.execute(
-            select(NL2SQLCase).where(NL2SQLCase.id == case_id)
-        )
+        result = await self._session.execute(select(NL2SQLCase).where(NL2SQLCase.id == case_id))
         case = result.scalar_one_or_none()
         if case:
             case.status = "verified"
@@ -99,9 +97,7 @@ class NL2SQLFeedbackService:
 
     async def reject_case(self, case_id: str, reviewer: str) -> NL2SQLCase | None:
         """Admin rejects a case."""
-        result = await self._session.execute(
-            select(NL2SQLCase).where(NL2SQLCase.id == case_id)
-        )
+        result = await self._session.execute(select(NL2SQLCase).where(NL2SQLCase.id == case_id))
         case = result.scalar_one_or_none()
         if case:
             case.status = "rejected"

@@ -40,9 +40,7 @@ async def run_indexing_pipeline(
     await _update_status(status_callback, "chunking")
     logger.info("Chunking document %s: %d sections", document_id, len(parsed.sections))
     chunker = SemanticChunker(ChunkConfig())
-    chunks = await asyncio.to_thread(
-        chunker.chunk, parsed, source_file=file_path.name, document_id=document_id
-    )
+    chunks = await asyncio.to_thread(chunker.chunk, parsed, source_file=file_path.name, document_id=document_id)
     logger.info("Produced %d chunks for document %s", len(chunks), document_id)
     if cancel_event and cancel_event.is_set():
         raise asyncio.CancelledError("索引任务已被取消")
@@ -66,9 +64,7 @@ async def delete_document_chunks(document_id: str) -> None:
     try:
         await qdrant.client.delete(
             collection_name="knowledge",
-            points_selector=Filter(
-                must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
-            ),
+            points_selector=Filter(must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]),
         )
         logger.info("Deleted chunks for document %s", document_id)
     except Exception as e:
